@@ -60,15 +60,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const maxLeaveCount = Math.max(...leaveTypeDist.map((d) => d.count), 5);
 
   return (
-    <div className="space-y-6">
-      {/* 1. 4 KPI Stat Cards Grid (Removed low leave card, even 4-column layout) */}
+    <div className="space-y-5">
+      {/* 1. Compact 4 KPI Stat Cards Grid */}
       <section aria-label="Chỉ số KPI nhân sự tổng quan">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           {/* KPI 1: Tổng số nhân sự */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5 flex flex-col justify-between">
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
-                <Users className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
+                <Users className="w-4 h-4" />
               </div>
               <button
                 type="button"
@@ -80,10 +80,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
             </div>
-            <div className="my-3">
+            <div className="my-2">
               <div
                 data-testid="kpi-total-employees"
-                className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
+                className="text-2xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
               >
                 {kpis.totalEmployees}
               </div>
@@ -97,10 +97,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* KPI 2: Đang làm việc */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5 flex flex-col justify-between">
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <UserCheck className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <UserCheck className="w-4 h-4" />
               </div>
               <span className="text-xs font-mono tabular-nums text-emerald-700 font-semibold">
                 {kpis.totalEmployees > 0
@@ -108,10 +108,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   : '0%'}
               </span>
             </div>
-            <div className="my-3">
+            <div className="my-2">
               <div
                 data-testid="kpi-active-employees"
-                className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
+                className="text-2xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
               >
                 {kpis.activeEmployees}
               </div>
@@ -125,19 +125,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* KPI 3: Nghỉ phép hôm nay */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5 flex flex-col justify-between">
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
-                <CalendarOff className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                <CalendarOff className="w-4 h-4" />
               </div>
               <span className="text-[11px] font-mono tabular-nums text-slate-500">
                 12/11/2026
               </span>
             </div>
-            <div className="my-3">
+            <div className="my-2">
               <div
                 data-testid="kpi-leave-today"
-                className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
+                className="text-2xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
               >
                 {kpis.onLeaveToday}
               </div>
@@ -153,19 +153,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* KPI 4: Lượt đi muộn trong tháng */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5 flex flex-col justify-between">
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                <ClockAlert className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                <ClockAlert className="w-4 h-4" />
               </div>
               <span className="text-xs font-mono tabular-nums text-amber-700 font-semibold">
-                {kpis.lateHoursInMonth} giờ
+                {kpis.lateHoursInMonth}h
               </span>
             </div>
-            <div className="my-3 flex items-baseline gap-2">
+            <div className="my-2 flex items-baseline gap-2">
               <span
                 data-testid="kpi-late-count"
-                className="text-3xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
+                className="text-2xl font-extrabold text-slate-900 font-mono tabular-nums tracking-tight"
               >
                 {kpis.lateCountInMonth}
               </span>
@@ -185,34 +185,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      {/* 2. Visual Charts Section (Pie/Doughnut Chart & Bar Chart) */}
+      {/* 2. Compact Visual Charts Section (max-h-[260px]) */}
       <section
         aria-label="Biểu đồ trực quan nhân sự và loại hình nghỉ"
-        className="grid grid-cols-1 lg:grid-cols-2 gap-5"
+        className="grid grid-cols-1 lg:grid-cols-2 gap-4"
       >
-        {/* Chart 1: Phân bổ nhân sự theo Nhóm/Bộ phận (SVG Donut Chart + Legend) */}
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
+        {/* Chart 1: Phân bổ nhân sự theo Nhóm/Bộ phận */}
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 flex flex-col justify-between max-h-[260px]">
+          <div className="flex items-center justify-between mb-2">
             <div>
-              <h2 className="text-sm font-bold text-slate-900">
+              <h2 className="text-xs font-bold text-slate-900">
                 Phân bổ nhân sự theo Nhóm / Bộ phận
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Tỷ trọng nhân sự đang làm việc tại {departmentDist.length} phòng ban
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Tỷ trọng nhân sự tại {departmentDist.length} phòng ban
               </p>
             </div>
             <button
               type="button"
               onClick={() => onNavigate('employees')}
-              className="text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer"
+              className="text-[11px] font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer"
             >
               Quản lý bộ phận
             </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-6 py-2">
-            {/* SVG Donut Chart */}
-            <div className="relative w-40 h-40 shrink-0">
+          <div className="flex items-center gap-4 py-1">
+            {/* SVG Donut Chart (Compact w-32 h-32) */}
+            <div className="relative w-32 h-32 shrink-0">
               <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
                 {donutSlices.map((slice, idx) => (
                   <circle
@@ -230,29 +230,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 ))}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-                <span className="text-2xl font-extrabold text-slate-900 font-mono">
+                <span className="text-xl font-extrabold text-slate-900 font-mono">
                   {kpis.totalEmployees}
                 </span>
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">
                   Nhân sự
                 </span>
               </div>
             </div>
 
-            {/* Legend (Flex col justify-center gap-2) */}
-            <div className="flex-1 w-full flex flex-col justify-center gap-2">
+            {/* Legend */}
+            <div className="flex-1 w-full flex flex-col justify-center gap-1.5 max-h-32 overflow-y-auto pr-1">
               {departmentDist.map((item) => (
-                <div key={item.label} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
+                <div key={item.label} className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <span
-                      className="w-3 h-3 rounded-full shrink-0 shadow-2xs"
+                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
                       style={{ backgroundColor: item.color }}
                     />
                     <span className="font-medium text-slate-700 truncate">
                       {item.label}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
+                  <div className="flex items-center gap-1.5 shrink-0 font-mono tabular-nums">
                     <span className="font-bold text-slate-900">{item.count}</span>
                     <span className="text-slate-400">({item.percentage}%)</span>
                   </div>
@@ -262,33 +262,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Chart 2: Thống kê loại hình nghỉ trong tháng (SVG Bar Chart with background grid lines) */}
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
+        {/* Chart 2: Thống kê loại hình nghỉ trong tháng */}
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 flex flex-col justify-between max-h-[260px]">
+          <div className="flex items-center justify-between mb-2">
             <div>
-              <h2 className="text-sm font-bold text-slate-900">
+              <h2 className="text-xs font-bold text-slate-900">
                 Thống kê loại hình nghỉ trong tháng (Tháng 11/2026)
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                So sánh lượt nghỉ phép năm, không lương, chế độ và đi muộn
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                So sánh phép năm, không lương, chế độ &amp; đi muộn
               </p>
             </div>
             <button
               type="button"
               onClick={onOpenAddLeave}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer"
             >
-              <CalendarPlus className="w-3.5 h-3.5" />
-              <span>Ghi nhận mới</span>
+              <CalendarPlus className="w-3 h-3" />
+              <span>Ghi nhận</span>
             </button>
           </div>
 
-          {/* Bar Chart with Grid Lines */}
-          <div className="pt-4 pb-2">
-            <div className="relative h-40 flex items-end justify-around gap-4 px-3 border-b border-slate-200">
+          {/* Bar Chart with Grid Lines (Compact h-28) */}
+          <div className="pt-1 pb-1">
+            <div className="relative h-28 flex items-end justify-around gap-3 px-2 border-b border-slate-200">
               {/* Background horizontal dashed grid lines */}
               <div className="absolute inset-0 flex flex-col justify-between pointer-events-none py-1">
-                <div className="w-full border-b border-slate-100 border-dashed" />
                 <div className="w-full border-b border-slate-100 border-dashed" />
                 <div className="w-full border-b border-slate-100 border-dashed" />
                 <div className="w-full border-b border-slate-100 border-dashed" />
@@ -301,13 +300,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     key={item.label}
                     className="flex-1 flex flex-col items-center h-full justify-end group z-10"
                   >
-                    <span className="text-[11px] font-mono font-bold text-slate-700 mb-1">
+                    <span className="text-[10px] font-mono font-bold text-slate-700 mb-1">
                       {item.count}
                     </span>
                     <div
-                      className="w-full max-w-[48px] rounded-t-lg transition-all duration-500 group-hover:opacity-90 shadow-xs"
+                      className="w-full max-w-[40px] rounded-t-lg transition-all duration-500 group-hover:opacity-90 shadow-xs"
                       style={{
-                        height: `${Math.max(heightPct, 6)}%`,
+                        height: `${Math.max(heightPct, 8)}%`,
                         backgroundColor: item.color,
                       }}
                     />
@@ -317,13 +316,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {/* Bar Chart Labels */}
-            <div className="flex justify-around gap-3 pt-2 px-1 text-center">
+            <div className="flex justify-around gap-2 pt-1.5 px-1 text-center">
               {leaveTypeDist.map((item) => (
                 <div key={item.label} className="flex-1 min-w-0">
-                  <div className="text-[11px] font-bold text-slate-800 truncate" title={item.label}>
+                  <div className="text-[10px] font-bold text-slate-800 truncate" title={item.label}>
                     {item.label}
                   </div>
-                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                  <div className="text-[9px] text-slate-500 font-mono mt-0.5">
                     {item.subLabel}
                   </div>
                 </div>
@@ -333,15 +332,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      {/* 3. Bottom Row: Recent Leave Records occupying Full Width (w-full col-span-full) */}
-      <section className="w-full col-span-full bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden flex flex-col">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      {/* 3. Bottom Row: Recent Leave Records occupying Full Width with max-h-[420px] and sticky header */}
+      <section className="w-full col-span-full bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden flex flex-col min-h-[420px]">
+        <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
           <div>
             <h3 className="text-sm font-bold text-slate-900">
               Ghi chép Nghỉ phép &amp; Đi muộn Gần đây
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Bấm vào ảnh chứng từ để đối chiếu giấy xin phép / viện phí
+              Hiển thị danh sách bản ghi mới nhất (Hỗ trợ cuộn dọc và ghim tiêu đề)
             </p>
           </div>
           <button
@@ -353,19 +352,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[420px] flex-1">
           <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-[#0F232E] text-white text-xs font-semibold tracking-wider uppercase">
-                <th className="py-2.5 px-4">Nhân sự</th>
-                <th className="py-2.5 px-3">Loại giấy phép</th>
-                <th className="py-2.5 px-3">Thời gian</th>
-                <th className="py-2.5 px-3 text-right">Số lượng</th>
-                <th className="py-2.5 px-4 text-center">Giấy phép</th>
+            <thead className="sticky top-0 bg-[#0F232E] text-white text-xs font-semibold tracking-wider uppercase z-10">
+              <tr>
+                <th className="py-2.5 px-4 bg-[#0F232E]">Nhân sự</th>
+                <th className="py-2.5 px-3 bg-[#0F232E]">Loại giấy phép</th>
+                <th className="py-2.5 px-3 bg-[#0F232E]">Thời gian</th>
+                <th className="py-2.5 px-3 text-right bg-[#0F232E]">Số lượng</th>
+                <th className="py-2.5 px-4 text-center bg-[#0F232E]">Giấy phép</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {recentRecords.slice(0, 5).map((rec) => {
+              {recentRecords.slice(0, 15).map((rec) => {
                 const emp = empMap.get(rec.employeeId);
                 const meta = LEAVE_TYPE_META[rec.type];
                 return (
