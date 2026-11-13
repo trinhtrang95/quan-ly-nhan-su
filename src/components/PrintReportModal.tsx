@@ -276,7 +276,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
             </div>
           )}
 
-          {/* CASE 2: XUẤT PDF BẢNG ĐẦY ĐỦ THÔNG TIN (10 CỘT ĐÚNG THỨ TỰ) */}
+          {/* CASE 2: XUẤT PDF BẢNG ĐẦY ĐỦ THÔNG TIN (12 CỘT ĐẦY ĐỦ 100%) */}
           {isFullEmployeeList && (
             <div className="overflow-x-auto">
               <table
@@ -308,8 +308,14 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     <th className="p-2 border border-slate-600">
                       Nhóm / Bộ phận
                     </th>
+                    <th className="p-2 border border-slate-600">
+                      Chức danh
+                    </th>
                     <th className="p-2 border border-slate-600 text-center">
                       Ngày vào
+                    </th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Trạng thái
                     </th>
                   </tr>
                 </thead>
@@ -323,9 +329,11 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                       ? formatDateVN(emp.cccdDate)
                       : '-';
                     const deptStr = (emp.department || '').trim() || '-';
+                    const posStr = (emp.position || '').trim() || '-';
                     const joinDateStr = emp.joinDate
                       ? formatDateVN(emp.joinDate)
                       : '-';
+                    const statusStr = (emp.status || '').trim() || '-';
 
                     return (
                       <tr key={emp.id} className="border-b border-slate-200">
@@ -364,8 +372,18 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                         >
                           {deptStr}
                         </td>
+                        <td
+                          className={`p-2 border border-slate-300 ${
+                            posStr === '-' ? 'text-center text-slate-400' : ''
+                          }`}
+                        >
+                          {posStr}
+                        </td>
                         <td className="p-2 border border-slate-300 text-center font-mono">
                           {joinDateStr}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center">
+                          {statusStr}
                         </td>
                       </tr>
                     );

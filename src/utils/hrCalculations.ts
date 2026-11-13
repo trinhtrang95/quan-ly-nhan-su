@@ -96,6 +96,7 @@ export type EmployeeSortField =
   | 'cccdDate'
   | 'department'
   | 'joinDate'
+  | 'status'
   | null;
 
 export type SortDirection = 'asc' | 'desc' | null;

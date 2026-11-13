@@ -1270,6 +1270,7 @@ export default function App() {
             {activeModule === 'employees' && (
               <EmployeeDirectoryView
                 employees={companyEmployees}
+                records={companyRecords}
                 groups={companyGroups}
                 selectedIds={selectedEmpIds}
                 isAdmin={isAdmin}
@@ -1320,6 +1321,9 @@ export default function App() {
                   showToast('Đã tải xuống tệp mẫu Excel nhập danh sách nhân sự.');
                 }}
                 onImportExcelFile={handleImportExcelFile}
+                onInspectAttachment={(url, title) =>
+                  setLightboxImage({ url, title })
+                }
               />
             )}
 

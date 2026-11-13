@@ -1,6 +1,11 @@
 export type Gender = 'Nam' | 'Nữ' | 'Khác' | '';
 
-export type WorkStatus = 'Đang làm việc' | 'Đang thử việc' | 'Nghỉ thai sản' | 'Đã nghỉ việc';
+export type WorkStatus =
+  | 'Đang làm việc'
+  | 'Tạm nghỉ'
+  | 'Đang thử việc'
+  | 'Nghỉ thai sản'
+  | 'Đã nghỉ việc';
 
 export type LeaveRecordType =
   | 'annual_leave' // Nghỉ phép năm (trừ vào phép tồn)

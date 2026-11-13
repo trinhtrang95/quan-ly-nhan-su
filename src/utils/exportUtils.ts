@@ -70,7 +70,7 @@ export function normalizeDateInput(raw: string | undefined, fallback = ''): stri
 /**
  * Exports Employee Directory to an Excel-compatible file (.xls with UTF-8 BOM & styling)
  * Title: DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT
- * Exact Columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Ngày vào
+ * Full 12 Columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Chức danh, Ngày vào, Trạng thái
  */
 export function exportEmployeesToExcel(
   employees: Employee[],
@@ -92,7 +92,9 @@ export function exportEmployeesToExcel(
           ? ''
           : emp.department;
       const deptDisplay = displayOrDash(rawDept);
+      const posDisplay = displayOrDash(emp.position);
       const joinDateDisplay = emp.joinDate ? formatDateVN(emp.joinDate) : '-';
+      const statusDisplay = displayOrDash(emp.status || 'Đang làm việc');
 
       return `
       <tr>
@@ -105,7 +107,9 @@ export function exportEmployeesToExcel(
         <td style="mso-number-format:'\\@';text-align:center;">${escapeHtml(cccdDisplay)}</td>
         <td style="text-align:center;">${escapeHtml(cccdDateDisplay)}</td>
         <td style="text-align:${deptDisplay === '-' ? 'center' : 'left'};">${escapeHtml(deptDisplay)}</td>
+        <td style="text-align:${posDisplay === '-' ? 'center' : 'left'};">${escapeHtml(posDisplay)}</td>
         <td style="text-align:center;">${escapeHtml(joinDateDisplay)}</td>
+        <td style="text-align:center;">${escapeHtml(statusDisplay)}</td>
       </tr>`;
     })
     .join('');
@@ -124,7 +128,7 @@ export function exportEmployeesToExcel(
       <table>
         <thead>
           <tr>
-            <th colspan="10" style="background-color:#FFFFFF;color:#0F232E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
+            <th colspan="12" style="background-color:#FFFFFF;color:#0F232E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
               DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT
             </th>
           </tr>
@@ -138,7 +142,9 @@ export function exportEmployeesToExcel(
             <th>Số CCCD</th>
             <th>Ngày cấp CCCD</th>
             <th>Nhóm / Bộ phận</th>
+            <th>Chức danh</th>
             <th>Ngày vào</th>
+            <th>Trạng thái</th>
           </tr>
         </thead>
         <tbody>
@@ -160,7 +166,7 @@ export function exportEmployeesToExcel(
 
 /**
  * Downloads a clean CSV/Excel template file that users can fill and import back.
- * Exact synchronized columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Ngày vào, Chức danh/Vị trí
+ * Exact synchronized columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Chức danh, Ngày vào, Trạng thái
  */
 export function downloadEmployeeTemplateExcel(
   registeredGroups?: DepartmentGroup[]
@@ -176,8 +182,9 @@ export function downloadEmployeeTemplateExcel(
     'Số CCCD',
     'Ngày cấp CCCD',
     'Nhóm / Bộ phận',
+    'Chức danh',
     'Ngày vào',
-    'Chức danh/Vị trí',
+    'Trạng thái',
   ];
   const sampleRows = [
     [
@@ -186,12 +193,13 @@ export function downloadEmployeeTemplateExcel(
       'Trịnh Quốc Khánh',
       '1996-03-21',
       'Nam',
-      'Khu Công Nghiệp Lương Sơn, Xã Lương Sơn, Tỉnh Phú Thọ',
+      'Khu Công Nghiệp Lương Sơn, Xã Lương Sơn, Phú Thọ',
       '001096012345',
       '2021-05-10',
       sampleDept,
-      '2023-02-15',
       'Trưởng nhóm',
+      '2023-02-15',
+      'Đang làm việc',
     ],
     [
       '2',
@@ -203,8 +211,9 @@ export function downloadEmployeeTemplateExcel(
       '',
       '',
       sampleDept,
-      '2024-06-01',
       'Nhân viên',
+      '2024-06-01',
+      'Đang làm việc',
     ],
   ];
 
@@ -279,8 +288,9 @@ export function parseEmployeesFromCsvText(
   const resolvedCccdIdx = cccdIdx !== -1 ? cccdIdx : offset + 5;
   const cccdDateIdx = findColIdx(['ngày cấp', 'ngay cap'], offset + 6);
   const deptIdx = findColIdx(['nhóm', 'bộ phận', 'phòng ban', 'bo phan'], offset + 7);
-  const joinDateIdx = findColIdx(['ngày vào', 'ngay vao', 'join_date'], offset + 8);
-  const posIdx = findColIdx(['chức danh', 'vị trí', 'chuc danh', 'vi tri'], offset + 9);
+  const posIdx = findColIdx(['chức danh', 'vị trí', 'chuc danh', 'vi tri'], offset + 8);
+  const joinDateIdx = findColIdx(['ngày vào', 'ngay vao', 'join_date'], offset + 9);
+  const statusIdx = findColIdx(['trạng thái', 'trang thai', 'status'], offset + 10);
 
   const existingCodeSet = new Set(
     existingEmployees.map((e) => e.employeeCode.trim().toUpperCase())
@@ -340,7 +350,7 @@ export function parseEmployeesFromCsvText(
       : undefined;
     const department = matchedGroup ? matchedGroup.name : '';
 
-    // Support both [Nhóm, Ngày vào, Chức danh] and [Nhóm, Chức danh, Ngày vào]
+    // Support both [Nhóm, Chức danh, Ngày vào] and [Nhóm, Ngày vào, Chức danh]
     let rawJoinDate = cleanCsvCell(rawCols[joinDateIdx]);
     let rawPosition = cleanCsvCell(rawCols[posIdx]);
     if (
@@ -353,6 +363,17 @@ export function parseEmployeesFromCsvText(
     }
     const joinDate = normalizeDateInput(rawJoinDate, '');
     const position = rawPosition;
+
+    const rawStatus = cleanCsvCell(rawCols[statusIdx]).toLowerCase();
+    const status: WorkStatus = rawStatus.includes('đã nghỉ')
+      ? 'Đã nghỉ việc'
+      : rawStatus.includes('tạm nghỉ')
+      ? 'Tạm nghỉ'
+      : rawStatus.includes('thai sản')
+      ? 'Nghỉ thai sản'
+      : rawStatus.includes('thử việc')
+      ? 'Đang thử việc'
+      : 'Đang làm việc';
 
     const nameParts = fullName.split(' ').filter(Boolean);
     const initials =
@@ -375,7 +396,7 @@ export function parseEmployeesFromCsvText(
       position,
       joinDate,
       standardAnnualLeave: defaultAnnualLeaveQuota,
-      status: 'Đang làm việc' as WorkStatus,
+      status,
       avatarUrl: createAvatarSvgDataUri(initials, bg, accent),
     });
   }
