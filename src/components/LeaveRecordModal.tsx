@@ -50,6 +50,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   const [reason, setReason] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState<string>('');
   const [attachmentTitle, setAttachmentTitle] = useState<string>('');
+  const [paperStatus, setPaperStatus] = useState<'Chưa có' | 'Đã có'>('Đã có');
   const [isUploadingProof, setIsUploadingProof] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -69,6 +70,10 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       setReason(editingRecord.reason);
       setAttachmentUrl(editingRecord.attachmentUrl || '');
       setAttachmentTitle(editingRecord.attachmentTitle || '');
+      setPaperStatus(
+        editingRecord.paperStatus ||
+          (editingRecord.attachmentUrl ? 'Đã có' : 'Chưa có')
+      );
     } else {
       const initialEmp = defaultEmployeeId || employees[0]?.id || '';
       setEmployeeId(initialEmp);
@@ -84,6 +89,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       setReason('');
       setAttachmentUrl('');
       setAttachmentTitle('');
+      setPaperStatus('Chưa có');
     }
   }, [isOpen, editingRecord, defaultEmployeeId, defaultMonth, defaultYear, employees]);
 
@@ -119,46 +125,6 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
     }
   };
 
-  const handleGenerateSampleSlip = () => {
-    if (!selectedEmployee) return;
-    const meta = LEAVE_TYPE_META[type];
-    const docTitleMap: Record<LeaveRecordType, string> = {
-      annual_leave: 'ĐƠN XIN NGHỈ PHÉP NĂM',
-      unpaid_leave: 'ĐƠN XIN NGHỈ KHÔNG HƯỞNG LƯƠNG',
-      regime_leave: `GIẤY XÁC NHẬN NGHỈ CHẾ ĐỘ (${regimeSubtype.toUpperCase()})`,
-      late_early: 'PHIẾU XÁC NHẬN ĐI MUỘN / VỀ SỚM',
-    };
-
-    const generated = createLeaveSlipSvgDataUri({
-      docTitle: docTitleMap[type],
-      docNumber: `CT-${new Date().getFullYear()}/${String(Math.floor(100 + Math.random() * 899))}`,
-      employeeName: selectedEmployee.fullName,
-      employeeCode: selectedEmployee.employeeCode,
-      department: selectedEmployee.department,
-      leaveTypeLabel:
-        type === 'regime_leave'
-          ? `${meta.label} - ${regimeSubtype}`
-          : meta.label,
-      dateRange:
-        startDate === endDate
-          ? `Ngày ${formatDateVN(startDate)}`
-          : `${formatDateVN(startDate)} - ${formatDateVN(endDate)}`,
-      amountLabel: `${amount} ${meta.unit === 'ngày' ? 'Ngày' : 'Giờ'}`,
-      reason:
-        reason.trim() ||
-        (isLateMode
-          ? 'Xin đi muộn có báo trước cho quản lý trực tiếp'
-          : 'Giải quyết công việc cá nhân và gia đình'),
-      signedDate: `Hà Nội, ngày ${formatDateVN(startDate)}`,
-      approver: 'Trần Thu Trang',
-    });
-
-    setAttachmentUrl(generated);
-    setAttachmentTitle(
-      `${docTitleMap[type]} - ${selectedEmployee.fullName} (${formatDateVN(startDate)})`
-    );
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!employeeId) {
@@ -180,37 +146,6 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
         ? 'Đi muộn có báo cáo quản lý bộ phận'
         : 'Xin nghỉ phép giải quyết việc cá nhân');
 
-    // If user didn't upload a photo, auto-attach a clean digital slip if they didn't explicitly clear it
-    let finalAttachmentUrl = attachmentUrl;
-    let finalAttachmentTitle = attachmentTitle;
-    if (!finalAttachmentUrl && selectedEmployee) {
-      const meta = LEAVE_TYPE_META[type];
-      finalAttachmentUrl = createLeaveSlipSvgDataUri({
-        docTitle:
-          type === 'late_early'
-            ? 'PHIẾU XÁC NHẬN ĐI MUỘN / VỀ SỚM'
-            : type === 'unpaid_leave'
-            ? 'ĐƠN XIN NGHỈ KHÔNG HƯỞNG LƯƠNG'
-            : type === 'regime_leave'
-            ? 'GIẤY XÁC NHẬN NGHỈ CHẾ ĐỘ'
-            : 'ĐƠN XIN NGHỈ PHÉP NĂM',
-        docNumber: `HR-${Date.now().toString().slice(-4)}`,
-        employeeName: selectedEmployee.fullName,
-        employeeCode: selectedEmployee.employeeCode,
-        department: selectedEmployee.department,
-        leaveTypeLabel: meta.label,
-        dateRange:
-          startDate === endDate
-            ? formatDateVN(startDate)
-            : `${formatDateVN(startDate)} - ${formatDateVN(endDate)}`,
-        amountLabel: `${amount} ${meta.unit}`,
-        reason: finalReason,
-        signedDate: `Hà Nội, ngày ${formatDateVN(startDate)}`,
-        approver: 'Trần Thu Trang',
-      });
-      finalAttachmentTitle = `Đơn xác nhận - ${selectedEmployee.fullName} (${formatDateVN(startDate)})`;
-    }
-
     onSave(
       {
         employeeId,
@@ -220,8 +155,9 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
         endDate: isLateMode ? startDate : endDate < startDate ? startDate : endDate,
         amount: Number(amount),
         reason: finalReason,
-        attachmentUrl: finalAttachmentUrl,
-        attachmentTitle: finalAttachmentTitle,
+        attachmentUrl: attachmentUrl.trim() || undefined,
+        attachmentTitle: attachmentTitle.trim() || undefined,
+        paperStatus,
         createdAt: new Date().toISOString().slice(0, 10),
         approvedBy: 'Trần Thu Trang',
       },
@@ -535,7 +471,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                   <span>
                     {isUploadingProof
                       ? 'Đang tải lên Cloud...'
-                      : 'Chụp / Tải ảnh giấy phép'}
+                      : 'Chụp / Tải ảnh giấy phép thực tế'}
                   </span>
                   <input
                     type="file"
@@ -547,16 +483,30 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                     aria-label="Chụp hoặc tải ảnh giấy phép"
                   />
                 </label>
-
-                <button
-                  type="button"
-                  onClick={handleGenerateSampleSlip}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-teal-300 bg-white hover:bg-teal-50 text-[#0F766E] text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  <FileCheck2 className="w-3.5 h-3.5" />
-                  <span>Tạo mẫu đơn tự động</span>
-                </button>
               </div>
+            </div>
+
+            {/* Hiện trạng giấy phép selector */}
+            <div className="pt-2 border-t border-teal-200/60 flex items-center justify-between gap-3">
+              <label
+                htmlFor="paper-status-select"
+                className="text-xs font-bold text-slate-800"
+              >
+                Hiện trạng giấy phép:
+              </label>
+              <select
+                id="paper-status-select"
+                value={paperStatus}
+                onChange={(e) => setPaperStatus(e.target.value as 'Chưa có' | 'Đã có')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg border focus:outline-none bg-white cursor-pointer ${
+                  paperStatus === 'Đã có'
+                    ? 'border-emerald-300 text-emerald-700 bg-emerald-50/50'
+                    : 'border-red-300 text-red-600 bg-red-50/50'
+                }`}
+              >
+                <option value="Chưa có">Chưa có (Chưa nộp)</option>
+                <option value="Đã có">Đã có (Đã viết &amp; nộp)</option>
+              </select>
             </div>
 
             {attachmentUrl && (

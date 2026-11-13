@@ -61,6 +61,7 @@ export interface LeaveRecord {
   reason: string;       // Lý do / Ghi chú chi tiết
   attachmentUrl?: string; // Ảnh chụp giấy phép / viện phí (Data URI hoặc URL)
   attachmentTitle?: string;
+  paperStatus?: 'Chưa có' | 'Đã có'; // Hiện trạng giấy phép
   createdAt: string;
   approvedBy: string;
 }
