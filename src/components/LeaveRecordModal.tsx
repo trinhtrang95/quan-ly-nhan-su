@@ -208,11 +208,11 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="leave-modal-title"
-      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3"
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-2xl overflow-hidden my-auto">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-2xl overflow-hidden my-auto max-h-[96vh] flex flex-col">
         {/* Header */}
-        <div className="bg-[#0F232E] text-white px-4 py-3 flex items-center justify-between">
+        <div className="bg-[#0F232E] text-white px-4 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <CalendarClock className="w-5 h-5 text-[#2DD4BF]" />
             <h3 id="leave-modal-title" className="text-sm font-bold">
@@ -231,9 +231,9 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-3">
+        <form onSubmit={handleSubmit} className="p-3.5 space-y-2.5 overflow-y-auto flex-1">
           {errorMsg && (
-            <div className="p-2.5 rounded-lg bg-[#FEF2F2] border border-red-200 text-xs font-medium text-[#EF4444]">
+            <div className="p-2 rounded-lg bg-[#FEF2F2] border border-red-200 text-xs font-medium text-[#EF4444]">
               {errorMsg}
             </div>
           )}
@@ -290,7 +290,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                   }}
                   placeholder="Lọc nhanh Mã NV / Họ tên..."
                   aria-label="Tìm nhanh nhân viên theo mã hoặc tên"
-                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                  className="w-full pl-8 pr-3 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
                 />
               </div>
 
@@ -299,7 +299,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                   id="leave-emp-select"
                   value={employeeId}
                   onChange={(e) => setEmployeeId(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488] text-slate-800 cursor-pointer"
+                  className="w-full px-3 py-1.5 text-[16px] sm:text-xs font-semibold rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488] text-slate-800 cursor-pointer"
                 >
                   {filteredEmployees.map((emp) => (
                     <option key={emp.id} value={emp.id}>
@@ -316,7 +316,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             <span className="block text-xs font-bold text-slate-800">
               2. Loại hình ghi chép <span className="text-red-500">*</span>
             </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
               {(
                 [
                   { id: 'annual_leave', title: 'Nghỉ phép năm' },
@@ -339,7 +339,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                         setAmount(calcDays(startDate, endDate));
                       }
                     }}
-                    className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer ${
+                    className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
                       active
                         ? 'border-[#0D9488] bg-teal-50/80 ring-1 ring-[#0D9488] font-bold text-[#0F766E]'
                         : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
@@ -366,7 +366,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                   id="regime-subtype-select"
                   value={regimeSubtype}
                   onChange={(e) => setRegimeSubtype(e.target.value as RegimeSubtype)}
-                  className="w-full sm:w-72 px-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                  className="w-full sm:w-72 px-3 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
                 >
                   <option value="Ốm đau / Viện phí">Ốm đau / Viện phí (BHXH)</option>
                   <option value="Thai sản">Chế độ Thai sản / Khám thai</option>
@@ -378,7 +378,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
           </div>
 
           {/* Step 3: Date Range & Quantity */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
               <label
                 htmlFor="leave-start-date"
@@ -405,7 +405,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                     }
                   }
                 }}
-                className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-3 py-1.5 text-[16px] sm:text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
@@ -430,7 +430,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                       setAmount(calcDays(startDate, newEnd));
                     }
                   }}
-                  className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                  className="w-full px-3 py-1.5 text-[16px] sm:text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
                 />
               </div>
             )}
@@ -452,7 +452,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                   required
                   value={amount}
                   onChange={(e) => setAmount(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                  className="w-full px-3 py-1.5 text-[16px] sm:text-xs font-mono font-bold rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
                 />
                 <span className="text-xs font-bold text-slate-600 shrink-0">
                   {isLateMode ? 'Giờ' : 'Ngày'}
@@ -479,19 +479,19 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                   ? 'Nhập lý do đi muộn (VD: Tắc đường, hỏng xe...)'
                   : 'Nhập lý do xin nghỉ phép, bàn giao công việc...'
               }
-              className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+              className="w-full px-3 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
             />
           </div>
 
           {/* Step 5: Camera / Photo Upload for Leave Slip */}
-          <div className="p-2.5 rounded-xl bg-teal-50/40 border border-teal-200/80 space-y-2">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="p-2 rounded-xl bg-teal-50/40 border border-teal-200/80 space-y-1.5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
               <div className="text-xs font-bold text-slate-800">
                 Đính kèm Ảnh chụp Giấy xin phép / Viện phí
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold cursor-pointer transition-colors shadow-xs">
+                <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold cursor-pointer transition-colors shadow-xs">
                   {isUploadingProof ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
@@ -514,7 +514,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             </div>
 
             {/* Hiện trạng giấy phép selector */}
-            <div className="pt-1.5 border-t border-teal-200/60 flex items-center justify-between gap-3">
+            <div className="pt-1 border-t border-teal-200/60 flex items-center justify-between gap-2">
               <label
                 htmlFor="paper-status-select"
                 className="text-xs font-bold text-slate-800"
@@ -525,7 +525,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                 id="paper-status-select"
                 value={paperStatus}
                 onChange={(e) => setPaperStatus(e.target.value as 'Chưa có' | 'Đã có')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-lg border focus:outline-none bg-white cursor-pointer ${
+                className={`px-2 py-1 text-[16px] sm:text-xs font-bold rounded-lg border focus:outline-none bg-white cursor-pointer ${
                   paperStatus === 'Đã có'
                     ? 'border-emerald-300 text-emerald-700 bg-emerald-50/50'
                     : 'border-red-300 text-red-600 bg-red-50/50'
@@ -567,7 +567,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
           </div>
 
           {/* Footer */}
-          <div className="pt-2 border-t border-slate-200 flex items-center justify-end gap-2">
+          <div className="pt-2 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
             <button
               type="button"
               onClick={onClose}
