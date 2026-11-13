@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   FileText,
   ClipboardCheck,
@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   X,
   Eye,
+  ChevronDown,
 } from 'lucide-react';
 import { DepartmentGroup, Employee, LeaveRecord } from '../types/hr';
 import {
@@ -76,7 +77,23 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   const [sortField, setSortField] = useState<EmployeeSortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [drawerEmployeeId, setDrawerEmployeeId] = useState<string | null>(null);
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        exportDropdownRef.current &&
+        !exportDropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsExportDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Set of registered group names from Settings
   const registeredGroupNames = useMemo(
@@ -143,7 +160,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
       return (
         <span
           aria-hidden="true"
-          className="text-[9px] text-slate-400/80 group-hover/th:text-teal-300 transition-colors ml-1"
+          className="text-[9px] text-slate-300/80 group-hover/th:text-teal-300 transition-colors ml-1"
         >
           ▲▼
         </span>
@@ -203,107 +220,132 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       )}
 
-      {/* Action Header Card */}
+      {/* Action Header Card (Thu gọn tiêu đề & gom nhóm công cụ toolbar) */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 md:p-5">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-          {/* Left: Title + Counter */}
+          {/* Left: Title + Counter (Bỏ dòng mô tả phụ) */}
           <div className="flex items-center gap-3">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className="text-base md:text-lg font-bold text-slate-900">
-                  Quản lý Nhân sự
-                </h2>
-                <span
-                  data-testid="employee-total-counter"
-                  className="text-xs font-mono tabular-nums font-bold text-[#0D9488] bg-teal-50 px-2.5 py-0.5 rounded-md"
-                >
-                  {sortedEmployees.length} / {employees.length} nhân sự
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Bấm trực tiếp vào dòng nhân viên hoặc Họ tên để mở Ngăn kéo Hồ sơ Chi tiết (Slide-over Drawer)
-              </p>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-base md:text-lg font-bold text-slate-900">
+                Quản lý Nhân sự
+              </h2>
+              <span
+                data-testid="employee-total-counter"
+                className="text-xs font-mono tabular-nums font-bold text-[#0D9488] bg-teal-50 px-2.5 py-0.5 rounded-md"
+              >
+                {sortedEmployees.length} / {employees.length} nhân sự
+              </span>
             </div>
           </div>
 
-          {/* Right: Action Buttons Toolbar (No "Quản lý Nhóm" button per requirement) */}
+          {/* Right: Exactly 2 fixed buttons (Xuất/Nhập dữ liệu ▾ and + Thêm nhân sự) + Conditional Delete Selected button */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              data-testid="btn-export-pdf-full"
-              onClick={() => onExportPDF(sortedEmployees)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <FileText className="w-3.5 h-3.5 text-rose-500" />
-              <span>Xuất PDF</span>
-            </button>
+            {/* Conditional "Xóa đã chọn" button: Only shown when selectedIds.length > 0 */}
+            {isAdmin && selectedIds.length > 0 && (
+              <button
+                type="button"
+                data-testid="btn-delete-selected"
+                onClick={onDeleteSelected}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 bg-[#FEF2F2] hover:bg-red-100 text-[#EF4444] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs animate-pulse"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa đã chọn ({selectedIds.length})</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              data-testid="btn-export-pdf-sign-list"
-              onClick={() => onExportPDFSignList(sortedEmployees)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <ClipboardCheck className="w-3.5 h-3.5 text-[#0D9488]" />
-              <span>Xuất PDF Danh sách</span>
-            </button>
+            {/* Dropdown Menu "Xuất / Nhập dữ liệu ▾" */}
+            <div className="relative" ref={exportDropdownRef}>
+              <button
+                type="button"
+                data-testid="btn-export-import-dropdown"
+                onClick={() => setIsExportDropdownOpen((prev) => !prev)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#0D9488]" />
+                <span>Xuất / Nhập dữ liệu</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
 
-            <button
-              type="button"
-              data-testid="btn-export-excel"
-              onClick={() => onExportExcel(sortedEmployees)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Xuất Excel</span>
-            </button>
+              {isExportDropdownOpen && (
+                <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl border border-slate-200 shadow-xl py-1.5 z-50 text-xs font-medium text-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportDropdownOpen(false);
+                      onExportPDF(sortedEmployees);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                  >
+                    <FileText className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>Xuất PDF (Đầy đủ)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportDropdownOpen(false);
+                      onExportPDFSignList(sortedEmployees);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                  >
+                    <ClipboardCheck className="w-4 h-4 text-[#0D9488] shrink-0" />
+                    <span>Xuất PDF Danh sách (Ký nhận)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportDropdownOpen(false);
+                      onExportExcel(sortedEmployees);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Xuất Excel</span>
+                  </button>
+
+                  {isAdmin && (
+                    <>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsExportDropdownOpen(false);
+                          onDownloadTemplate();
+                        }}
+                        className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                      >
+                        <Download className="w-4 h-4 text-sky-600 shrink-0" />
+                        <span>Tải file mẫu Excel</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsExportDropdownOpen(false);
+                          fileInputRef.current?.click();
+                        }}
+                        className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                      >
+                        <Upload className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span>Nhập từ Excel</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             {isAdmin && (
-              <>
-                <button
-                  type="button"
-                  data-testid="btn-download-excel-template"
-                  onClick={onDownloadTemplate}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-sky-600" />
-                  <span>Tải file mẫu Excel</span>
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="btn-import-excel"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Nhập từ Excel</span>
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="btn-add-employee"
-                  onClick={onOpenAddEmployee}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>+ Thêm nhân sự</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedIds.length === 0}
-                  onClick={onDeleteSelected}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                    selectedIds.length > 0
-                      ? 'border-red-200 bg-[#FEF2F2] text-[#EF4444] hover:bg-red-100 cursor-pointer'
-                      : 'border-red-100 bg-[#FEF2F2]/60 text-red-300 cursor-not-allowed'
-                  }`}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Xóa đã chọn ({selectedIds.length})</span>
-                </button>
-              </>
+              <button
+                type="button"
+                data-testid="btn-add-employee"
+                onClick={onOpenAddEmployee}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ Thêm nhân sự</span>
+              </button>
             )}
           </div>
         </div>
@@ -384,17 +426,17 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       </div>
 
-      {/* Compact 8-Column Employee Data Table Card (Fits PC 16:9 Viewport cleanly) */}
+      {/* Compact 8-Column Employee Data Table with Sticky Header & max-h-[calc(100vh-200px)] */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-auto relative">
           <table
             data-testid="employees-table"
             className="w-full text-left border-collapse"
           >
             <thead>
-              <tr className="bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase select-none">
+              <tr className="sticky top-0 z-30 bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase select-none shadow-sm">
                 {/* 1. Checkbox chọn */}
-                <th className="py-3 px-3 w-10 text-center">
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3 w-10 text-center">
                   <input
                     type="checkbox"
                     checked={allFilteredSelected}
@@ -406,12 +448,14 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                   />
                 </th>
                 {/* 2. STT */}
-                <th className="py-3 px-2.5 w-14 text-center">STT</th>
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-2.5 w-14 text-center">
+                  STT
+                </th>
                 {/* 3. Mã nhân viên (Sortable) */}
                 <th
                   data-testid="th-sort-code"
                   onClick={() => handleSortClick('employeeCode')}
-                  className="py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Mã nhân viên</span>
@@ -422,7 +466,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 <th
                   data-testid="th-sort-name"
                   onClick={() => handleSortClick('fullName')}
-                  className="py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Họ tên</span>
@@ -433,7 +477,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 <th
                   data-testid="th-sort-department"
                   onClick={() => handleSortClick('department')}
-                  className="py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Nhóm / Bộ phận</span>
@@ -444,7 +488,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 <th
                   data-testid="th-sort-join-date"
                   onClick={() => handleSortClick('joinDate')}
-                  className="py-3 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center justify-center">
                     <span>Ngày vào</span>
@@ -455,7 +499,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 <th
                   data-testid="th-sort-status"
                   onClick={() => handleSortClick('status')}
-                  className="py-3 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center justify-center">
                     <span>Trạng thái</span>
@@ -463,7 +507,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                   </div>
                 </th>
                 {/* 8. Thao tác */}
-                <th className="py-3 px-3.5 text-center whitespace-nowrap">
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 text-center whitespace-nowrap">
                   Thao tác
                 </th>
               </tr>

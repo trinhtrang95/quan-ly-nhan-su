@@ -13,7 +13,8 @@ import {
   composeAddressFromParts,
   fetchCommunesForProvince,
   parseAddressIntoParts,
-  VN_34_PROVINCES,
+  VN_28_PROVINCES,
+  VN_6_CENTRAL_CITIES,
 } from '../utils/vnAddressData';
 
 interface EmployeeModalProps {
@@ -461,11 +462,20 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
                   >
                     <option value="">-- Chọn Tỉnh / Thành phố (34) --</option>
-                    {VN_34_PROVINCES.map((prov) => (
-                      <option key={prov} value={prov}>
-                        {prov}
-                      </option>
-                    ))}
+                    <optgroup label="6 Thành phố trực thuộc Trung ương">
+                      {VN_6_CENTRAL_CITIES.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="28 Tỉnh">
+                      {VN_28_PROVINCES.map((prov) => (
+                        <option key={prov} value={prov}>
+                          {prov}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
 

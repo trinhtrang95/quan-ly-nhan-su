@@ -29,6 +29,13 @@ import {
   UserRole,
 } from '../types/hr';
 import { uploadImageToHrBucket } from '../utils/supabaseService';
+import {
+  composeAddressFromParts,
+  fetchCommunesForProvince,
+  parseAddressIntoParts,
+  VN_28_PROVINCES,
+  VN_6_CENTRAL_CITIES,
+} from '../utils/vnAddressData';
 
 export type SettingsSubTab = 'units' | 'departments' | 'accounts' | 'backup';
 
@@ -124,7 +131,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [editingCompId, setEditingCompId] = useState<string | null>(null);
   const [compName, setCompName] = useState('');
   const [compLogoUrl, setCompLogoUrl] = useState('');
+  const [compProvince, setCompProvince] = useState('');
+  const [compCommune, setCompCommune] = useState('');
   const [compAddress, setCompAddress] = useState('');
+  const [compCommuneSuggestions, setCompCommuneSuggestions] = useState<string[]>([]);
   const [compPhone, setCompPhone] = useState('');
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
@@ -132,9 +142,25 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [inlineCompId, setInlineCompId] = useState<string | null>(null);
   const [inlineCompName, setInlineCompName] = useState('');
   const [inlineCompLogoUrl, setInlineCompLogoUrl] = useState('');
+  const [inlineCompProvince, setInlineCompProvince] = useState('');
+  const [inlineCompCommune, setInlineCompCommune] = useState('');
   const [inlineCompAddress, setInlineCompAddress] = useState('');
   const [inlineCompPhone, setInlineCompPhone] = useState('');
   const [isUploadingInlineLogo, setIsUploadingInlineLogo] = useState(false);
+
+  useEffect(() => {
+    if (!compProvince) {
+      setCompCommuneSuggestions([]);
+      return;
+    }
+    let active = true;
+    fetchCommunesForProvince(compProvince).then((list) => {
+      if (active) setCompCommuneSuggestions(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, [compProvince]);
 
   // =========================================================================
   // TAB 2 STATE: DEPARTMENTS, POSITIONS & DEFAULT LEAVE QUOTA
@@ -230,12 +256,18 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     const cleanName = compName.trim();
     if (!cleanName) return;
 
+    const fullCompanyAddress = composeAddressFromParts(
+      compAddress,
+      compCommune,
+      compProvince
+    );
+
     const unitPayload: Omit<CompanyUnit, 'id'> = {
       name: cleanName,
       code: `UNIT-${Date.now().toString().slice(-4)}`,
       shortName: 'TS',
       logoUrl: compLogoUrl || undefined,
-      address: compAddress.trim(),
+      address: fullCompanyAddress,
       phone: compPhone.trim(),
     };
 
@@ -248,27 +280,39 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
     setCompName('');
     setCompLogoUrl('');
+    setCompProvince('');
+    setCompCommune('');
     setCompAddress('');
     setCompPhone('');
   };
 
   const startInlineEditCompany = (unit: CompanyUnit) => {
+    const parsedAddr = parseAddressIntoParts(unit.address);
     setInlineCompId(unit.id);
     setInlineCompName(unit.name);
     setInlineCompLogoUrl(unit.logoUrl || '');
-    setInlineCompAddress(unit.address || '');
+    setInlineCompProvince(parsedAddr.province);
+    setInlineCompCommune(parsedAddr.commune);
+    setInlineCompAddress(
+      parsedAddr.province ? parsedAddr.detail : unit.address || ''
+    );
     setInlineCompPhone(unit.phone || '');
   };
 
   const saveInlineEditCompany = (unit: CompanyUnit) => {
     const cleanName = inlineCompName.trim();
     if (!cleanName) return;
+    const composedInlineAddress = composeAddressFromParts(
+      inlineCompAddress,
+      inlineCompCommune,
+      inlineCompProvince
+    );
     onUpdateCompanyUnit(unit.id, {
       name: cleanName,
       code: unit.code || 'UNIT',
       shortName: 'TS',
       logoUrl: inlineCompLogoUrl || undefined,
-      address: inlineCompAddress.trim(),
+      address: composedInlineAddress,
       phone: inlineCompPhone.trim(),
       defaultLeaveQuota: unit.defaultLeaveQuota,
       isInitialized: unit.isInitialized,
@@ -555,20 +599,78 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                 />
               </div>
 
-              {/* Địa chỉ & Nút Thêm */}
-              <div className="md:col-span-9">
+              {/* Địa chỉ hành chính 2 cấp (34 Tỉnh/TP sau sáp nhập) & Nút Thêm */}
+              <div className="md:col-span-3">
+                <label
+                  htmlFor="comp-addr-province"
+                  className="block text-[11px] font-semibold text-slate-600 mb-1"
+                >
+                  Tỉnh / Thành phố (34 Tỉnh/TP)
+                </label>
+                <select
+                  id="comp-addr-province"
+                  value={compProvince}
+                  onChange={(e) => setCompProvince(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                >
+                  <option value="">-- Chọn Tỉnh / Thành phố (34) --</option>
+                  <optgroup label="6 Thành phố trực thuộc Trung ương">
+                    {VN_6_CENTRAL_CITIES.map((city) => (
+                      <option key={city} value={city}>
+                        {city}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="28 Tỉnh">
+                    {VN_28_PROVINCES.map((prov) => (
+                      <option key={prov} value={prov}>
+                        {prov}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div className="md:col-span-3">
+                <label
+                  htmlFor="comp-addr-commune"
+                  className="block text-[11px] font-semibold text-slate-600 mb-1"
+                >
+                  Xã / Phường / Đặc khu
+                </label>
+                <input
+                  id="comp-addr-commune"
+                  type="text"
+                  list="comp-commune-datalist"
+                  value={compCommune}
+                  onChange={(e) => setCompCommune(e.target.value)}
+                  placeholder={
+                    compProvince
+                      ? `Chọn/nhập Xã, Phường (${compProvince})...`
+                      : 'Chọn hoặc nhập Xã/Phường...'
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                />
+                <datalist id="comp-commune-datalist">
+                  {compCommuneSuggestions.map((comm) => (
+                    <option key={comm} value={comm} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="md:col-span-3">
                 <label
                   htmlFor="comp-address-input"
                   className="block text-[11px] font-semibold text-slate-600 mb-1"
                 >
-                  Địa chỉ trụ sở / Chi nhánh
+                  Địa chỉ trụ sở / Chi nhánh chi tiết
                 </label>
                 <input
                   id="comp-address-input"
                   type="text"
                   value={compAddress}
                   onChange={(e) => setCompAddress(e.target.value)}
-                  placeholder="Nhập địa chỉ chi tiết của đơn vị..."
+                  placeholder="Số nhà, Đường, KCN, Tòa nhà..."
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
                 />
               </div>
@@ -665,14 +767,50 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
                       <td className="py-2.5 px-3 text-slate-600">
                         {isInlineEditing ? (
-                          <input
-                            type="text"
-                            value={inlineCompAddress}
-                            onChange={(e) =>
-                              setInlineCompAddress(e.target.value)
-                            }
-                            className="w-full px-2.5 py-1.5 text-xs rounded border border-[#0D9488] bg-white"
-                          />
+                          <div className="flex flex-col sm:flex-row gap-1.5">
+                            <select
+                              aria-label="Chọn Tỉnh/Thành phố cho đơn vị"
+                              value={inlineCompProvince}
+                              onChange={(e) =>
+                                setInlineCompProvince(e.target.value)
+                              }
+                              className="px-2 py-1.5 text-xs rounded border border-[#0D9488] bg-white shrink-0"
+                            >
+                              <option value="">-- Tỉnh/TP (34) --</option>
+                              <optgroup label="6 Thành phố trực thuộc Trung ương">
+                                {VN_6_CENTRAL_CITIES.map((city) => (
+                                  <option key={city} value={city}>
+                                    {city}
+                                  </option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="28 Tỉnh">
+                                {VN_28_PROVINCES.map((prov) => (
+                                  <option key={prov} value={prov}>
+                                    {prov}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            </select>
+                            <input
+                              type="text"
+                              value={inlineCompCommune}
+                              onChange={(e) =>
+                                setInlineCompCommune(e.target.value)
+                              }
+                              placeholder="Xã / Phường..."
+                              className="w-32 px-2 py-1.5 text-xs rounded border border-[#0D9488] bg-white"
+                            />
+                            <input
+                              type="text"
+                              value={inlineCompAddress}
+                              onChange={(e) =>
+                                setInlineCompAddress(e.target.value)
+                              }
+                              placeholder="Địa chỉ chi tiết..."
+                              className="flex-1 min-w-[140px] px-2.5 py-1.5 text-xs rounded border border-[#0D9488] bg-white"
+                            />
+                          </div>
                         ) : (
                           unit.address || '—'
                         )}

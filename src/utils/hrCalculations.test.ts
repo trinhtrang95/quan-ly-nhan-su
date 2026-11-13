@@ -9,8 +9,11 @@ import {
 import { parseEmployeesFromCsvText } from './exportUtils';
 import {
   composeAddressFromParts,
+  DEFAULT_COMMUNES_BY_PROVINCE,
   parseAddressIntoParts,
+  VN_28_PROVINCES,
   VN_34_PROVINCES,
+  VN_6_CENTRAL_CITIES,
 } from './vnAddressData';
 import {
   INITIAL_EMPLOYEES,
@@ -26,12 +29,28 @@ test('formatDateVN converts YYYY-MM-DD and DD/MM/YYYY into DD/MM/YYYY accurately
   assert.equal(formatDateVN('-'), '');
 });
 
-test('VN_34_PROVINCES contains exact 34 post-merger provinces and composeAddressFromParts / parseAddressIntoParts round-trip cleanly', () => {
+test('VN_34_PROVINCES contains exact 6 central cities + 28 provinces = 34 unique post-merger units and round-trips addresses cleanly', () => {
+  assert.equal(VN_6_CENTRAL_CITIES.length, 6);
+  assert.deepEqual(VN_6_CENTRAL_CITIES, [
+    'Hà Nội',
+    'TP. Hồ Chí Minh',
+    'Hải Phòng',
+    'Đà Nẵng',
+    'Cần Thơ',
+    'Huế',
+  ]);
+  assert.equal(VN_28_PROVINCES.length, 28);
   assert.equal(VN_34_PROVINCES.length, 34);
-  assert.ok(VN_34_PROVINCES.includes('Hà Nội'));
-  assert.ok(VN_34_PROVINCES.includes('TP. Hồ Chí Minh'));
-  assert.ok(VN_34_PROVINCES.includes('Phú Thọ'));
-  assert.ok(VN_34_PROVINCES.includes('Huế'));
+  assert.equal(new Set(VN_34_PROVINCES).size, 34);
+
+  // Every single one of the 34 provinces/cities has commune suggestions configured
+  for (const prov of VN_34_PROVINCES) {
+    assert.ok(
+      Array.isArray(DEFAULT_COMMUNES_BY_PROVINCE[prov]) &&
+        DEFAULT_COMMUNES_BY_PROVINCE[prov].length > 0,
+      `Missing communes for ${prov}`
+    );
+  }
 
   const composed = composeAddressFromParts(
     'Thôn Đồng Tiến',
@@ -47,13 +66,22 @@ test('VN_34_PROVINCES contains exact 34 post-merger provinces and composeAddress
     province: 'Phú Thọ',
   });
 
-  // Also handles "Tỉnh Phú Thọ" prefix when splitting existing addresses
+  // Also handles "Tỉnh Phú Thọ" or merged province "Tỉnh Hòa Bình" prefix when splitting existing addresses
   const parsedWithPrefix = parseAddressIntoParts(
     'KCN Lương Sơn, Xã Hòa Sơn, Tỉnh Phú Thọ'
   );
   assert.deepEqual(parsedWithPrefix, {
     detail: 'KCN Lương Sơn',
     commune: 'Xã Hòa Sơn',
+    province: 'Phú Thọ',
+  });
+
+  const parsedMergedAlias = parseAddressIntoParts(
+    'Xóm 2, Xã Lương Sơn, Tỉnh Hòa Bình'
+  );
+  assert.deepEqual(parsedMergedAlias, {
+    detail: 'Xóm 2',
+    commune: 'Xã Lương Sơn',
     province: 'Phú Thọ',
   });
 

@@ -1197,6 +1197,7 @@ export default function App() {
         currentUser={currentUser}
         companyUnits={companyUnits}
         activeCompanyId={activeCompany.id}
+        isCloudConnected={isCloudConnected}
         onSelectCompany={(compId) => {
           setActiveCompanyId(compId);
           const found = companyUnits.find((c) => c.id === compId);
@@ -1216,33 +1217,6 @@ export default function App() {
       {/* Right Main Content Viewport */}
       <div className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto pb-20 md:pb-8">
         <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-5 md:px-6 pt-4 md:pt-5 flex-1">
-          {/* Top White Rounded Card Banner Header */}
-          <TopBannerHeader
-            activeModule={activeModule}
-            onSelectModule={setActiveModule}
-            activeCompany={activeCompany}
-            currentUser={currentUser}
-            onLogoutClick={() => {
-              setCurrentUser(null);
-              setActiveModule('dashboard');
-            }}
-            isCloudConnected={isCloudConnected}
-            isSyncing={isSyncing}
-            onManualSync={() => syncFromSupabase(false)}
-            onQuickAddLeave={() => {
-              setEditingRecord(null);
-              setLeaveDefaultEmpId(undefined);
-              setLeaveDefaultMonth(undefined);
-              setLeaveDefaultYear(undefined);
-              setIsLeaveModalOpen(true);
-            }}
-            onQuickAddEmployee={() => {
-              if (!isAdmin) return;
-              setEditingEmployee(null);
-              setIsEmpModalOpen(true);
-            }}
-          />
-
           {/* Main Active Module Content */}
           <main aria-label="Nội dung phân hệ chính">
             {activeModule === 'dashboard' && (

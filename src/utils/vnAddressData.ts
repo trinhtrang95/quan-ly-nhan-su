@@ -1,43 +1,52 @@
 /**
  * Danh sách chuẩn 34 Tỉnh / Thành phố sau sáp nhập của Việt Nam
- * và bộ xử lý tách/ghép địa chỉ hành chính 2 cấp (Tỉnh/TP -> Xã/Phường -> Địa chỉ chi tiết)
+ * gồm 6 Thành phố trực thuộc Trung ương và 28 Tỉnh
+ * kèm bộ xử lý tách/ghép địa chỉ hành chính 2 cấp (Tỉnh/TP -> Xã/Phường -> Địa chỉ chi tiết)
  */
 
-export const VN_34_PROVINCES: string[] = [
+export const VN_6_CENTRAL_CITIES: string[] = [
   'Hà Nội',
   'TP. Hồ Chí Minh',
   'Hải Phòng',
   'Đà Nẵng',
   'Cần Thơ',
   'Huế',
-  'Đồng Nai',
-  'Quảng Ninh',
-  'Bắc Ninh',
-  'Phú Thọ',
-  'Hưng Yên',
-  'Ninh Bình',
-  'Thanh Hóa',
-  'Nghệ An',
-  'Hà Tĩnh',
-  'Quảng Trị',
-  'Quảng Ngãi',
-  'Gia Lai',
-  'Khánh Hòa',
-  'Đắk Lắk',
-  'Lâm Đồng',
-  'Tây Ninh',
-  'Đồng Tháp',
-  'Vĩnh Long',
+];
+
+export const VN_28_PROVINCES: string[] = [
   'An Giang',
+  'Bắc Ninh',
   'Cà Mau',
   'Cao Bằng',
-  'Tuyên Quang',
+  'Đắk Lắk',
   'Điện Biên',
+  'Đồng Nai',
+  'Đồng Tháp',
+  'Gia Lai',
+  'Hà Tĩnh',
+  'Hưng Yên',
+  'Khánh Hòa',
   'Lai Châu',
-  'Sơn La',
-  'Lào Cai',
-  'Thái Nguyên',
+  'Lâm Đồng',
   'Lạng Sơn',
+  'Lào Cai',
+  'Nghệ An',
+  'Ninh Bình',
+  'Phú Thọ',
+  'Quảng Ngãi',
+  'Quảng Ninh',
+  'Quảng Trị',
+  'Sơn La',
+  'Tây Ninh',
+  'Thái Nguyên',
+  'Thanh Hóa',
+  'Tuyên Quang',
+  'Vĩnh Long',
+];
+
+export const VN_34_PROVINCES: string[] = [
+  ...VN_6_CENTRAL_CITIES,
+  ...VN_28_PROVINCES,
 ];
 
 /**
@@ -499,8 +508,46 @@ export interface ParsedAddressParts {
   province: string;
 }
 
+const MERGED_PROVINCE_ALIASES: Record<string, string> = {
+  'hồ chí minh': 'TP. Hồ Chí Minh',
+  'tphcm': 'TP. Hồ Chí Minh',
+  'hcm': 'TP. Hồ Chí Minh',
+  'bình dương': 'TP. Hồ Chí Minh',
+  'bà rịa - vũng tàu': 'TP. Hồ Chí Minh',
+  'bà rịa vũng tàu': 'TP. Hồ Chí Minh',
+  'hải dương': 'Hải Phòng',
+  'quảng nam': 'Đà Nẵng',
+  'hậu giang': 'Cần Thơ',
+  'sóc trăng': 'Cần Thơ',
+  'thừa thiên huế': 'Huế',
+  'thừa thiên - huế': 'Huế',
+  'hòa bình': 'Phú Thọ',
+  'vĩnh phúc': 'Phú Thọ',
+  'bắc giang': 'Bắc Ninh',
+  'thái bình': 'Hưng Yên',
+  'hà nam': 'Ninh Bình',
+  'nam định': 'Ninh Bình',
+  'quảng bình': 'Quảng Trị',
+  'kon tum': 'Quảng Ngãi',
+  'bình định': 'Gia Lai',
+  'ninh thuận': 'Khánh Hòa',
+  'phú yên': 'Đắk Lắk',
+  'bình thuận': 'Lâm Đồng',
+  'đắk nông': 'Lâm Đồng',
+  'bình phước': 'Đồng Nai',
+  'long an': 'Tây Ninh',
+  'tiền giang': 'Đồng Tháp',
+  'bến tre': 'Vĩnh Long',
+  'trà vinh': 'Vĩnh Long',
+  'kiên giang': 'An Giang',
+  'bạc liêu': 'Cà Mau',
+  'hà giang': 'Tuyên Quang',
+  'yên bái': 'Lào Cai',
+  'bắc kạn': 'Thái Nguyên',
+};
+
 /**
- * Chuẩn hóa tên tỉnh để khớp với danh sách 34 Tỉnh/Thành phố chuẩn
+ * Chuẩn hóa tên tỉnh để khớp với danh sách 34 Tỉnh/Thành phố chuẩn sau sáp nhập
  */
 export function matchStandardProvince(raw: string): string {
   const cleaned = raw
@@ -510,19 +557,11 @@ export function matchStandardProvince(raw: string): string {
   if (!cleaned) return '';
 
   const lower = cleaned.toLowerCase();
-  if (
-    lower === 'hồ chí minh' ||
-    lower === 'tphcm' ||
-    lower === 'hcm' ||
-    raw.trim().toLowerCase() === 'tp. hồ chí minh'
-  ) {
+  if (raw.trim().toLowerCase() === 'tp. hồ chí minh') {
     return 'TP. Hồ Chí Minh';
   }
-  if (lower === 'thừa thiên huế' || lower === 'huế') {
-    return 'Huế';
-  }
-  if (lower === 'hòa bình' || lower === 'vĩnh phúc') {
-    return 'Phú Thọ';
+  if (MERGED_PROVINCE_ALIASES[lower]) {
+    return MERGED_PROVINCE_ALIASES[lower];
   }
 
   const found = VN_34_PROVINCES.find(

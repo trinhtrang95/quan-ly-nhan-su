@@ -24,6 +24,7 @@ interface SidebarProps {
   currentUser: UserAccount;
   companyUnits: CompanyUnit[];
   activeCompanyId: string;
+  isCloudConnected?: boolean;
   onSelectCompany: (id: string) => void;
   onLogoutClick: () => void;
 }
@@ -84,6 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   companyUnits,
   activeCompanyId,
+  isCloudConnected = true,
   onSelectCompany,
   onLogoutClick,
 }) => {
@@ -204,8 +206,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Bottom Workspace Dropdown & Logged-in Account Box */}
-        <div className="p-3 border-t border-slate-700/60 bg-[#0B1B24]">
+        {/* Bottom Workspace Dropdown, Cloud Status & Logged-in Account Box */}
+        <div className="p-3 border-t border-slate-700/60 bg-[#0B1B24] space-y-2.5">
+          {/* Cloud Status Indicator */}
+          {!collapsed && (
+            <div className="px-2.5 py-1.5 rounded-lg bg-[#0F232E] border border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-slate-400">Trạng thái Cloud:</span>
+              <span
+                className={`inline-flex items-center gap-1 font-semibold ${
+                  isCloudConnected ? 'text-[#2DD4BF]' : 'text-amber-400'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    isCloudConnected ? 'bg-[#2DD4BF]' : 'bg-amber-400'
+                  }`}
+                />
+                {isCloudConnected ? 'Đã kết nối Supabase' : 'Đang kết nối lại'}
+              </span>
+            </div>
+          )}
+
           {!collapsed ? (
             <div className="space-y-2.5">
               {/* CÔNG TY ĐANG LÀM VIỆC Dropdown */}
