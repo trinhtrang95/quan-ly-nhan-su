@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   CalendarPlus,
   Search,
@@ -13,6 +13,7 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
+  ChevronDown,
 } from 'lucide-react';
 import {
   DepartmentGroup,
@@ -54,6 +55,21 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
   const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
+  const exportDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        exportDropdownRef.current &&
+        !exportDropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsExportDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
 
@@ -110,7 +126,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
        .text-center { text-align: center; }
        .text-left { text-align: left; }`;
 
-    const docTitle = 'Thong_Ke_Ghi_Chep_Nghi_Phep_Va_Di_Muon_A4';
+    const docTitle = 'Bang_Thong_Ke_Nghi_Phep_Va_Di_Muon_A4';
 
     const fullHtml = `<!DOCTYPE html>
 <html lang="vi">
@@ -170,32 +186,56 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsPdfModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
-            >
-              <FileText className="w-3.5 h-3.5 text-red-600" />
-              <span>Xuất PDF</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onExportExcel(filteredRecords)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Xuất Excel</span>
-            </button>
-
+            {/* 1. Nút + Ghi nhận mới đặt lên vị trí ưu tiên đầu tiên */}
             <button
               type="button"
               onClick={onOpenAddRecord}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
               <CalendarPlus className="w-4 h-4" />
               <span>+ Ghi nhận mới</span>
             </button>
+
+            {/* 2. Dropdown Xuất Excel / PDF ▾ */}
+            <div className="relative" ref={exportDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsExportDropdownOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#0D9488]" />
+                <span>Xuất Excel / PDF</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {isExportDropdownOpen && (
+                <div className="absolute right-0 mt-1.5 w-48 bg-white rounded-xl border border-slate-200 shadow-xl py-1.5 z-50 text-xs font-medium text-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportDropdownOpen(false);
+                      onExportExcel(filteredRecords);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Xuất Excel</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportDropdownOpen(false);
+                      setIsPdfModalOpen(true);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
+                  >
+                    <FileText className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>Xuất PDF</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -218,7 +258,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Họ tên, Mã NV, Lý do..."
                 aria-label="Tìm kiếm nhật ký nghỉ phép"
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488]"
+                className="w-full pl-8 pr-3 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488]"
               />
             </div>
           </div>
@@ -237,7 +277,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               value={startDateFilter}
               onChange={(e) => setStartDateFilter(e.target.value)}
               aria-label="Từ ngày"
-              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488]"
+              className="w-full px-2.5 py-1.5 text-[16px] sm:text-xs font-mono rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488]"
             />
           </div>
 
@@ -255,7 +295,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               value={endDateFilter}
               onChange={(e) => setEndDateFilter(e.target.value)}
               aria-label="Đến ngày"
-              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488]"
+              className="w-full px-2.5 py-1.5 text-[16px] sm:text-xs font-mono rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488]"
             />
           </div>
 
@@ -272,7 +312,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
               aria-label="Lọc theo Loại giấy phép"
-              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
+              className="w-full px-2.5 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
             >
               <option value="ALL">Tất cả loại giấy phép</option>
               <option value="annual_leave">Nghỉ phép năm</option>
@@ -296,7 +336,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                 value={departmentFilter}
                 onChange={(e) => setDepartmentFilter(e.target.value)}
                 aria-label="Lọc nhật ký theo Nhóm bộ phận"
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
+                className="w-full px-2.5 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
               >
                 <option value="ALL">Tất cả Nhóm</option>
                 {groups.map((g) => (
@@ -503,6 +543,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
 
       {/* =====================================================================
           PDF EXPORT PREVIEW MODAL (A4 Portrait - Exactly 5 Columns)
+          Title: "BẢNG THỐNG KÊ NGHỈ PHÉP & ĐI MUỘN" (No Subtitle, No Signatures)
       ===================================================================== */}
       {isPdfModalOpen && (
         <div
@@ -524,10 +565,10 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
             <div className="no-print bg-[#0F232E] text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 id="leave-pdf-modal-title" className="text-sm font-bold">
-                  Xem trước Bản in PDF — Bảng Thống kê Ghi chép Nghỉ phép &amp; Đi muộn
+                  Xem trước Bản in PDF — BẢNG THỐNG KÊ NGHỈ PHÉP &amp; ĐI MUỘN
                 </h3>
                 <p className="text-xs text-slate-300">
-                  Khổ dọc A4 (5 cột chuẩn: STT, Ngày/Tháng, Họ và tên, Loại giấy phép, Ký/Nhận)
+                  Khổ dọc A4 (5 cột chuẩn: STT, NGÀY/THÁNG, HỌ VÀ TÊN, LOẠI GIẤY PHÉP, KÝ/NHẬN)
                 </p>
               </div>
 
@@ -567,17 +608,11 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               className="max-h-[78vh] overflow-y-auto bg-white text-black p-8"
               style={{ fontFamily: '"Times New Roman", Times, serif' }}
             >
+              {/* Title: BẢNG THỐNG KÊ NGHỈ PHÉP & ĐI MUỘN */}
               <div className="text-center mb-6">
                 <h2 className="text-[14pt] font-bold text-black uppercase tracking-wide">
-                  BẢNG THỐNG KÊ GHI CHÉP NGHỈ PHÉP &amp; ĐI MUỘN
+                  BẢNG THỐNG KÊ NGHỈ PHÉP &amp; ĐI MUỘN
                 </h2>
-                <p className="text-[11pt] text-slate-700 mt-1">
-                  {startDateFilter || endDateFilter
-                    ? `Khoảng thời gian: ${startDateFilter ? formatDateVN(startDateFilter) : 'Đầu kỳ'} → ${endDateFilter ? formatDateVN(endDateFilter) : 'Hiện tại'}`
-                    : 'Toàn bộ thời gian'}
-                  {typeFilter !== 'ALL' && ` | Loại: ${typeFilter === 'late_early' ? 'Đi muộn' : LEAVE_TYPE_META[typeFilter as LeaveRecordType]?.label}`}
-                  {` | Tổng số: ${filteredRecords.length} bản ghi`}
-                </p>
               </div>
 
               <table
@@ -648,21 +683,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                 </tbody>
               </table>
 
-              {/* Footer signature lines */}
-              <div className="mt-10 pt-4 flex justify-between text-[12pt] font-serif">
-                <div className="text-center">
-                  <div className="font-bold">LẬP BIỂU</div>
-                  <div className="text-[11pt] italic">(Ký, ghi rõ họ tên)</div>
-                  <div className="h-16"></div>
-                  <div className="font-bold">Trần Thu Trang</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-bold">PHÒNG KỸ THUẬT / BAN GIÁM ĐỐC</div>
-                  <div className="text-[11pt] italic">(Ký, đóng dấu)</div>
-                  <div className="h-16"></div>
-                  <div className="font-bold"></div>
-                </div>
-              </div>
+              {/* No signatures, no extra dates or record counts */}
             </div>
           </div>
         </div>
