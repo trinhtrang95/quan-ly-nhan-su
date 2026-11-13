@@ -111,6 +111,7 @@ export interface SupabaseLeaveLogRow {
   duration: number;
   reason: string | null;
   proof_image_url: string | null;
+  paper_status?: string | null;
   created_at?: string;
 }
 
@@ -351,6 +352,9 @@ export function mapSupabaseRowToLeaveRecord(
     attachmentTitle: row.proof_image_url
       ? `${meta.shortLabel} - ${emp ? emp.fullName : ''} (${formatDateVN(row.start_date)})`
       : undefined,
+    paperStatus:
+      (row.paper_status as 'Chưa có' | 'Đã có') ||
+      (row.proof_image_url ? 'Đã có' : 'Chưa có'),
     createdAt: row.created_at ? row.created_at.slice(0, 10) : row.start_date,
     approvedBy: 'Quản trị viên',
   };
@@ -1341,6 +1345,7 @@ export async function createLeaveLogInSupabase(
     duration: recData.amount,
     reason: recData.reason,
     proof_image_url: recData.attachmentUrl || null,
+    paper_status: recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có'),
   };
 
   const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
@@ -1375,6 +1380,7 @@ export async function updateLeaveLogInSupabase(
     duration: recData.amount,
     reason: recData.reason,
     proof_image_url: recData.attachmentUrl || null,
+    paper_status: recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có'),
   };
 
   const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
