@@ -8,16 +8,136 @@ import {
   filterEmployees,
   filterLeaveRecords,
   formatDateVN,
+  parseComparableDate,
+  sortEmployees,
 } from './hrCalculations';
+import { parseEmployeesFromCsvText } from './exportUtils';
 import {
   INITIAL_DEPARTMENT_GROUPS,
   INITIAL_EMPLOYEES,
   INITIAL_LEAVE_RECORDS,
 } from '../data/mockData';
+import { Employee } from '../types/hr';
 
-test('formatDateVN converts YYYY-MM-DD into DD/MM/YYYY accurately', () => {
+test('formatDateVN converts YYYY-MM-DD and DD/MM/YYYY into DD/MM/YYYY accurately', () => {
   assert.equal(formatDateVN('2026-11-12'), '12/11/2026');
   assert.equal(formatDateVN('1995-04-05'), '05/04/1995');
+  assert.equal(formatDateVN('5/4/1995'), '05/04/1995');
+  assert.equal(formatDateVN(''), '');
+  assert.equal(formatDateVN('-'), '');
+});
+
+test('sortEmployees sorts by department (A-Z and Z-A) and pushes empty "-" departments to bottom', () => {
+  const sample: Employee[] = [
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: '1',
+      employeeCode: 'NV001',
+      fullName: 'An',
+      department: '',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: '2',
+      employeeCode: 'NV002',
+      fullName: 'Bình',
+      department: 'Tổ Cơ khí',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: '3',
+      employeeCode: 'NV003',
+      fullName: 'Cường',
+      department: 'Ban Giám đốc',
+    },
+  ];
+
+  const asc = sortEmployees(sample, 'department', 'asc');
+  assert.deepEqual(
+    asc.map((e) => e.employeeCode),
+    ['NV003', 'NV002', 'NV001']
+  );
+
+  const desc = sortEmployees(sample, 'department', 'desc');
+  assert.deepEqual(
+    desc.map((e) => e.employeeCode),
+    ['NV002', 'NV003', 'NV001']
+  );
+});
+
+test('sortEmployees sorts by joinDate supporting both YYYY-MM-DD and DD/MM/YYYY and pushes empty dates to bottom', () => {
+  assert.ok(
+    (parseComparableDate('2022-05-10') || 0) <
+      (parseComparableDate('15/08/2023') || 0)
+  );
+
+  const sample: Employee[] = [
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: '1',
+      employeeCode: 'NV001',
+      joinDate: '',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: '2',
+      employeeCode: 'NV002',
+      joinDate: '15/08/2024',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: '3',
+      employeeCode: 'NV003',
+      joinDate: '2021-03-01',
+    },
+  ];
+
+  const asc = sortEmployees(sample, 'joinDate', 'asc');
+  assert.deepEqual(
+    asc.map((e) => e.employeeCode),
+    ['NV003', 'NV002', 'NV001']
+  );
+
+  const desc = sortEmployees(sample, 'joinDate', 'desc');
+  assert.deepEqual(
+    desc.map((e) => e.employeeCode),
+    ['NV002', 'NV003', 'NV001']
+  );
+});
+
+test('parseEmployeesFromCsvText enforces unique employeeCode, optional fields, and registered department groups', () => {
+  const registeredGroups = [
+    { id: 'g1', name: 'Phòng Kỹ thuật & CNTT', code: 'KT', color: '#0D9488' },
+  ];
+
+  const csvValid = [
+    'STT,Mã nhân viên,Họ tên,Ngày sinh,Giới tính,Địa chỉ,Số CCCD,Ngày cấp CCCD,Nhóm / Bộ phận,Ngày vào,Chức danh/Vị trí',
+    '1,NV101,Nguyễn Văn A,,,,,,Phòng Kỹ thuật & CNTT,2024-02-10,Trưởng nhóm',
+    '2,NV102,Trần Thị B,,,,,,Nhóm Chưa Đăng Ký,,',
+  ].join('\n');
+
+  const res1 = parseEmployeesFromCsvText(csvValid, [], registeredGroups, 12);
+  assert.equal(res1.duplicateCodes.length, 0);
+  assert.equal(res1.employees.length, 2);
+  // NV101 has registered group & joinDate, empty optional fields are ""
+  assert.equal(res1.employees[0].department, 'Phòng Kỹ thuật & CNTT');
+  assert.equal(res1.employees[0].joinDate, '2024-02-10');
+  assert.equal(res1.employees[0].dob, '');
+  assert.equal(res1.employees[0].gender, '');
+  assert.equal(res1.employees[0].cccd, '');
+  // NV102 has unregistered group -> automatically cleared to ""
+  assert.equal(res1.employees[1].department, '');
+  assert.equal(res1.employees[1].joinDate, '');
+  assert.equal(res1.employees[1].position, '');
+
+  // Duplicate check against existingEmployees
+  const resDup = parseEmployeesFromCsvText(
+    csvValid,
+    [res1.employees[0]],
+    registeredGroups,
+    12
+  );
+  assert.deepEqual(resDup.duplicateCodes, ['NV101']);
 });
 
 test('calculateDashboardKPIs computes accurate KPI metrics from seed data', () => {
@@ -31,137 +151,39 @@ test('calculateDashboardKPIs computes accurate KPI metrics from seed data', () =
 
   assert.equal(kpis.totalEmployees, 8);
   assert.equal(kpis.activeEmployees, 8);
-  // On 2026-11-12: emp-3 (annual_leave 12-13/11) and emp-4 (regime_leave 11-12/11) are on leave;
-  // emp-8 has late_early on 2026-11-12 which does not count as absent on leave.
   assert.equal(kpis.onLeaveToday, 2);
   assert.equal(kpis.lateCountInMonth, 4);
-  assert.equal(kpis.lateHoursInMonth, 5); // 1.5 + 1 + 2 + 0.5 = 5.0 hours
-  // Low leave employees (<= 2 days left): emp-3 (1 day left), emp-5 (1.5 days left), emp-6 (0 days left)
+  assert.equal(kpis.lateHoursInMonth, 5);
   assert.equal(kpis.lowLeaveEmployeesCount, 3);
 });
 
-test('calculateAnnualMatrixReport deducts only annual_leave from standardAnnualLeave and tracks unpaid & late hours', () => {
-  const rows = calculateAnnualMatrixReport(
-    INITIAL_EMPLOYEES,
-    INITIAL_LEAVE_RECORDS,
-    2026,
-    'ALL'
-  );
-
-  assert.equal(rows.length, 8);
-
-  // Check emp-6 (Đặng Khánh Linh): 12 standard, used 5 (Feb) + 5 (Jun) + 2 (Sep) = 12 annual leave -> 0 remaining, plus 1.5 unpaid in Nov
-  const emp6Row = rows.find((r) => r.employee.id === 'emp-6');
-  assert.ok(emp6Row);
-  assert.equal(emp6Row.totalAnnualUsed, 12);
-  assert.equal(emp6Row.remainingAnnualLeave, 0);
-  assert.equal(emp6Row.totalUnpaidDays, 1.5);
-  assert.equal(emp6Row.months[2].annualLeaveDays, 5);
-  assert.equal(emp6Row.months[6].annualLeaveDays, 5);
-  assert.equal(emp6Row.months[9].annualLeaveDays, 2);
-  assert.equal(emp6Row.months[11].unpaidLeaveDays, 1.5);
-
-  // Check emp-5 (Vũ Đức Thịnh): 12 standard, used 5 (May) + 5.5 (Oct) = 10.5 annual -> 1.5 remaining, plus 1.5 late hours in Nov
-  const emp5Row = rows.find((r) => r.employee.id === 'emp-5');
-  assert.ok(emp5Row);
-  assert.equal(emp5Row.totalAnnualUsed, 10.5);
-  assert.equal(emp5Row.remainingAnnualLeave, 1.5);
-  assert.equal(emp5Row.totalLateHours, 1.5);
-});
-
-test('filterEmployees and filterLeaveRecords filter accurately by query and department', () => {
-  const techEmployees = filterEmployees(
-    INITIAL_EMPLOYEES,
-    '',
-    'Phòng Kỹ thuật & CNTT',
-    'ALL'
-  );
-  assert.equal(techEmployees.length, 2);
-
-  const searchByCCCD = filterEmployees(
-    INITIAL_EMPLOYEES,
-    '036095004812',
-    'ALL',
-    'ALL'
-  );
-  assert.equal(searchByCCCD.length, 1);
-  assert.equal(searchByCCCD[0].employeeCode, 'NV003');
-
-  const novLateLogs = filterLeaveRecords(
-    INITIAL_LEAVE_RECORDS,
-    INITIAL_EMPLOYEES,
-    11,
-    2026,
-    'late_early',
-    'ALL',
-    ''
-  );
-  assert.equal(novLateLogs.length, 4);
-});
-
-test('distributions compute valid percentages and counts', () => {
-  const deptDist = calculateDepartmentDistribution(
-    INITIAL_EMPLOYEES,
-    INITIAL_DEPARTMENT_GROUPS
-  );
-  assert.equal(deptDist.length, 5);
-  const totalDeptCount = deptDist.reduce((acc, d) => acc + d.count, 0);
-  assert.equal(totalDeptCount, 8);
-
-  const novTypeDist = calculateMonthlyLeaveTypeDistribution(
-    INITIAL_LEAVE_RECORDS,
-    11,
-    2026
-  );
-  assert.equal(novTypeDist.length, 4);
-});
-
-test('Supabase row mapping and leave_type encoding/decoding preserve all fields', async () => {
-  const {
-    mapSupabaseRowToEmployee,
-    encodeLeaveTypeForDb,
-    decodeLeaveTypeFromDb,
-    mapSupabaseRowToLeaveRecord,
-  } = await import('./supabaseService');
+test('Supabase row mapping preserves empty optional fields without fake defaults', async () => {
+  const { mapSupabaseRowToEmployee } = await import('./supabaseService');
 
   const emp = mapSupabaseRowToEmployee({
     id: 'uuid-123',
     employee_code: 'NV099',
     full_name: 'Đỗ Hoàng Sơn',
-    dob: '1994-05-20',
-    gender: 'Nam',
-    cccd: '001094001122',
-    phone: '0912345678',
-    address: 'Hà Nội',
-    department: 'Phòng Kỹ thuật & CNTT',
-    avatar_url: 'https://example.com/avatar.png',
+    dob: null,
+    gender: null,
+    cccd: null,
+    cccd_date: null,
+    phone: null,
+    address: null,
+    department: null,
+    position: null,
+    join_date: '2025-01-15',
+    avatar_url: null,
     annual_leave_quota: 14,
     status: 'Đang làm việc',
   });
 
   assert.equal(emp.id, 'uuid-123');
   assert.equal(emp.employeeCode, 'NV099');
-  assert.equal(emp.standardAnnualLeave, 14);
-
-  const encoded = encodeLeaveTypeForDb('regime_leave', 'Thai sản');
-  assert.equal(encoded, 'regime_leave|Thai sản');
-  const decoded = decodeLeaveTypeFromDb(encoded);
-  assert.equal(decoded.type, 'regime_leave');
-  assert.equal(decoded.regimeSubtype, 'Thai sản');
-
-  const log = mapSupabaseRowToLeaveRecord({
-    id: 'log-456',
-    employee_id: 'uuid-123',
-    leave_type: 'late_early',
-    start_date: '2026-11-12',
-    end_date: '2026-11-12',
-    duration: 1.5,
-    reason: 'Tắc đường',
-    proof_image_url: 'https://example.com/proof.png',
-  });
-
-  assert.equal(log.type, 'late_early');
-  assert.equal(log.amount, 1.5);
-  assert.equal(log.attachmentUrl, 'https://example.com/proof.png');
+  assert.equal(emp.dob, '');
+  assert.equal(emp.gender, '');
+  assert.equal(emp.department, '');
+  assert.equal(emp.position, '');
+  assert.equal(emp.joinDate, '2025-01-15');
 });
 

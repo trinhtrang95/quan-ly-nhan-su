@@ -1,4 +1,4 @@
-export type Gender = 'Nam' | 'Nữ' | 'Khác';
+export type Gender = 'Nam' | 'Nữ' | 'Khác' | '';
 
 export type WorkStatus = 'Đang làm việc' | 'Đang thử việc' | 'Nghỉ thai sản' | 'Đã nghỉ việc';
 

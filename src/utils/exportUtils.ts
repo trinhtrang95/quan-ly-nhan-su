@@ -1,4 +1,5 @@
 import {
+  DepartmentGroup,
   Employee,
   EmployeeAnnualMatrixRow,
   Gender,
@@ -26,7 +27,7 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
 /**
  * Escapes HTML special characters for SpreadsheetML / HTML table export
  */
-function escapeHtml(val: string | number | undefined): string {
+function escapeHtml(val: string | number | undefined | null): string {
   if (val === undefined || val === null) return '';
   return String(val)
     .replace(/&/g, '&amp;')
@@ -36,12 +37,26 @@ function escapeHtml(val: string | number | undefined): string {
 }
 
 /**
- * Normalizes a date string (YYYY-MM-DD or DD/MM/YYYY) into YYYY-MM-DD
+ * Helper to return "-" when a string value is empty, null, undefined, or "-"
  */
-function normalizeDateInput(raw: string | undefined, fallback = ''): string {
+function displayOrDash(val?: string | null): string {
+  if (!val) return '-';
+  const trimmed = val.trim();
+  return !trimmed || trimmed === '-' || trimmed === '—' ? '-' : trimmed;
+}
+
+/**
+ * Normalizes a date string (YYYY-MM-DD or DD/MM/YYYY) into YYYY-MM-DD.
+ * Returns fallback (default '') when empty or invalid.
+ */
+export function normalizeDateInput(raw: string | undefined, fallback = ''): string {
   const s = (raw || '').trim();
-  if (!s) return fallback;
+  if (!s || s === '-' || s === '—') return fallback;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const isoFlex = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoFlex) {
+    return `${isoFlex[1]}-${isoFlex[2].padStart(2, '0')}-${isoFlex[3].padStart(2, '0')}`;
+  }
   const dmY = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (dmY) {
     const dd = dmY[1].padStart(2, '0');
@@ -55,25 +70,44 @@ function normalizeDateInput(raw: string | undefined, fallback = ''): string {
 /**
  * Exports Employee Directory to an Excel-compatible file (.xls with UTF-8 BOM & styling)
  * Title: DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT
- * Columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Chức danh/Vị trí
+ * Exact Columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Ngày vào
  */
-export function exportEmployeesToExcel(employees: Employee[]): void {
+export function exportEmployeesToExcel(
+  employees: Employee[],
+  registeredGroups?: DepartmentGroup[]
+): void {
+  const validGroupSet = registeredGroups
+    ? new Set(registeredGroups.map((g) => g.name))
+    : null;
+
   const rowsHtml = employees
-    .map(
-      (emp, idx) => `
+    .map((emp, idx) => {
+      const dobDisplay = emp.dob ? formatDateVN(emp.dob) : '-';
+      const genderDisplay = displayOrDash(emp.gender);
+      const addressDisplay = displayOrDash(emp.address);
+      const cccdDisplay = displayOrDash(emp.cccd);
+      const cccdDateDisplay = emp.cccdDate ? formatDateVN(emp.cccdDate) : '-';
+      const rawDept =
+        validGroupSet && emp.department && !validGroupSet.has(emp.department)
+          ? ''
+          : emp.department;
+      const deptDisplay = displayOrDash(rawDept);
+      const joinDateDisplay = emp.joinDate ? formatDateVN(emp.joinDate) : '-';
+
+      return `
       <tr>
         <td style="text-align:center;">${idx + 1}</td>
-        <td style="text-align:center;font-weight:bold;color:#0D9488;">${escapeHtml(emp.employeeCode)}</td>
-        <td style="font-weight:bold;">${escapeHtml(emp.fullName)}</td>
-        <td style="text-align:center;">${escapeHtml(emp.dob ? formatDateVN(emp.dob) : '')}</td>
-        <td style="text-align:center;">${escapeHtml(emp.gender)}</td>
-        <td>${escapeHtml(emp.address)}</td>
-        <td style="mso-number-format:'\\@';text-align:center;">${escapeHtml(emp.cccd)}</td>
-        <td style="text-align:center;">${escapeHtml(emp.cccdDate ? formatDateVN(emp.cccdDate) : '')}</td>
-        <td>${escapeHtml(emp.department)}</td>
-        <td>${escapeHtml(emp.position || 'Nhân viên')}</td>
-      </tr>`
-    )
+        <td style="text-align:center;font-weight:bold;color:#0D9488;">${escapeHtml(displayOrDash(emp.employeeCode))}</td>
+        <td style="font-weight:bold;">${escapeHtml(displayOrDash(emp.fullName))}</td>
+        <td style="text-align:center;">${escapeHtml(dobDisplay)}</td>
+        <td style="text-align:center;">${escapeHtml(genderDisplay)}</td>
+        <td style="text-align:${addressDisplay === '-' ? 'center' : 'left'};">${escapeHtml(addressDisplay)}</td>
+        <td style="mso-number-format:'\\@';text-align:center;">${escapeHtml(cccdDisplay)}</td>
+        <td style="text-align:center;">${escapeHtml(cccdDateDisplay)}</td>
+        <td style="text-align:${deptDisplay === '-' ? 'center' : 'left'};">${escapeHtml(deptDisplay)}</td>
+        <td style="text-align:center;">${escapeHtml(joinDateDisplay)}</td>
+      </tr>`;
+    })
     .join('');
 
   const html = `
@@ -104,7 +138,7 @@ export function exportEmployeesToExcel(employees: Employee[]): void {
             <th>Số CCCD</th>
             <th>Ngày cấp CCCD</th>
             <th>Nhóm / Bộ phận</th>
-            <th>Chức danh/Vị trí</th>
+            <th>Ngày vào</th>
           </tr>
         </thead>
         <tbody>
@@ -126,9 +160,12 @@ export function exportEmployeesToExcel(employees: Employee[]): void {
 
 /**
  * Downloads a clean CSV/Excel template file that users can fill and import back.
- * Synchronized columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Chức danh/Vị trí
+ * Exact synchronized columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Ngày vào, Chức danh/Vị trí
  */
-export function downloadEmployeeTemplateExcel(): void {
+export function downloadEmployeeTemplateExcel(
+  registeredGroups?: DepartmentGroup[]
+): void {
+  const sampleDept = registeredGroups?.[0]?.name || '';
   const headers = [
     'STT',
     'Mã nhân viên',
@@ -139,6 +176,7 @@ export function downloadEmployeeTemplateExcel(): void {
     'Số CCCD',
     'Ngày cấp CCCD',
     'Nhóm / Bộ phận',
+    'Ngày vào',
     'Chức danh/Vị trí',
   ];
   const sampleRows = [
@@ -151,19 +189,21 @@ export function downloadEmployeeTemplateExcel(): void {
       'Khu Công Nghiệp Lương Sơn, Xã Lương Sơn, Tỉnh Phú Thọ',
       '001096012345',
       '2021-05-10',
-      'Phòng Kỹ thuật & CNTT',
+      sampleDept,
+      '2023-02-15',
       'Trưởng nhóm',
     ],
     [
       '2',
       'NV002',
       'Lương Thị Mai Hương',
-      '1998-10-12',
+      '',
       'Nữ',
-      'Phường Tân Hòa, TP. Hòa Bình, Tỉnh Phú Thọ',
-      '001198067890',
-      '2022-08-15',
-      'Phòng Kỹ thuật & CNTT',
+      '',
+      '',
+      '',
+      sampleDept,
+      '2024-06-01',
       'Nhân viên',
     ],
   ];
@@ -179,29 +219,75 @@ export function downloadEmployeeTemplateExcel(): void {
   triggerBlobDownload(blob, 'File_Mau_Nhap_Danh_Sach_Nhan_Vien.csv');
 }
 
+export interface ExcelImportValidationResult {
+  employees: Employee[];
+  duplicateCodes: string[];
+  missingRequiredRows: number[];
+}
+
+function cleanCsvCell(raw: string | undefined): string {
+  const s = (raw || '').replace(/^"|"$/g, '').trim();
+  if (s === '-' || s === '—') return '';
+  return s;
+}
+
 /**
- * Parses an uploaded CSV/Excel text file into new Employee records
+ * Pure parser for CSV/Excel text into validated Employee records.
+ * - Requires ONLY Mã nhân viên and Họ tên. All other fields are optional (stored as '' if blank).
+ * - Checks for duplicate Mã nhân viên against existingEmployees and within the file itself.
+ * - Validates Nhóm / Bộ phận against registeredGroups (if not in registeredGroups, sets department to '').
  */
-export async function parseEmployeesFromUploadedFile(
-  file: File,
-  existingCount: number,
+export function parseEmployeesFromCsvText(
+  text: string,
+  existingEmployees: Employee[] = [],
+  registeredGroups: DepartmentGroup[] = [],
   defaultAnnualLeaveQuota: number = 12
-): Promise<Employee[]> {
-  const text = await file.text();
+): ExcelImportValidationResult {
   const lines = text
     .replace(/^\uFEFF/, '')
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
-  if (lines.length <= 1) return [];
+  if (lines.length <= 1) {
+    return { employees: [], duplicateCodes: [], missingRequiredRows: [] };
+  }
 
-  // Detect if header starts with STT
   const headerCols = lines[0]
     .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
     .map((c) => c.replace(/^"|"$/g, '').trim().toLowerCase());
+
   const hasSttColumn =
     headerCols[0] === 'stt' || headerCols[0] === 'số thứ tự';
+  const offset = hasSttColumn ? 1 : 0;
+
+  const findColIdx = (keywords: string[], fallbackIdx: number): number => {
+    const found = headerCols.findIndex((h) =>
+      keywords.some((kw) => h.includes(kw))
+    );
+    return found !== -1 ? found : fallbackIdx;
+  };
+
+  const codeIdx = findColIdx(['mã nhân viên', 'ma nhan vien', 'mã nv'], offset + 0);
+  const nameIdx = findColIdx(['họ tên', 'họ và tên', 'ho ten'], offset + 1);
+  const dobIdx = findColIdx(['ngày sinh', 'ngay sinh'], offset + 2);
+  const genderIdx = findColIdx(['giới tính', 'gioi tinh'], offset + 3);
+  const addressIdx = findColIdx(['địa chỉ', 'dia chi'], offset + 4);
+  const cccdIdx = headerCols.findIndex(
+    (h) => (h.includes('cccd') || h.includes('cmnd')) && !h.includes('ngày') && !h.includes('ngay')
+  );
+  const resolvedCccdIdx = cccdIdx !== -1 ? cccdIdx : offset + 5;
+  const cccdDateIdx = findColIdx(['ngày cấp', 'ngay cap'], offset + 6);
+  const deptIdx = findColIdx(['nhóm', 'bộ phận', 'phòng ban', 'bo phan'], offset + 7);
+  const joinDateIdx = findColIdx(['ngày vào', 'ngay vao', 'join_date'], offset + 8);
+  const posIdx = findColIdx(['chức danh', 'vị trí', 'chuc danh', 'vi tri'], offset + 9);
+
+  const existingCodeSet = new Set(
+    existingEmployees.map((e) => e.employeeCode.trim().toUpperCase())
+  );
+  const seenInFileCodeSet = new Set<string>();
+  const duplicateCodeSet = new Set<string>();
+  const missingRequiredRows: number[] = [];
 
   const parsed: Employee[] = [];
   const colors = [
@@ -213,42 +299,67 @@ export async function parseEmployeesFromUploadedFile(
   ];
 
   for (let i = 1; i < lines.length; i++) {
-    const rawCols = lines[i]
-      .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
-      .map((c) => c.replace(/^"|"$/g, '').trim());
+    const rawCols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+    if (rawCols.every((c) => cleanCsvCell(c) === '')) continue;
 
-    const cols = hasSttColumn ? rawCols.slice(1) : rawCols;
+    const code = cleanCsvCell(rawCols[codeIdx]).toUpperCase();
+    const fullName = cleanCsvCell(rawCols[nameIdx]);
 
-    if (cols.length < 2 || !cols[1]) continue;
+    if (!code || !fullName) {
+      missingRequiredRows.push(i + 1);
+      continue;
+    }
 
-    // Expected order after STT:
-    // [0] Mã nhân viên, [1] Họ tên, [2] Ngày sinh, [3] Giới tính, [4] Địa chỉ, [5] Số CCCD, [6] Ngày cấp CCCD, [7] Nhóm / Bộ phận, [8] Chức danh/Vị trí
-    const code =
-      cols[0] ||
-      `NV${String(existingCount + parsed.length + 1).padStart(3, '0')}`;
-    const fullName = cols[1];
-    const dob = normalizeDateInput(cols[2], '1995-01-01');
-    const rawGender = cols[3] || 'Nam';
-    const gender: Gender =
-      rawGender.toLowerCase().includes('nữ') ||
-      rawGender.toLowerCase().includes('nu')
-        ? 'Nữ'
-        : rawGender.toLowerCase().includes('khác')
-        ? 'Khác'
-        : 'Nam';
+    if (existingCodeSet.has(code) || seenInFileCodeSet.has(code)) {
+      duplicateCodeSet.add(code);
+      continue;
+    }
+    seenInFileCodeSet.add(code);
 
-    const address = cols[4] || '';
-    const cccd = cols[5] || '';
-    const cccdDate = normalizeDateInput(cols[6], '');
-    const department = cols[7] || 'Phòng Kỹ thuật & CNTT';
-    const position = cols[8] || 'Nhân viên';
+    const dob = normalizeDateInput(cleanCsvCell(rawCols[dobIdx]), '');
+    const rawGender = cleanCsvCell(rawCols[genderIdx]).toLowerCase();
+    const gender: Gender = !rawGender
+      ? ''
+      : rawGender.includes('nữ') || rawGender.includes('nu')
+      ? 'Nữ'
+      : rawGender.includes('khác') || rawGender.includes('khac')
+      ? 'Khác'
+      : rawGender.includes('nam')
+      ? 'Nam'
+      : '';
+
+    const address = cleanCsvCell(rawCols[addressIdx]);
+    const cccd = cleanCsvCell(rawCols[resolvedCccdIdx]);
+    const cccdDate = normalizeDateInput(cleanCsvCell(rawCols[cccdDateIdx]), '');
+
+    const rawDept = cleanCsvCell(rawCols[deptIdx]);
+    const matchedGroup = rawDept
+      ? registeredGroups.find(
+          (g) => g.name.trim().toLowerCase() === rawDept.toLowerCase()
+        )
+      : undefined;
+    const department = matchedGroup ? matchedGroup.name : '';
+
+    // Support both [Nhóm, Ngày vào, Chức danh] and [Nhóm, Chức danh, Ngày vào]
+    let rawJoinDate = cleanCsvCell(rawCols[joinDateIdx]);
+    let rawPosition = cleanCsvCell(rawCols[posIdx]);
+    if (
+      !normalizeDateInput(rawJoinDate, '') &&
+      normalizeDateInput(rawPosition, '')
+    ) {
+      const temp = rawJoinDate;
+      rawJoinDate = rawPosition;
+      rawPosition = temp;
+    }
+    const joinDate = normalizeDateInput(rawJoinDate, '');
+    const position = rawPosition;
 
     const nameParts = fullName.split(' ').filter(Boolean);
     const initials =
       nameParts.length >= 2
         ? `${nameParts[nameParts.length - 2][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase()
         : fullName.slice(0, 2).toUpperCase();
-    const [bg, accent] = colors[(existingCount + i) % colors.length];
+    const [bg, accent] = colors[(existingEmployees.length + i) % colors.length];
 
     parsed.push({
       id: `emp-imp-${Date.now()}-${i}`,
@@ -262,14 +373,36 @@ export async function parseEmployeesFromUploadedFile(
       address,
       department,
       position,
-      joinDate: new Date().toISOString().slice(0, 10),
+      joinDate,
       standardAnnualLeave: defaultAnnualLeaveQuota,
       status: 'Đang làm việc' as WorkStatus,
       avatarUrl: createAvatarSvgDataUri(initials, bg, accent),
     });
   }
 
-  return parsed;
+  return {
+    employees: parsed,
+    duplicateCodes: Array.from(duplicateCodeSet),
+    missingRequiredRows,
+  };
+}
+
+/**
+ * Parses an uploaded CSV/Excel text file into validated Employee records
+ */
+export async function parseEmployeesFromUploadedFile(
+  file: File,
+  existingEmployees: Employee[],
+  registeredGroups: DepartmentGroup[] = [],
+  defaultAnnualLeaveQuota: number = 12
+): Promise<ExcelImportValidationResult> {
+  const text = await file.text();
+  return parseEmployeesFromCsvText(
+    text,
+    existingEmployees,
+    registeredGroups,
+    defaultAnnualLeaveQuota
+  );
 }
 
 /**

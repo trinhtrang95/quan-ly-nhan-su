@@ -48,13 +48,103 @@ export const LEAVE_TYPE_META: Record<
 };
 
 /**
- * Formats YYYY-MM-DD to DD/MM/YYYY for Vietnamese display
+ * Formats YYYY-MM-DD or DD/MM/YYYY to DD/MM/YYYY for Vietnamese display
  */
-export function formatDateVN(dateStr: string): string {
+export function formatDateVN(dateStr?: string | null): string {
   if (!dateStr) return '';
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return dateStr;
-  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  const trimmed = dateStr.trim();
+  if (!trimmed || trimmed === '-' || trimmed === '—') return '';
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    return `${isoMatch[3].padStart(2, '0')}/${isoMatch[2].padStart(2, '0')}/${isoMatch[1]}`;
+  }
+  const dmyMatch = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[1].padStart(2, '0')}/${dmyMatch[2].padStart(2, '0')}/${dmyMatch[3]}`;
+  }
+  return trimmed;
+}
+
+/**
+ * Parses a date string (YYYY-MM-DD or DD/MM/YYYY) into a UTC timestamp for accurate sorting.
+ * Returns null if the string is empty or invalid so empty dates can be pushed to the bottom.
+ */
+export function parseComparableDate(raw?: string | null): number | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (!s || s === '-' || s === '—') return null;
+
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  }
+
+  const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (dmy) {
+    return Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+  }
+
+  const parsed = Date.parse(s);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export type EmployeeSortField =
+  | 'employeeCode'
+  | 'fullName'
+  | 'dob'
+  | 'gender'
+  | 'cccdDate'
+  | 'department'
+  | 'joinDate'
+  | null;
+
+export type SortDirection = 'asc' | 'desc' | null;
+
+/**
+ * Sorts employees by the specified column and direction.
+ * Empty values ("", null, undefined, "-") are ALWAYS pushed to the bottom of the list.
+ */
+export function sortEmployees(
+  employees: Employee[],
+  field: EmployeeSortField,
+  direction: SortDirection
+): Employee[] {
+  if (!field || !direction) return employees;
+
+  const factor = direction === 'asc' ? 1 : -1;
+
+  return [...employees].sort((a, b) => {
+    if (field === 'joinDate' || field === 'dob' || field === 'cccdDate') {
+      const tA = parseComparableDate(a[field]);
+      const tB = parseComparableDate(b[field]);
+      if (tA === null && tB === null) {
+        return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      }
+      if (tA === null) return 1; // Push empty to bottom
+      if (tB === null) return -1; // Push empty to bottom
+      if (tA !== tB) return (tA - tB) * factor;
+      return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+    }
+
+    const rawA = (a[field] || '').toString().trim();
+    const rawB = (b[field] || '').toString().trim();
+    const emptyA = !rawA || rawA === '-' || rawA === '—';
+    const emptyB = !rawB || rawB === '-' || rawB === '—';
+
+    if (emptyA && emptyB) {
+      return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+    }
+    if (emptyA) return 1; // Always push empty to bottom
+    if (emptyB) return -1; // Always push empty to bottom
+
+    const cmp = rawA.localeCompare(rawB, 'vi', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    if (cmp !== 0) return cmp * factor;
+
+    return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+  });
 }
 
 /**
@@ -225,7 +315,8 @@ export function calculateDepartmentDistribution(
   const countsMap = new Map<string, number>();
 
   for (const emp of employees) {
-    countsMap.set(emp.department, (countsMap.get(emp.department) || 0) + 1);
+    const key = (emp.department || '').trim();
+    countsMap.set(key, (countsMap.get(key) || 0) + 1);
   }
 
   const result: DistributionItem[] = [];
@@ -242,19 +333,6 @@ export function calculateDepartmentDistribution(
       color: grp.color || palette[idx % palette.length],
       subLabel: `${count} nhân sự`,
     });
-  });
-
-  // Any remaining custom department names
-  let extraIdx = groups.length;
-  countsMap.forEach((count, deptName) => {
-    result.push({
-      label: deptName,
-      count,
-      percentage: Math.round((count / total) * 100),
-      color: palette[extraIdx % palette.length],
-      subLabel: `${count} nhân sự`,
-    });
-    extraIdx++;
   });
 
   return result.sort((a, b) => b.count - a.count);
@@ -309,8 +387,12 @@ export function filterEmployees(
 ): Employee[] {
   const q = searchQuery.trim().toLowerCase();
   return employees.filter((emp) => {
-    if (departmentFilter !== 'ALL' && emp.department !== departmentFilter) {
-      return false;
+    if (departmentFilter !== 'ALL') {
+      if (departmentFilter === '__EMPTY__') {
+        if ((emp.department || '').trim() !== '') return false;
+      } else if (emp.department !== departmentFilter) {
+        return false;
+      }
     }
     if (genderOrStatusFilter !== 'ALL') {
       if (
@@ -324,11 +406,12 @@ export function filterEmployees(
     return (
       emp.fullName.toLowerCase().includes(q) ||
       emp.employeeCode.toLowerCase().includes(q) ||
-      emp.cccd.toLowerCase().includes(q) ||
+      (emp.cccd || '').toLowerCase().includes(q) ||
       (emp.cccdDate || '').toLowerCase().includes(q) ||
+      (emp.joinDate || '').toLowerCase().includes(q) ||
       (emp.position || '').toLowerCase().includes(q) ||
-      emp.phone.toLowerCase().includes(q) ||
-      emp.address.toLowerCase().includes(q)
+      (emp.phone || '').toLowerCase().includes(q) ||
+      (emp.address || '').toLowerCase().includes(q)
     );
   });
 }

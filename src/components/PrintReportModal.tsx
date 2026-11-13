@@ -276,7 +276,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
             </div>
           )}
 
-          {/* CASE 2: XUẤT PDF BẢNG ĐẦY ĐỦ THÔNG TIN (9 CỘT ĐÚNG THỨ TỰ) */}
+          {/* CASE 2: XUẤT PDF BẢNG ĐẦY ĐỦ THÔNG TIN (10 CỘT ĐÚNG THỨ TỰ) */}
           {isFullEmployeeList && (
             <div className="overflow-x-auto">
               <table
@@ -308,40 +308,68 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     <th className="p-2 border border-slate-600">
                       Nhóm / Bộ phận
                     </th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Ngày vào
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map((emp, idx) => (
-                    <tr key={emp.id} className="border-b border-slate-200">
-                      <td className="p-2 border border-slate-300 text-center font-mono">
-                        {idx + 1}
-                      </td>
-                      <td className="p-2 border border-slate-300 text-center font-mono font-bold">
-                        {emp.employeeCode}
-                      </td>
-                      <td className="p-2 border border-slate-300 font-semibold">
-                        {emp.fullName}
-                      </td>
-                      <td className="p-2 border border-slate-300 text-center font-mono">
-                        {emp.dob ? formatDateVN(emp.dob) : ''}
-                      </td>
-                      <td className="p-2 border border-slate-300 text-center">
-                        {emp.gender}
-                      </td>
-                      <td className="p-2 border border-slate-300">
-                        {emp.address}
-                      </td>
-                      <td className="p-2 border border-slate-300 text-center font-mono">
-                        {emp.cccd}
-                      </td>
-                      <td className="p-2 border border-slate-300 text-center font-mono">
-                        {emp.cccdDate ? formatDateVN(emp.cccdDate) : ''}
-                      </td>
-                      <td className="p-2 border border-slate-300">
-                        {emp.department}
-                      </td>
-                    </tr>
-                  ))}
+                  {employees.map((emp, idx) => {
+                    const dobStr = emp.dob ? formatDateVN(emp.dob) : '-';
+                    const genderStr = (emp.gender || '').trim() || '-';
+                    const addrStr = (emp.address || '').trim() || '-';
+                    const cccdStr = (emp.cccd || '').trim() || '-';
+                    const cccdDateStr = emp.cccdDate
+                      ? formatDateVN(emp.cccdDate)
+                      : '-';
+                    const deptStr = (emp.department || '').trim() || '-';
+                    const joinDateStr = emp.joinDate
+                      ? formatDateVN(emp.joinDate)
+                      : '-';
+
+                    return (
+                      <tr key={emp.id} className="border-b border-slate-200">
+                        <td className="p-2 border border-slate-300 text-center font-mono">
+                          {idx + 1}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center font-mono font-bold">
+                          {emp.employeeCode || '-'}
+                        </td>
+                        <td className="p-2 border border-slate-300 font-semibold">
+                          {emp.fullName || '-'}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center font-mono">
+                          {dobStr}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center">
+                          {genderStr}
+                        </td>
+                        <td
+                          className={`p-2 border border-slate-300 ${
+                            addrStr === '-' ? 'text-center text-slate-400' : ''
+                          }`}
+                        >
+                          {addrStr}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center font-mono">
+                          {cccdStr}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center font-mono">
+                          {cccdDateStr}
+                        </td>
+                        <td
+                          className={`p-2 border border-slate-300 ${
+                            deptStr === '-' ? 'text-center text-slate-400' : ''
+                          }`}
+                        >
+                          {deptStr}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center font-mono">
+                          {joinDateStr}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

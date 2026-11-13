@@ -293,6 +293,7 @@ export default function App() {
 
   // Selection state in Employee Directory
   const [selectedEmpIds, setSelectedEmpIds] = useState<string[]>([]);
+  const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
 
   // Modals State
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
@@ -394,24 +395,33 @@ export default function App() {
     companyUnits[0] ||
     INITIAL_COMPANY_UNITS[0];
 
-  // Filter employees and departments by active company (including legacy rows where companyId is null)
-  const companyEmployees =
+  const companyGroups =
+    companyUnits.length <= 1
+      ? groups
+      : groups.filter((g) => !g.companyId || g.companyId === activeCompany.id);
+
+  const registeredGroupNames = new Set(companyGroups.map((g) => g.name));
+
+  // Filter employees by active company and clear any department not registered in Settings
+  const companyEmployees = (
     companyUnits.length <= 1
       ? employees
       : employees.filter(
           (e) => !e.companyId || e.companyId === activeCompany.id
-        );
+        )
+  ).map((emp) => ({
+    ...emp,
+    department:
+      emp.department && registeredGroupNames.has(emp.department)
+        ? emp.department
+        : '',
+  }));
 
   const companyEmployeeIds = new Set(companyEmployees.map((e) => e.id));
   const companyRecords =
     companyUnits.length <= 1
       ? records
       : records.filter((r) => companyEmployeeIds.has(r.employeeId));
-
-  const companyGroups =
-    companyUnits.length <= 1
-      ? groups
-      : groups.filter((g) => !g.companyId || g.companyId === activeCompany.id);
 
   const companyPositions: PositionItem[] = (() => {
     const filtered =
@@ -423,24 +433,8 @@ export default function App() {
     return filtered.length > 0 ? filtered : INITIAL_POSITIONS;
   })();
 
-  // Include any departments referenced by existing employees so filters & forms are always complete
-  const effectiveGroups: DepartmentGroup[] = (() => {
-    const existingNames = new Set(companyGroups.map((g) => g.name));
-    const extraGroups: DepartmentGroup[] = [];
-    for (const emp of companyEmployees) {
-      if (emp.department && !existingNames.has(emp.department)) {
-        existingNames.add(emp.department);
-        extraGroups.push({
-          id: `emp-dept-${emp.department}`,
-          companyId: activeCompany.id,
-          name: emp.department,
-          code: emp.department.slice(0, 4).toUpperCase(),
-          color: '#0D9488',
-        });
-      }
-    }
-    return [...companyGroups, ...extraGroups];
-  })();
+  // Strictly use groups registered in Settings
+  const effectiveGroups: DepartmentGroup[] = companyGroups;
 
   // Derived Real-time Dashboard & Matrix Calculations
   const kpis = calculateDashboardKPIs(
@@ -586,13 +580,42 @@ export default function App() {
 
   const handleImportExcelFile = async (file: File) => {
     if (!isAdmin) return;
-    const imported = await parseEmployeesFromUploadedFile(file, employees.length);
-    if (imported.length === 0) {
-      showToast('Không tìm thấy dòng dữ liệu hợp lệ trong tệp tải lên.');
+    setImportErrorMsg(null);
+
+    const quota = activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota;
+    const result = await parseEmployeesFromUploadedFile(
+      file,
+      employees,
+      companyGroups,
+      quota
+    );
+
+    if (result.duplicateCodes.length > 0) {
+      const errMsg = `Chặn nhập Excel: Phát hiện Mã nhân viên bị trùng lặp (${result.duplicateCodes.join(
+        ', '
+      )}). Mỗi Mã nhân viên chỉ được xuất hiện 1 lần duy nhất trong bảng!`;
+      setImportErrorMsg(errMsg);
+      showToast(errMsg);
       return;
     }
 
-    const withCompany = imported.map(({ id: _unused, ...rest }) => ({
+    if (result.missingRequiredRows.length > 0 && result.employees.length === 0) {
+      const errMsg = `Không thể nhập Excel: Dòng thứ ${result.missingRequiredRows.join(
+        ', '
+      )} thiếu Mã nhân viên hoặc Họ tên (2 trường bắt buộc).`;
+      setImportErrorMsg(errMsg);
+      showToast(errMsg);
+      return;
+    }
+
+    if (result.employees.length === 0) {
+      const errMsg = 'Không tìm thấy dòng dữ liệu hợp lệ trong tệp tải lên.';
+      setImportErrorMsg(errMsg);
+      showToast(errMsg);
+      return;
+    }
+
+    const withCompany = result.employees.map(({ id: _unused, ...rest }) => ({
       ...rest,
       companyId: activeCompany.id,
     }));
@@ -604,8 +627,10 @@ export default function App() {
         `Đã nhập và đồng bộ ${inserted.length} nhân sự từ Excel lên Supabase Cloud.`
       );
     } catch {
-      setEmployees((prev) => [...prev, ...imported]);
-      showToast(`Đã nhập thành công ${imported.length} nhân sự từ tệp Excel/CSV.`);
+      setEmployees((prev) => [...prev, ...result.employees]);
+      showToast(
+        `Đã nhập thành công ${result.employees.length} nhân sự từ tệp Excel/CSV.`
+      );
     }
   };
 
@@ -662,7 +687,15 @@ export default function App() {
   };
 
   const handleDeleteGroup = async (id: string) => {
+    const deletedGrp = groups.find((g) => g.id === id);
     setGroups((prev) => prev.filter((g) => g.id !== id));
+    if (deletedGrp) {
+      setEmployees((prev) =>
+        prev.map((emp) =>
+          emp.department === deletedGrp.name ? { ...emp, department: '' } : emp
+        )
+      );
+    }
     try {
       await deleteDepartmentFromSupabase(id);
       showToast('Đã xóa phòng ban khỏi bảng departments (Supabase).');
@@ -1237,9 +1270,11 @@ export default function App() {
             {activeModule === 'employees' && (
               <EmployeeDirectoryView
                 employees={companyEmployees}
-                groups={effectiveGroups}
+                groups={companyGroups}
                 selectedIds={selectedEmpIds}
                 isAdmin={isAdmin}
+                importErrorMsg={importErrorMsg}
+                onClearImportError={() => setImportErrorMsg(null)}
                 onToggleSelect={handleToggleSelectEmployee}
                 onToggleSelectAll={handleToggleSelectAllEmployees}
                 onDeleteSelected={handleDeleteSelectedEmployees}
@@ -1253,10 +1288,6 @@ export default function App() {
                   if (!isAdmin) return;
                   setEditingEmployee(emp);
                   setIsEmpModalOpen(true);
-                }}
-                onOpenManageGroups={() => {
-                  if (!isAdmin) return;
-                  setIsGroupModalOpen(true);
                 }}
                 onExportPDF={(filteredList) =>
                   setPrintModalState({
@@ -1279,13 +1310,13 @@ export default function App() {
                   })
                 }
                 onExportExcel={(filteredList) => {
-                  exportEmployeesToExcel(filteredList);
+                  exportEmployeesToExcel(filteredList, companyGroups);
                   showToast(
                     `Đã xuất tệp Excel danh sách ${filteredList.length} nhân sự.`
                   );
                 }}
                 onDownloadTemplate={() => {
-                  downloadEmployeeTemplateExcel();
+                  downloadEmployeeTemplateExcel(companyGroups);
                   showToast('Đã tải xuống tệp mẫu Excel nhập danh sách nhân sự.');
                 }}
                 onImportExcelFile={handleImportExcelFile}
@@ -1406,9 +1437,11 @@ export default function App() {
       <EmployeeModal
         isOpen={isEmpModalOpen}
         editingEmployee={editingEmployee}
-        groups={effectiveGroups}
+        groups={companyGroups}
         positions={companyPositions}
-        existingCodes={employees.map((e) => e.employeeCode)}
+        existingCodes={employees
+          .filter((e) => e.id !== editingEmployee?.id)
+          .map((e) => e.employeeCode)}
         nextSuggestedCode={nextSuggestedCode}
         defaultAnnualLeaveQuota={
           activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
