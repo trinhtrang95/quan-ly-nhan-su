@@ -42,11 +42,11 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
       {/* Zone 1: Brand Title, Active Company & Supabase Cloud Status */}
       <div className="flex items-center gap-3 min-w-0">
         <div className="w-10 h-10 rounded-xl bg-[#0F232E] flex items-center justify-center text-[#2DD4BF] font-extrabold text-sm shrink-0 shadow-xs">
-          {activeCompany.shortName || 'HR'}
+          TS
         </div>
         <div className="min-w-0">
           <h1 className="text-sm md:text-base font-bold text-slate-900 tracking-tight truncate">
-            HR PRO - Quản lý Nhân sự &amp; Chấm công ({activeCompany.name})
+            PHÒNG KỸ THUẬT TRANSON - Hệ thống Quản lý Nhân sự &amp; Chấm công
           </h1>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <span className="truncate">{MODULE_TITLES[activeModule]}</span>

@@ -114,15 +114,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-between h-16 px-4 border-b border-slate-700/50">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="w-9 h-9 rounded-lg bg-[#0D9488] flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm">
-              {activeCompany?.shortName || 'HR'}
+              TS
             </div>
             {!collapsed && (
               <div className="truncate">
-                <div className="text-white font-bold text-base tracking-tight leading-tight whitespace-nowrap">
-                  HR PRO
+                <div className="text-white font-bold text-xs tracking-tight leading-tight truncate uppercase">
+                  PHÒNG KỸ THUẬT TRANSON
                 </div>
                 <div className="text-[11px] text-teal-300/80 font-medium truncate">
-                  {activeCompany?.code || 'Enterprise HRM'}
+                  Hệ thống Quản lý Nhân sự &amp; Chấm công
                 </div>
               </div>
             )}
