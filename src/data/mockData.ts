@@ -1,4 +1,80 @@
-import { DepartmentGroup, Employee, LeaveRecord } from '../types/hr';
+import {
+  CompanyUnit,
+  DepartmentGroup,
+  Employee,
+  LeaveRecord,
+  UserAccount,
+} from '../types/hr';
+
+export const INITIAL_COMPANY_UNITS: CompanyUnit[] = [
+  {
+    id: 'comp-1',
+    name: 'Công ty CP Công nghệ & Dịch vụ HR PRO (Trụ sở Hà Nội)',
+    code: 'HN-HQ',
+    shortName: 'HR',
+    address: 'Số 18 Lý Thường Kiệt, Hoàn Kiếm, Hà Nội',
+    phone: '024 3825 9999',
+  },
+  {
+    id: 'comp-2',
+    name: 'Chi nhánh HR PRO TP. Hồ Chí Minh',
+    code: 'HCM-BR',
+    shortName: 'HR-S',
+    address: 'Tòa nhà Vietcombank, Quận 1, TP. Hồ Chí Minh',
+    phone: '028 3829 8888',
+  },
+  {
+    id: 'comp-3',
+    name: 'Chi nhánh HR PRO Đà Nẵng',
+    code: 'DN-BR',
+    shortName: 'HR-D',
+    address: 'Số 36 Bạch Đằng, Hải Châu, Đà Nẵng',
+    phone: '0236 388 7777',
+  },
+];
+
+export const INITIAL_USER_ACCOUNTS: UserAccount[] = [
+  {
+    id: 'acc-1',
+    username: 'admin',
+    password: '123',
+    fullName: 'Trần Thu Trang',
+    role: 'admin',
+    employeeCode: 'NV002',
+    department: 'Phòng Hành chính - Nhân sự',
+    createdAt: '2025-01-10',
+  },
+  {
+    id: 'acc-2',
+    username: 'NV001',
+    password: '123',
+    fullName: 'Nguyễn Minh Quân',
+    role: 'admin',
+    employeeCode: 'NV001',
+    department: 'Ban Giám đốc & Quản lý',
+    createdAt: '2025-01-10',
+  },
+  {
+    id: 'acc-3',
+    username: 'user',
+    password: '123',
+    fullName: 'Lê Hoàng Nam',
+    role: 'user',
+    employeeCode: 'NV003',
+    department: 'Phòng Kỹ thuật & CNTT',
+    createdAt: '2025-02-15',
+  },
+  {
+    id: 'acc-4',
+    username: 'NV004',
+    password: '123',
+    fullName: 'Phạm Ngọc Ánh',
+    role: 'user',
+    employeeCode: 'NV004',
+    department: 'Phòng Tài chính - Kế toán',
+    createdAt: '2025-03-01',
+  },
+];
 
 function escapeXml(str: string): string {
   return String(str || '')

@@ -92,4 +92,32 @@ export interface EmployeeAnnualMatrixRow {
 
 export type MatrixViewMode = 'all' | 'annual_leave' | 'unpaid_leave' | 'late_early';
 
-export type ActiveModule = 'dashboard' | 'employees' | 'leave_logs' | 'annual_report';
+export type ActiveModule =
+  | 'dashboard'
+  | 'employees'
+  | 'leave_logs'
+  | 'annual_report'
+  | 'settings';
+
+export type UserRole = 'admin' | 'user';
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  role: UserRole;
+  employeeCode?: string;
+  department?: string;
+  createdAt: string;
+}
+
+export interface CompanyUnit {
+  id: string;
+  name: string;
+  code: string;
+  shortName: string;
+  address: string;
+  phone: string;
+}
+
