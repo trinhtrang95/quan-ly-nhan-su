@@ -17,6 +17,7 @@ import { filterEmployees, formatDateVN } from '../utils/hrCalculations';
 interface EmployeeDirectoryViewProps {
   employees: Employee[];
   groups: DepartmentGroup[];
+  isAdmin?: boolean;
   selectedIds: string[];
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: (ids: string[]) => void;
@@ -34,6 +35,7 @@ interface EmployeeDirectoryViewProps {
 export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   employees,
   groups,
+  isAdmin = true,
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
@@ -101,7 +103,9 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Quản lý hồ sơ cá nhân, bộ phận làm việc và định mức phép năm tiêu chuẩn
+                {isAdmin
+                  ? 'Quản lý hồ sơ cá nhân, bộ phận làm việc và định mức phép năm tiêu chuẩn'
+                  : 'Chế độ Nhân viên (User): Tra cứu danh bạ nhân sự và định mức phép tiêu chuẩn'}
               </p>
             </div>
           </div>
@@ -126,55 +130,59 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
               <span>Xuất Excel</span>
             </button>
 
-            <button
-              type="button"
-              onClick={onDownloadTemplate}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 text-sky-600" />
-              <span>Tải file mẫu Excel</span>
-            </button>
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={onDownloadTemplate}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Tải file mẫu Excel</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Upload className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Nhập từ Excel</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Nhập từ Excel</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={onOpenManageGroups}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <FolderCog className="w-3.5 h-3.5 text-amber-600" />
-              <span>Quản lý Nhóm</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={onOpenManageGroups}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <FolderCog className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Quản lý Nhóm</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={onOpenAddEmployee}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>+ Thêm nhân sự</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={onOpenAddEmployee}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Thêm nhân sự</span>
+                </button>
 
-            <button
-              type="button"
-              disabled={selectedIds.length === 0}
-              onClick={onDeleteSelected}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                selectedIds.length > 0
-                  ? 'border-red-200 bg-[#FEF2F2] text-[#EF4444] hover:bg-red-100 cursor-pointer'
-                  : 'border-red-100 bg-[#FEF2F2]/60 text-red-300 cursor-not-allowed'
-              }`}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Xóa đã chọn ({selectedIds.length})</span>
-            </button>
+                <button
+                  type="button"
+                  disabled={selectedIds.length === 0}
+                  onClick={onDeleteSelected}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    selectedIds.length > 0
+                      ? 'border-red-200 bg-[#FEF2F2] text-[#EF4444] hover:bg-red-100 cursor-pointer'
+                      : 'border-red-100 bg-[#FEF2F2]/60 text-red-300 cursor-not-allowed'
+                  }`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa đã chọn ({selectedIds.length})</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -359,26 +367,30 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                         {emp.standardAnnualLeave} ngày
                       </td>
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onOpenEditEmployee(emp)}
-                            aria-label={`Sửa nhân sự ${emp.fullName}`}
-                            title="Sửa thông tin"
-                            className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteSingle(emp)}
-                            aria-label={`Xóa nhân sự ${emp.fullName}`}
-                            title="Xóa nhân sự"
-                            className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {isAdmin ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => onOpenEditEmployee(emp)}
+                              aria-label={`Sửa nhân sự ${emp.fullName}`}
+                              title="Sửa thông tin"
+                              className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteSingle(emp)}
+                              aria-label={`Xóa nhân sự ${emp.fullName}`}
+                              title="Xóa nhân sự"
+                              className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Chỉ xem</span>
+                        )}
                       </td>
                     </tr>
                   );

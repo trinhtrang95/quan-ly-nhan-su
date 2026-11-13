@@ -25,6 +25,7 @@ interface LeaveLateLogViewProps {
   records: LeaveRecord[];
   employees: Employee[];
   groups: DepartmentGroup[];
+  isAdmin?: boolean;
   onOpenAddRecord: () => void;
   onOpenEditRecord: (rec: LeaveRecord) => void;
   onDeleteRecord: (rec: LeaveRecord) => void;
@@ -36,6 +37,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
   records,
   employees,
   groups,
+  isAdmin = true,
   onOpenAddRecord,
   onOpenEditRecord,
   onDeleteRecord,
@@ -368,26 +370,30 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                         )}
                       </td>
                       <td className="py-3 px-3 text-center whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onOpenEditRecord(rec)}
-                            aria-label={`Sửa bản ghi của ${emp?.fullName}`}
-                            title="Chỉnh sửa"
-                            className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteRecord(rec)}
-                            aria-label={`Xóa bản ghi của ${emp?.fullName}`}
-                            title="Xóa bản ghi"
-                            className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {isAdmin ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => onOpenEditRecord(rec)}
+                              aria-label={`Sửa bản ghi của ${emp?.fullName}`}
+                              title="Chỉnh sửa"
+                              className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteRecord(rec)}
+                              aria-label={`Xóa bản ghi của ${emp?.fullName}`}
+                              title="Xóa bản ghi"
+                              className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Đã lưu</span>
+                        )}
                       </td>
                     </tr>
                   );

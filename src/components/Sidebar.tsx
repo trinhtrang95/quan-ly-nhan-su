@@ -4,13 +4,15 @@ import {
   Users,
   CalendarClock,
   FileSpreadsheet,
+  Settings,
   ChevronLeft,
   ChevronRight,
   Building2,
   LogOut,
   ShieldCheck,
+  UserCheck,
 } from 'lucide-react';
-import { ActiveModule } from '../types/hr';
+import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -19,6 +21,10 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   employeeCount: number;
   recordCount: number;
+  currentUser: UserAccount;
+  companyUnits: CompanyUnit[];
+  activeCompanyId: string;
+  onSelectCompany: (id: string) => void;
   onLogoutClick: () => void;
 }
 
@@ -28,6 +34,7 @@ const NAV_ITEMS: {
   shortLabel: string;
   icon: React.FC<{ className?: string }>;
   iconColor: string;
+  adminOnly?: boolean;
 }[] = [
   {
     id: 'dashboard',
@@ -57,6 +64,14 @@ const NAV_ITEMS: {
     icon: FileSpreadsheet,
     iconColor: 'text-purple-400',
   },
+  {
+    id: 'settings',
+    label: 'Hệ thống / Cài đặt',
+    shortLabel: 'Cài đặt',
+    icon: Settings,
+    iconColor: 'text-rose-400',
+    adminOnly: true,
+  },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -66,22 +81,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   employeeCount,
   recordCount,
+  currentUser,
+  companyUnits,
+  activeCompanyId,
+  onSelectCompany,
   onLogoutClick,
 }) => {
+  const isAdmin = currentUser.role === 'admin';
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !item.adminOnly || isAdmin
+  );
+  const activeCompany =
+    companyUnits.find((c) => c.id === activeCompanyId) || companyUnits[0];
+
+  const userInitials = (() => {
+    const parts = currentUser.fullName.trim().split(' ').filter(Boolean);
+    return parts.length >= 2
+      ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+      : currentUser.fullName.slice(0, 2).toUpperCase();
+  })();
+
   return (
     <>
       {/* PC Left Fixed Sidebar (>= 768px) */}
       <aside
         aria-label="Thanh điều hướng chính"
         className={`no-print hidden md:flex flex-col shrink-0 bg-[#0F232E] text-[#CBD5E1] transition-all duration-200 select-none border-r border-slate-800/80 ${
-          collapsed ? 'w-[76px]' : 'w-[256px]'
+          collapsed ? 'w-[76px]' : 'w-[264px]'
         }`}
       >
         {/* Brand Header + Collapse Toggle */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-slate-700/50">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="w-9 h-9 rounded-lg bg-[#0D9488] flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm">
-              HR
+              {activeCompany?.shortName || 'HR'}
             </div>
             {!collapsed && (
               <div className="truncate">
@@ -89,7 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   HR PRO
                 </div>
                 <div className="text-[11px] text-teal-300/80 font-medium truncate">
-                  Enterprise HRM Suite
+                  {activeCompany?.code || 'Enterprise HRM'}
                 </div>
               </div>
             )}
@@ -116,7 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               PHÂN HỆ QUẢN TRỊ
             </div>
           )}
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeModule === item.id;
             return (
@@ -165,32 +198,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Bottom Workspace & Admin Profile Box */}
+        {/* Bottom Workspace Dropdown & Logged-in Account Box */}
         <div className="p-3 border-t border-slate-700/60 bg-[#0B1B24]">
           {!collapsed ? (
             <div className="space-y-2.5">
+              {/* CÔNG TY ĐANG LÀM VIỆC Dropdown */}
               <div className="px-2.5 py-2 rounded-lg bg-[#163C45]/50 border border-teal-900/60">
-                <div className="flex items-center gap-2 text-xs font-semibold text-teal-300">
-                  <Building2 className="w-3.5 h-3.5 shrink-0 text-[#2DD4BF]" />
-                  <span className="truncate">Khối Văn phòng Hà Nội</span>
-                </div>
-                <div className="mt-1 text-[11px] text-slate-300 truncate">
-                  Đơn vị: Công ty CP HR PRO
-                </div>
+                <label
+                  htmlFor="sidebar-company-select"
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-[#2DD4BF] uppercase tracking-wider mb-1"
+                >
+                  <Building2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>CÔNG TY ĐANG LÀM VIỆC</span>
+                </label>
+                <select
+                  id="sidebar-company-select"
+                  value={activeCompanyId}
+                  onChange={(e) => onSelectCompany(e.target.value)}
+                  className="w-full bg-[#0F232E] text-white text-xs font-semibold rounded-md px-2 py-1.5 border border-teal-800/80 focus:outline-none focus:border-[#2DD4BF] cursor-pointer truncate"
+                >
+                  {companyUnits.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
+              {/* Logged-in Account & Role Info + Logout Button */}
               <div className="flex items-center justify-between gap-2 px-1 pt-1">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-full bg-teal-600/30 border border-teal-400/40 flex items-center justify-center text-[#2DD4BF] font-bold text-xs shrink-0">
-                    QT
+                    {userInitials}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold text-white truncate flex items-center gap-1">
-                      <span>Trần Thu Trang</span>
-                      <ShieldCheck className="w-3.5 h-3.5 text-[#2DD4BF] shrink-0" />
+                    <div
+                      data-testid="sidebar-user-name"
+                      className="text-xs font-semibold text-white truncate flex items-center gap-1"
+                    >
+                      <span className="truncate">{currentUser.fullName}</span>
+                      {isAdmin ? (
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#2DD4BF] shrink-0" />
+                      ) : (
+                        <UserCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      )}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate">
-                      Quản trị viên HR
+                    <div
+                      data-testid="sidebar-user-role"
+                      className={`text-[10px] font-bold tracking-wider uppercase truncate ${
+                        isAdmin ? 'text-[#2DD4BF]' : 'text-sky-300'
+                      }`}
+                    >
+                      {isAdmin ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN'}
                     </div>
                   </div>
                 </div>
@@ -198,28 +257,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   type="button"
                   onClick={onLogoutClick}
+                  data-testid="sidebar-logout-btn"
                   aria-label="Đăng xuất phiên làm việc"
                   title="Đăng xuất"
-                  className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/40 transition-colors shrink-0 cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-red-300 hover:text-white hover:bg-red-600/80 transition-colors shrink-0 cursor-pointer"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Đăng xuất</span>
                 </button>
               </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2">
               <div
-                title="Quản trị viên: Trần Thu Trang (Khối Văn phòng Hà Nội)"
+                title={`${currentUser.fullName} (${
+                  isAdmin ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN'
+                })`}
                 className="w-8 h-8 rounded-full bg-[#163C45] text-[#2DD4BF] flex items-center justify-center text-xs font-bold"
               >
-                QT
+                {userInitials}
               </div>
               <button
                 type="button"
                 onClick={onLogoutClick}
                 aria-label="Đăng xuất phiên làm việc"
                 title="Đăng xuất"
-                className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/40 transition-colors cursor-pointer"
+                className="p-2 rounded-lg text-red-300 hover:text-white hover:bg-red-600/80 transition-colors cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -231,9 +294,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Bottom Navigation Bar (< 768px) */}
       <nav
         aria-label="Điều hướng di động"
-        className="no-print md:hidden fixed bottom-0 inset-x-0 z-40 h-14 bg-[#0F232E] border-t border-slate-800 grid grid-cols-4 px-1 shadow-lg"
+        className={`no-print md:hidden fixed bottom-0 inset-x-0 z-40 h-14 bg-[#0F232E] border-t border-slate-800 grid ${
+          visibleNavItems.length === 5 ? 'grid-cols-5' : 'grid-cols-4'
+        } px-1 shadow-lg`}
       >
-        {NAV_ITEMS.map((item) => {
+        {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeModule === item.id;
           return (
@@ -250,7 +315,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Icon
                 className={`w-4 h-4 ${isActive ? 'text-[#2DD4BF]' : item.iconColor}`}
               />
-              <span className="text-[11px] leading-tight whitespace-nowrap truncate max-w-full px-1">
+              <span className="text-[10px] leading-tight whitespace-nowrap truncate max-w-full px-1">
                 {item.shortLabel}
               </span>
             </button>

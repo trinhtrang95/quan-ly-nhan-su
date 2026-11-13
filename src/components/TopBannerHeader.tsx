@@ -1,12 +1,15 @@
 import React from 'react';
-import { CalendarPlus, UserPlus, Cloud, RefreshCw } from 'lucide-react';
-import { ActiveModule } from '../types/hr';
+import { CalendarPlus, UserPlus, Cloud, RefreshCw, LogOut } from 'lucide-react';
+import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
 interface TopBannerHeaderProps {
   activeModule: ActiveModule;
   onSelectModule: (mod: ActiveModule) => void;
   onQuickAddLeave: () => void;
   onQuickAddEmployee: () => void;
+  activeCompany: CompanyUnit;
+  currentUser: UserAccount;
+  onLogoutClick: () => void;
   isCloudConnected?: boolean;
   isSyncing?: boolean;
   onManualSync?: () => void;
@@ -17,6 +20,7 @@ const MODULE_TITLES: Record<ActiveModule, string> = {
   employees: 'Hồ sơ & Danh bạ Nhân sự',
   leave_logs: 'Nhật ký Nghỉ phép & Đi muộn',
   annual_report: 'Ma trận Báo cáo Tồn phép Năm',
+  settings: 'Cài đặt Đơn vị & Hệ thống',
 };
 
 export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
@@ -24,20 +28,25 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
   onSelectModule,
   onQuickAddLeave,
   onQuickAddEmployee,
+  activeCompany,
+  currentUser,
+  onLogoutClick,
   isCloudConnected = true,
   isSyncing = false,
   onManualSync,
 }) => {
+  const isAdmin = currentUser.role === 'admin';
+
   return (
     <header className="no-print bg-white rounded-xl border border-slate-200/80 shadow-xs px-4 py-3 md:px-6 md:py-3.5 mb-5 flex items-center justify-between gap-4">
-      {/* Zone 1: Brand Title, Module & Supabase Cloud Status */}
+      {/* Zone 1: Brand Title, Active Company & Supabase Cloud Status */}
       <div className="flex items-center gap-3 min-w-0">
         <div className="w-10 h-10 rounded-xl bg-[#0F232E] flex items-center justify-center text-[#2DD4BF] font-extrabold text-sm shrink-0 shadow-xs">
-          HR
+          {activeCompany.shortName || 'HR'}
         </div>
         <div className="min-w-0">
           <h1 className="text-sm md:text-base font-bold text-slate-900 tracking-tight truncate">
-            HR PRO - Quản lý Nhân sự &amp; Chấm công
+            HR PRO - Quản lý Nhân sự &amp; Chấm công ({activeCompany.name})
           </h1>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <span className="truncate">{MODULE_TITLES[activeModule]}</span>
@@ -72,7 +81,7 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
       {/* Zone 2: Concise Quick Navigation Links (Desktop) */}
       <nav
         aria-label="Liên kết nhanh"
-        className="hidden xl:flex items-center gap-6 text-xs font-medium text-slate-600"
+        className="hidden xl:flex items-center gap-5 text-xs font-medium text-slate-600"
       >
         <button
           type="button"
@@ -118,11 +127,24 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
         >
           Ma trận Tồn phép
         </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => onSelectModule('settings')}
+            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeModule === 'settings'
+                ? 'text-[#0D9488] font-semibold underline underline-offset-4'
+                : ''
+            }`}
+          >
+            Hệ thống / Cài đặt
+          </button>
+        )}
       </nav>
 
       {/* Zone 3: Primary Action CTA */}
-      <div className="flex items-center gap-2.5 shrink-0">
-        {activeModule === 'employees' ? (
+      <div className="flex items-center gap-2 shrink-0">
+        {activeModule === 'employees' && isAdmin ? (
           <button
             type="button"
             onClick={onQuickAddEmployee}
@@ -141,6 +163,17 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
             <span>+ Ghi nhận phép</span>
           </button>
         )}
+
+        {/* Mobile Logout quick button (< 768px) */}
+        <button
+          type="button"
+          onClick={onLogoutClick}
+          aria-label="Đăng xuất trên thiết bị di động"
+          title="Đăng xuất"
+          className="md:hidden p-2 rounded-lg border border-red-200 bg-[#FEF2F2] text-[#EF4444] hover:bg-red-100 transition-colors cursor-pointer"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
       </div>
     </header>
   );

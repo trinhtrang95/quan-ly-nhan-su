@@ -2,16 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import {
   ActiveModule,
+  CompanyUnit,
   DepartmentGroup,
   Employee,
   EmployeeAnnualMatrixRow,
   LeaveRecord,
   MatrixViewMode,
+  UserAccount,
+  UserRole,
 } from './types/hr';
 import {
+  INITIAL_COMPANY_UNITS,
   INITIAL_DEPARTMENT_GROUPS,
   INITIAL_EMPLOYEES,
   INITIAL_LEAVE_RECORDS,
+  INITIAL_USER_ACCOUNTS,
 } from './data/mockData';
 import {
   calculateAnnualMatrixReport,
@@ -33,10 +38,10 @@ import {
   deleteEmployeesFromSupabase,
   deleteLeaveLogFromSupabase,
   loadOrSeedSupabaseData,
-  supabase,
   updateEmployeeInSupabase,
   updateLeaveLogInSupabase,
 } from './utils/supabaseService';
+import { LoginView } from './components/LoginView';
 import { Sidebar } from './components/Sidebar';
 import { TopBannerHeader } from './components/TopBannerHeader';
 import { DashboardView } from './components/DashboardView';
@@ -46,6 +51,7 @@ import { GroupManageModal } from './components/GroupManageModal';
 import { LeaveLateLogView } from './components/LeaveLateLogView';
 import { LeaveRecordModal } from './components/LeaveRecordModal';
 import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
+import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal } from './components/PrintReportModal';
 
@@ -53,6 +59,11 @@ const STORAGE_KEYS = {
   EMPLOYEES: 'hr_pro_employees_v2',
   RECORDS: 'hr_pro_leave_records_v2',
   GROUPS: 'hr_pro_groups_v2',
+  COMPANIES: 'hr_pro_companies_v2',
+  ACTIVE_COMPANY_ID: 'hr_pro_active_company_id_v2',
+  ACCOUNTS: 'hr_pro_accounts_v2',
+  CURRENT_USER: 'hr_pro_current_user_v2',
+  DEFAULT_QUOTA: 'hr_pro_default_quota_v2',
 };
 
 export default function App() {
@@ -60,6 +71,59 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  // User Accounts & Auth State
+  const [accounts, setAccounts] = useState<UserAccount[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
+      return saved ? JSON.parse(saved) : INITIAL_USER_ACCOUNTS;
+    } catch {
+      return INITIAL_USER_ACCOUNTS;
+    }
+  });
+
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('autostart') === '1') {
+          return INITIAL_USER_ACCOUNTS[0];
+        }
+      }
+      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Company Units & Active Company State
+  const [companyUnits, setCompanyUnits] = useState<CompanyUnit[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.COMPANIES);
+      return saved ? JSON.parse(saved) : INITIAL_COMPANY_UNITS;
+    } catch {
+      return INITIAL_COMPANY_UNITS;
+    }
+  });
+
+  const [activeCompanyId, setActiveCompanyId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_COMPANY_ID);
+      return saved || INITIAL_COMPANY_UNITS[0].id;
+    } catch {
+      return INITIAL_COMPANY_UNITS[0].id;
+    }
+  });
+
+  const [defaultAnnualLeaveQuota, setDefaultAnnualLeaveQuota] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.DEFAULT_QUOTA);
+      return saved ? Number(saved) : 12;
+    } catch {
+      return 12;
+    }
+  });
 
   // Core Data State (with localStorage cache + live Supabase sync)
   const [groups, setGroups] = useState<DepartmentGroup[]>(() => {
@@ -88,6 +152,50 @@ export default function App() {
       return INITIAL_LEAVE_RECORDS;
     }
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [accounts]);
+
+  useEffect(() => {
+    try {
+      if (currentUser) {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      }
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(companyUnits));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [companyUnits]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_COMPANY_ID, activeCompanyId);
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [activeCompanyId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.DEFAULT_QUOTA, String(defaultAnnualLeaveQuota));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [defaultAnnualLeaveQuota]);
 
   useEffect(() => {
     try {
@@ -193,29 +301,13 @@ export default function App() {
 
   useEffect(() => {
     syncFromSupabase(true);
-
-    const channel = supabase
-      .channel('hr-pro-cloud-sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'employees' },
-        () => {
-          syncFromSupabase(true);
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'leave_logs' },
-        () => {
-          syncFromSupabase(true);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
+
+  const isAdmin = currentUser?.role === 'admin';
+  const activeCompany =
+    companyUnits.find((c) => c.id === activeCompanyId) ||
+    companyUnits[0] ||
+    INITIAL_COMPANY_UNITS[0];
 
   // Derived Real-time Dashboard & Matrix Calculations
   const kpis = calculateDashboardKPIs(
@@ -255,7 +347,6 @@ export default function App() {
     existingId?: string
   ) => {
     if (existingId) {
-      // Optimistic update
       setEmployees((prev) =>
         prev.map((e) => (e.id === existingId ? { ...empData, id: existingId } : e))
       );
@@ -294,6 +385,7 @@ export default function App() {
   };
 
   const handleDeleteSingleEmployee = async (emp: Employee) => {
+    if (!isAdmin) return;
     setEmployees((prev) => prev.filter((e) => e.id !== emp.id));
     setRecords((prev) => prev.filter((r) => r.employeeId !== emp.id));
     setSelectedEmpIds((prev) => prev.filter((id) => id !== emp.id));
@@ -309,7 +401,7 @@ export default function App() {
   };
 
   const handleDeleteSelectedEmployees = async () => {
-    if (selectedEmpIds.length === 0) return;
+    if (!isAdmin || selectedEmpIds.length === 0) return;
     const idsToDelete = [...selectedEmpIds];
     const idSet = new Set(idsToDelete);
     setEmployees((prev) => prev.filter((e) => !idSet.has(e.id)));
@@ -341,6 +433,7 @@ export default function App() {
   };
 
   const handleImportExcelFile = async (file: File) => {
+    if (!isAdmin) return;
     const imported = await parseEmployeesFromUploadedFile(file, employees.length);
     if (imported.length === 0) {
       showToast('Không tìm thấy dòng dữ liệu hợp lệ trong tệp tải lên.');
@@ -371,9 +464,98 @@ export default function App() {
     showToast(`Đã thêm bộ phận mới: ${newGrp.name}.`);
   };
 
+  const handleUpdateGroup = (id: string, data: Omit<DepartmentGroup, 'id'>) => {
+    const oldGroup = groups.find((g) => g.id === id);
+    setGroups((prev) => prev.map((g) => (g.id === id ? { ...data, id } : g)));
+    if (oldGroup && oldGroup.name !== data.name) {
+      setEmployees((prev) =>
+        prev.map((emp) =>
+          emp.department === oldGroup.name
+            ? { ...emp, department: data.name }
+            : emp
+        )
+      );
+    }
+    showToast(`Đã cập nhật thông tin phòng ban: ${data.name}.`);
+  };
+
   const handleDeleteGroup = (id: string) => {
     setGroups((prev) => prev.filter((g) => g.id !== id));
     showToast('Đã xóa bộ phận khỏi danh mục.');
+  };
+
+  // Company Unit Handlers
+  const handleAddCompany = (unitData: Omit<CompanyUnit, 'id'>) => {
+    const newUnit: CompanyUnit = {
+      ...unitData,
+      id: `comp-${Date.now()}`,
+    };
+    setCompanyUnits((prev) => [...prev, newUnit]);
+    setActiveCompanyId(newUnit.id);
+    showToast(`Đã thêm đơn vị mới: ${newUnit.name}.`);
+  };
+
+  const handleUpdateCompany = (id: string, unitData: Omit<CompanyUnit, 'id'>) => {
+    setCompanyUnits((prev) =>
+      prev.map((c) => (c.id === id ? { ...unitData, id } : c))
+    );
+    showToast(`Đã cập nhật đơn vị: ${unitData.name}.`);
+  };
+
+  const handleDeleteCompany = (id: string) => {
+    if (companyUnits.length <= 1) return;
+    setCompanyUnits((prev) => {
+      const remaining = prev.filter((c) => c.id !== id);
+      if (activeCompanyId === id && remaining.length > 0) {
+        setActiveCompanyId(remaining[0].id);
+      }
+      return remaining;
+    });
+    showToast('Đã xóa đơn vị thành viên.');
+  };
+
+  // Default Annual Leave Quota Handler
+  const handleUpdateDefaultQuota = (quota: number) => {
+    setDefaultAnnualLeaveQuota(quota);
+    showToast(
+      `Đã cập nhật số ngày phép chuẩn mặc định thành ${quota} ngày/năm.`
+    );
+  };
+
+  // User Account Handlers
+  const handleAddAccount = (
+    accData: Omit<UserAccount, 'id' | 'createdAt'>
+  ) => {
+    const newAcc: UserAccount = {
+      ...accData,
+      id: `acc-${Date.now()}`,
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+    setAccounts((prev) => [...prev, newAcc]);
+    showToast(
+      `Đã tạo tài khoản ${newAcc.username} (${
+        newAcc.role === 'admin' ? 'Quản trị viên' : 'Nhân viên'
+      }).`
+    );
+  };
+
+  const handleUpdateAccountRole = (id: string, role: UserRole) => {
+    setAccounts((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, role } : a))
+    );
+    if (currentUser?.id === id) {
+      setCurrentUser((prev) => (prev ? { ...prev, role } : null));
+    }
+    showToast(
+      `Đã đổi phân quyền tài khoản sang ${
+        role === 'admin' ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN'
+      }.`
+    );
+  };
+
+  const handleDeleteAccount = (id: string) => {
+    setAccounts((prev) => prev.filter((a) => a.id !== id));
+    showToast('Đã xóa tài khoản khỏi hệ thống.');
   };
 
   // Leave / Late Record Handlers (persisted to Supabase + instant UI update)
@@ -397,7 +579,11 @@ export default function App() {
         setRecords((prev) =>
           prev.map((r) =>
             r.id === existingId
-              ? { ...updated, attachmentTitle: recData.attachmentTitle || updated.attachmentTitle }
+              ? {
+                  ...updated,
+                  attachmentTitle:
+                    recData.attachmentTitle || updated.attachmentTitle,
+                }
               : r
           )
         );
@@ -420,7 +606,11 @@ export default function App() {
         setRecords((prev) =>
           prev.map((r) =>
             r.id === tempId
-              ? { ...created, attachmentTitle: recData.attachmentTitle || created.attachmentTitle }
+              ? {
+                  ...created,
+                  attachmentTitle:
+                    recData.attachmentTitle || created.attachmentTitle,
+                }
               : r
           )
         );
@@ -440,6 +630,7 @@ export default function App() {
   };
 
   const handleDeleteLeaveRecord = async (rec: LeaveRecord) => {
+    if (!isAdmin) return;
     setRecords((prev) => prev.filter((r) => r.id !== rec.id));
     try {
       await deleteLeaveLogFromSupabase(rec.id);
@@ -449,19 +640,55 @@ export default function App() {
     }
   };
 
+  // If not logged in, render Login Screen
+  if (!currentUser) {
+    return (
+      <LoginView
+        accounts={accounts}
+        activeCompany={activeCompany}
+        isCloudConnected={isCloudConnected}
+        onLoginSuccess={(acc) => {
+          setCurrentUser(acc);
+          if (acc.role !== 'admin' && activeModule === 'settings') {
+            setActiveModule('dashboard');
+          }
+          showToast(
+            `Xin chào ${acc.fullName}! Đang đăng nhập với quyền ${
+              acc.role === 'admin' ? 'QUẢN TRỊ VIÊN (Admin)' : 'NHÂN VIÊN (User)'
+            }.`
+          );
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#EEF3F6] text-slate-800">
       {/* Left Fixed Sidebar (PC) & Bottom Navigation Bar (Mobile) */}
       <Sidebar
         activeModule={activeModule}
-        onSelectModule={setActiveModule}
+        onSelectModule={(mod) => {
+          if (mod === 'settings' && !isAdmin) return;
+          setActiveModule(mod);
+        }}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
         employeeCount={employees.length}
         recordCount={records.length}
-        onLogoutClick={() =>
-          showToast('Phiên làm việc của Quản trị viên Trần Thu Trang đang hoạt động.')
-        }
+        currentUser={currentUser}
+        companyUnits={companyUnits}
+        activeCompanyId={activeCompany.id}
+        onSelectCompany={(compId) => {
+          setActiveCompanyId(compId);
+          const found = companyUnits.find((c) => c.id === compId);
+          if (found) {
+            showToast(`Đã chuyển đơn vị làm việc sang: ${found.name}`);
+          }
+        }}
+        onLogoutClick={() => {
+          setCurrentUser(null);
+          setActiveModule('dashboard');
+        }}
       />
 
       {/* Right Main Content Viewport */}
@@ -471,6 +698,12 @@ export default function App() {
           <TopBannerHeader
             activeModule={activeModule}
             onSelectModule={setActiveModule}
+            activeCompany={activeCompany}
+            currentUser={currentUser}
+            onLogoutClick={() => {
+              setCurrentUser(null);
+              setActiveModule('dashboard');
+            }}
             isCloudConnected={isCloudConnected}
             isSyncing={isSyncing}
             onManualSync={() => syncFromSupabase(false)}
@@ -482,6 +715,7 @@ export default function App() {
               setIsLeaveModalOpen(true);
             }}
             onQuickAddEmployee={() => {
+              if (!isAdmin) return;
               setEditingEmployee(null);
               setIsEmpModalOpen(true);
             }}
@@ -516,19 +750,25 @@ export default function App() {
                 employees={employees}
                 groups={groups}
                 selectedIds={selectedEmpIds}
+                isAdmin={isAdmin}
                 onToggleSelect={handleToggleSelectEmployee}
                 onToggleSelectAll={handleToggleSelectAllEmployees}
                 onDeleteSelected={handleDeleteSelectedEmployees}
                 onDeleteSingle={handleDeleteSingleEmployee}
                 onOpenAddEmployee={() => {
+                  if (!isAdmin) return;
                   setEditingEmployee(null);
                   setIsEmpModalOpen(true);
                 }}
                 onOpenEditEmployee={(emp) => {
+                  if (!isAdmin) return;
                   setEditingEmployee(emp);
                   setIsEmpModalOpen(true);
                 }}
-                onOpenManageGroups={() => setIsGroupModalOpen(true)}
+                onOpenManageGroups={() => {
+                  if (!isAdmin) return;
+                  setIsGroupModalOpen(true);
+                }}
                 onExportPDF={(filteredList) =>
                   setPrintModalState({
                     isOpen: true,
@@ -558,6 +798,7 @@ export default function App() {
                 records={records}
                 employees={employees}
                 groups={groups}
+                isAdmin={isAdmin}
                 onOpenAddRecord={() => {
                   setEditingRecord(null);
                   setLeaveDefaultEmpId(undefined);
@@ -566,6 +807,7 @@ export default function App() {
                   setIsLeaveModalOpen(true);
                 }}
                 onOpenEditRecord={(rec) => {
+                  if (!isAdmin) return;
                   setEditingRecord(rec);
                   setIsLeaveModalOpen(true);
                 }}
@@ -613,6 +855,35 @@ export default function App() {
                 }}
               />
             )}
+
+            {activeModule === 'settings' && isAdmin && (
+              <SystemSettingsView
+                companyUnits={companyUnits}
+                activeCompanyId={activeCompany.id}
+                onSelectActiveCompany={(id) => {
+                  setActiveCompanyId(id);
+                  const found = companyUnits.find((c) => c.id === id);
+                  if (found) {
+                    showToast(`Đã đặt ${found.name} làm đơn vị đang làm việc.`);
+                  }
+                }}
+                onAddCompanyUnit={handleAddCompany}
+                onUpdateCompanyUnit={handleUpdateCompany}
+                onDeleteCompanyUnit={handleDeleteCompany}
+                groups={groups}
+                employees={employees}
+                onAddGroup={handleAddGroup}
+                onUpdateGroup={handleUpdateGroup}
+                onDeleteGroup={handleDeleteGroup}
+                defaultAnnualLeaveQuota={defaultAnnualLeaveQuota}
+                onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
+                accounts={accounts}
+                currentAccountId={currentUser.id}
+                onAddAccount={handleAddAccount}
+                onUpdateAccountRole={handleUpdateAccountRole}
+                onDeleteAccount={handleDeleteAccount}
+              />
+            )}
           </main>
         </div>
       </div>
@@ -624,6 +895,7 @@ export default function App() {
         groups={groups}
         existingCodes={employees.map((e) => e.employeeCode)}
         nextSuggestedCode={nextSuggestedCode}
+        defaultAnnualLeaveQuota={defaultAnnualLeaveQuota}
         onClose={() => setIsEmpModalOpen(false)}
         onSave={handleSaveEmployee}
       />

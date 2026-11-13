@@ -1,4 +1,3 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   Employee,
   Gender,
@@ -28,11 +27,6 @@ export const SUPABASE_ANON_KEY =
 
 export const HR_IMAGES_BUCKET = 'hr-images';
 
-export const supabase: SupabaseClient = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY
-);
-
 export interface SupabaseEmployeeRow {
   id: string;
   employee_code: string;
@@ -59,6 +53,38 @@ export interface SupabaseLeaveLogRow {
   reason: string | null;
   proof_image_url: string | null;
   created_at?: string;
+}
+
+/**
+ * Helper for Supabase PostgREST API calls using pure native fetch
+ */
+async function supabaseRestFetch<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Supabase REST error (${res.status}): ${errText}`);
+  }
+
+  if (res.status === 204) {
+    return undefined as unknown as T;
+  }
+
+  const text = await res.text();
+  return text ? (JSON.parse(text) as T) : (undefined as unknown as T);
 }
 
 /**
@@ -174,7 +200,7 @@ export function mapSupabaseRowToLeaveRecord(
 
 /**
  * Uploads an image File (avatar or leave proof photo) to Supabase Storage bucket `hr-images`
- * and returns its Public URL. Falls back to Data URI if storage upload fails.
+ * using pure fetch and returns its Public URL. Falls back to Data URI if storage upload fails.
  */
 export async function uploadImageToHrBucket(
   file: File,
@@ -186,30 +212,27 @@ export async function uploadImageToHrBucket(
       .toString(36)
       .slice(2, 8)}.${ext}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from(HR_IMAGES_BUCKET)
-      .upload(safeName, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: file.type || 'image/png',
-      });
+    const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${HR_IMAGES_BUCKET}/${safeName}`;
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': file.type || 'image/png',
+        'x-upsert': 'true',
+      },
+      body: file,
+    });
 
-    if (uploadError) {
-      throw uploadError;
+    if (!res.ok) {
+      throw new Error(`Storage upload failed (${res.status})`);
     }
 
-    const { data } = supabase.storage
-      .from(HR_IMAGES_BUCKET)
-      .getPublicUrl(safeName);
-
-    if (data?.publicUrl) {
-      return data.publicUrl;
-    }
+    return `${SUPABASE_URL}/storage/v1/object/public/${HR_IMAGES_BUCKET}/${safeName}`;
   } catch (err) {
     console.warn('Fallback to Data URI for image upload:', err);
   }
 
-  // Fallback: read as base64 Data URI
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
@@ -225,7 +248,7 @@ let initPromise: Promise<{
 }> | null = null;
 
 /**
- * Loads `employees` and `leave_logs` from Supabase.
+ * Loads `employees` and `leave_logs` from Supabase via REST API.
  * If `employees` on Supabase is empty (0 rows), automatically seeds `INITIAL_EMPLOYEES`
  * and `INITIAL_LEAVE_RECORDS` into Supabase.
  */
@@ -238,17 +261,12 @@ export async function loadOrSeedSupabaseData(): Promise<{
 
   initPromise = (async () => {
     try {
-      const { data: empRows, error: empErr } = await supabase
-        .from('employees')
-        .select('*')
-        .order('employee_code', { ascending: true });
-
-      if (empErr) throw empErr;
-
-      let finalEmpRows: SupabaseEmployeeRow[] = empRows || [];
+      let finalEmpRows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+        'employees?select=*&order=employee_code.asc'
+      );
 
       // Auto-seed if `employees` table is empty (0 rows)
-      if (finalEmpRows.length === 0) {
+      if (!finalEmpRows || finalEmpRows.length === 0) {
         const seedEmpPayloads = INITIAL_EMPLOYEES.map((emp) => ({
           employee_code: emp.employeeCode,
           full_name: emp.fullName,
@@ -263,12 +281,15 @@ export async function loadOrSeedSupabaseData(): Promise<{
           status: emp.status,
         }));
 
-        const { data: insertedEmps, error: seedEmpErr } = await supabase
-          .from('employees')
-          .insert(seedEmpPayloads)
-          .select('*');
+        const insertedEmps = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+          'employees?select=*',
+          {
+            method: 'POST',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify(seedEmpPayloads),
+          }
+        );
 
-        if (seedEmpErr) throw seedEmpErr;
         finalEmpRows = (insertedEmps || []).sort((a, b) =>
           (a.employee_code || '').localeCompare(b.employee_code || '')
         );
@@ -277,24 +298,16 @@ export async function loadOrSeedSupabaseData(): Promise<{
       const employees = finalEmpRows.map(mapSupabaseRowToEmployee);
       const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
 
-      // Build map from employee_code (e.g. NV001) to real Supabase employee UUID/id
       const codeToSupabaseId = new Map<string, string>();
       for (const e of employees) {
         codeToSupabaseId.set(e.employeeCode, e.id);
       }
 
-      // Fetch `leave_logs`
-      const { data: logRows, error: logErr } = await supabase
-        .from('leave_logs')
-        .select('*')
-        .order('start_date', { ascending: false });
+      let finalLogRows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+        'leave_logs?select=*&order=start_date.desc'
+      );
 
-      if (logErr) throw logErr;
-
-      let finalLogRows: SupabaseLeaveLogRow[] = logRows || [];
-
-      // If `leave_logs` is empty and we have matching seed employees, auto-seed `INITIAL_LEAVE_RECORDS`
-      if (finalLogRows.length === 0 && employees.length > 0) {
+      if ((!finalLogRows || finalLogRows.length === 0) && employees.length > 0) {
         const oldIdToCode = new Map<string, string>(
           INITIAL_EMPLOYEES.map((e) => [e.id, e.employeeCode])
         );
@@ -314,17 +327,21 @@ export async function loadOrSeedSupabaseData(): Promise<{
           };
         });
 
-        const { data: insertedLogs, error: seedLogErr } = await supabase
-          .from('leave_logs')
-          .insert(seedLogPayloads)
-          .select('*');
+        const insertedLogs = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+          'leave_logs?select=*',
+          {
+            method: 'POST',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify(seedLogPayloads),
+          }
+        );
 
-        if (!seedLogErr && insertedLogs) {
+        if (insertedLogs) {
           finalLogRows = insertedLogs;
         }
       }
 
-      const records = finalLogRows.map((row) =>
+      const records = (finalLogRows || []).map((row) =>
         mapSupabaseRowToLeaveRecord(row, empMap)
       );
 
@@ -368,21 +385,24 @@ export async function createEmployeeInSupabase(
     status: empData.status,
   };
 
-  const { data, error } = await supabase
-    .from('employees')
-    .insert([payload])
-    .select('*')
-    .single();
+  const rows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+    'employees?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([payload]),
+    }
+  );
 
-  if (error || !data) {
-    throw error || new Error('Failed to insert employee into Supabase');
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to insert employee into Supabase');
   }
 
-  return mapSupabaseRowToEmployee(data);
+  return mapSupabaseRowToEmployee(rows[0]);
 }
 
 /**
- * Bulk inserts multiple employees into Supabase `employees` (for Excel Import)
+ * Bulk inserts multiple employees into Supabase `employees`
  */
 export async function bulkCreateEmployeesInSupabase(
   empList: Omit<Employee, 'id'>[]
@@ -401,16 +421,16 @@ export async function bulkCreateEmployeesInSupabase(
     status: empData.status,
   }));
 
-  const { data, error } = await supabase
-    .from('employees')
-    .insert(payloads)
-    .select('*');
+  const rows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+    'employees?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payloads),
+    }
+  );
 
-  if (error || !data) {
-    throw error || new Error('Failed to bulk insert employees into Supabase');
-  }
-
-  return data.map(mapSupabaseRowToEmployee);
+  return (rows || []).map(mapSupabaseRowToEmployee);
 }
 
 /**
@@ -434,18 +454,20 @@ export async function updateEmployeeInSupabase(
     status: empData.status,
   };
 
-  const { data, error } = await supabase
-    .from('employees')
-    .update(payload)
-    .eq('id', id)
-    .select('*')
-    .single();
+  const rows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+    `employees?id=eq.${encodeURIComponent(id)}&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payload),
+    }
+  );
 
-  if (error || !data) {
-    throw error || new Error('Failed to update employee in Supabase');
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to update employee in Supabase');
   }
 
-  return mapSupabaseRowToEmployee(data);
+  return mapSupabaseRowToEmployee(rows[0]);
 }
 
 /**
@@ -453,14 +475,17 @@ export async function updateEmployeeInSupabase(
  */
 export async function deleteEmployeesFromSupabase(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
+  const inClause = `(${ids.map((id) => `"${id}"`).join(',')})`;
 
-  // Delete dependent leave_logs first in case FK is not ON DELETE CASCADE
-  await supabase.from('leave_logs').delete().in('employee_id', ids);
+  await supabaseRestFetch<void>(
+    `leave_logs?employee_id=in.${encodeURIComponent(inClause)}`,
+    { method: 'DELETE' }
+  ).catch(() => {});
 
-  const { error } = await supabase.from('employees').delete().in('id', ids);
-  if (error) {
-    throw error;
-  }
+  await supabaseRestFetch<void>(
+    `employees?id=in.${encodeURIComponent(inClause)}`,
+    { method: 'DELETE' }
+  );
 }
 
 /**
@@ -480,17 +505,20 @@ export async function createLeaveLogInSupabase(
     proof_image_url: recData.attachmentUrl || null,
   };
 
-  const { data, error } = await supabase
-    .from('leave_logs')
-    .insert([payload])
-    .select('*')
-    .single();
+  const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+    'leave_logs?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([payload]),
+    }
+  );
 
-  if (error || !data) {
-    throw error || new Error('Failed to insert leave log into Supabase');
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to insert leave log into Supabase');
   }
 
-  return mapSupabaseRowToLeaveRecord(data, empMap);
+  return mapSupabaseRowToLeaveRecord(rows[0], empMap);
 }
 
 /**
@@ -511,26 +539,28 @@ export async function updateLeaveLogInSupabase(
     proof_image_url: recData.attachmentUrl || null,
   };
 
-  const { data, error } = await supabase
-    .from('leave_logs')
-    .update(payload)
-    .eq('id', id)
-    .select('*')
-    .single();
+  const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+    `leave_logs?id=eq.${encodeURIComponent(id)}&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payload),
+    }
+  );
 
-  if (error || !data) {
-    throw error || new Error('Failed to update leave log in Supabase');
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to update leave log in Supabase');
   }
 
-  return mapSupabaseRowToLeaveRecord(data, empMap);
+  return mapSupabaseRowToLeaveRecord(rows[0], empMap);
 }
 
 /**
  * Deletes a leave/late record from Supabase `leave_logs`
  */
 export async function deleteLeaveLogFromSupabase(id: string): Promise<void> {
-  const { error } = await supabase.from('leave_logs').delete().eq('id', id);
-  if (error) {
-    throw error;
-  }
+  await supabaseRestFetch<void>(
+    `leave_logs?id=eq.${encodeURIComponent(id)}`,
+    { method: 'DELETE' }
+  );
 }

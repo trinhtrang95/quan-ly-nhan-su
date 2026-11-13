@@ -10,6 +10,7 @@ interface EmployeeModalProps {
   groups: DepartmentGroup[];
   existingCodes: string[];
   nextSuggestedCode: string;
+  defaultAnnualLeaveQuota?: number;
   onClose: () => void;
   onSave: (employeeData: Omit<Employee, 'id'>, existingId?: string) => void;
 }
@@ -20,6 +21,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   groups,
   existingCodes,
   nextSuggestedCode,
+  defaultAnnualLeaveQuota = 12,
   onClose,
   onSave,
 }) => {
@@ -32,7 +34,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [address, setAddress] = useState('');
   const [department, setDepartment] = useState('');
   const [position, setPosition] = useState('Chuyên viên');
-  const [standardAnnualLeave, setStandardAnnualLeave] = useState<number>(12);
+  const [standardAnnualLeave, setStandardAnnualLeave] = useState<number>(defaultAnnualLeaveQuota);
   const [status, setStatus] = useState<WorkStatus>('Đang làm việc');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -65,11 +67,11 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setAddress('');
       setDepartment(groups[0]?.name || 'Phòng Kỹ thuật & CNTT');
       setPosition('Chuyên viên');
-      setStandardAnnualLeave(12);
+      setStandardAnnualLeave(defaultAnnualLeaveQuota);
       setStatus('Đang làm việc');
       setAvatarUrl('');
     }
-  }, [isOpen, editingEmployee, nextSuggestedCode, groups]);
+  }, [isOpen, editingEmployee, nextSuggestedCode, groups, defaultAnnualLeaveQuota]);
 
   if (!isOpen) return null;
 
