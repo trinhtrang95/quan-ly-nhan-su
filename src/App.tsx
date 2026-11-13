@@ -9,12 +9,14 @@ import {
   HRBackupPayload,
   LeaveRecord,
   MatrixViewMode,
+  PositionItem,
   UserAccount,
   UserRole,
 } from './types/hr';
 import {
   INITIAL_COMPANY_UNITS,
   INITIAL_DEPARTMENT_GROUPS,
+  INITIAL_POSITIONS,
   INITIAL_USER_ACCOUNTS,
 } from './data/mockData';
 import {
@@ -38,11 +40,13 @@ import {
   createDepartmentInSupabase,
   createEmployeeInSupabase,
   createLeaveLogInSupabase,
+  createPositionInSupabase,
   deleteAppUserFromSupabase,
   deleteCompanyFromSupabase,
   deleteDepartmentFromSupabase,
   deleteEmployeesFromSupabase,
   deleteLeaveLogFromSupabase,
+  deletePositionFromSupabase,
   loadOrSeedSupabaseData,
   restoreFromBackupInSupabase,
   updateAppUserRoleInSupabase,
@@ -50,6 +54,7 @@ import {
   updateDepartmentInSupabase,
   updateEmployeeInSupabase,
   updateLeaveLogInSupabase,
+  updatePositionInSupabase,
 } from './utils/supabaseService';
 import { LoginView } from './components/LoginView';
 import { Sidebar } from './components/Sidebar';
@@ -63,13 +68,14 @@ import { LeaveRecordModal } from './components/LeaveRecordModal';
 import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
-import { PrintReportModal } from './components/PrintReportModal';
+import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
 
 const STORAGE_KEYS = {
   INITIALIZED: 'hr_pro_initialized',
   EMPLOYEES: 'hr_pro_employees_v2',
   RECORDS: 'hr_pro_leave_records_v2',
   GROUPS: 'hr_pro_groups_v2',
+  POSITIONS: 'hr_pro_positions_v2',
   COMPANIES: 'hr_pro_companies_v2',
   ACTIVE_COMPANY_ID: 'hr_pro_active_company_id_v2',
   ACCOUNTS: 'hr_pro_accounts_v2',
@@ -160,13 +166,22 @@ export default function App() {
     }
   });
 
-  // Core Data State (`departments`, `employees`, `leave_logs`)
+  // Core Data State (`departments`, `positions`, `employees`, `leave_logs`)
   const [groups, setGroups] = useState<DepartmentGroup[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.GROUPS);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
+    }
+  });
+
+  const [positions, setPositions] = useState<PositionItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.POSITIONS);
+      return saved ? JSON.parse(saved) : INITIAL_POSITIONS;
+    } catch {
+      return INITIAL_POSITIONS;
     }
   });
 
@@ -254,6 +269,14 @@ export default function App() {
 
   useEffect(() => {
     try {
+      localStorage.setItem(STORAGE_KEYS.POSITIONS, JSON.stringify(positions));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [positions]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
     } catch {
       // Ignore storage quota errors
@@ -298,7 +321,7 @@ export default function App() {
   // Print/PDF Report Modal State
   const [printModalState, setPrintModalState] = useState<{
     isOpen: boolean;
-    reportType: 'employees' | 'annual_matrix';
+    reportType: ReportPrintType;
     employees: Employee[];
     matrixRows: EmployeeAnnualMatrixRow[];
     year: number;
@@ -339,6 +362,9 @@ export default function App() {
           return chosen ? chosen.id : prevId;
         });
         setGroups(result.departments);
+        if (result.positions && result.positions.length > 0) {
+          setPositions(result.positions);
+        }
         setAccounts(result.accounts);
         setEmployees(result.employees);
         setRecords(result.records);
@@ -386,6 +412,16 @@ export default function App() {
     companyUnits.length <= 1
       ? groups
       : groups.filter((g) => !g.companyId || g.companyId === activeCompany.id);
+
+  const companyPositions: PositionItem[] = (() => {
+    const filtered =
+      companyUnits.length <= 1
+        ? positions
+        : positions.filter(
+            (p) => !p.companyId || p.companyId === activeCompany.id
+          );
+    return filtered.length > 0 ? filtered : INITIAL_POSITIONS;
+  })();
 
   // Include any departments referenced by existing employees so filters & forms are always complete
   const effectiveGroups: DepartmentGroup[] = (() => {
@@ -635,6 +671,67 @@ export default function App() {
     }
   };
 
+  // Position (`positions` table) Handlers
+  const handleAddPosition = async (posData: Omit<PositionItem, 'id'>) => {
+    const tempId = `pos-${Date.now()}`;
+    const optimistic: PositionItem = {
+      ...posData,
+      id: tempId,
+      companyId: activeCompany.id,
+    };
+    setPositions((prev) => [...prev, optimistic]);
+
+    try {
+      const created = await createPositionInSupabase(posData, activeCompany.id);
+      setPositions((prev) =>
+        prev.map((p) => (p.id === tempId ? created : p))
+      );
+      showToast(
+        `Đã lưu chức danh "${created.name}" lên bảng positions (Supabase).`
+      );
+    } catch {
+      showToast(`Đã thêm chức danh mới: ${optimistic.name}.`);
+    }
+  };
+
+  const handleUpdatePosition = async (id: string, name: string) => {
+    const oldPos = positions.find((p) => p.id === id);
+    setPositions((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, name, id, companyId: activeCompany.id } : p
+      )
+    );
+    if (oldPos && oldPos.name !== name) {
+      setEmployees((prev) =>
+        prev.map((emp) =>
+          emp.position === oldPos.name ? { ...emp, position: name } : emp
+        )
+      );
+    }
+
+    try {
+      const updated = await updatePositionInSupabase(
+        id,
+        name,
+        activeCompany.id
+      );
+      setPositions((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      showToast(`Đã cập nhật chức danh "${updated.name}" trên Supabase.`);
+    } catch {
+      showToast(`Đã cập nhật chức danh: ${name}.`);
+    }
+  };
+
+  const handleDeletePosition = async (id: string) => {
+    setPositions((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await deletePositionFromSupabase(id);
+      showToast('Đã xóa chức danh khỏi bảng positions (Supabase).');
+    } catch {
+      showToast('Đã xóa chức danh khỏi danh mục.');
+    }
+  };
+
   // Company Unit (`companies` table) Handlers
   const handleAddCompany = async (unitData: Omit<CompanyUnit, 'id'>) => {
     const tempId = `comp-${Date.now()}`;
@@ -878,6 +975,7 @@ export default function App() {
         activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota,
       companies: companyUnits,
       departments: groups,
+      positions,
       employees,
       records,
       accounts,
@@ -957,6 +1055,11 @@ export default function App() {
       } else if (Array.isArray(backup.departments)) {
         setGroups(backup.departments);
       }
+      if (restored.positions && restored.positions.length > 0) {
+        setPositions(restored.positions);
+      } else if (Array.isArray(backup.positions) && backup.positions.length > 0) {
+        setPositions(backup.positions);
+      }
       if (restored.accounts.length > 0) {
         setAccounts(restored.accounts);
       } else if (Array.isArray(backup.accounts) && backup.accounts.length > 0) {
@@ -976,6 +1079,9 @@ export default function App() {
       }
       if (Array.isArray(backup.departments)) {
         setGroups(backup.departments);
+      }
+      if (Array.isArray(backup.positions) && backup.positions.length > 0) {
+        setPositions(backup.positions);
       }
       if (Array.isArray(backup.employees)) {
         setEmployees(backup.employees);
@@ -1162,6 +1268,16 @@ export default function App() {
                     viewMode: 'all',
                   })
                 }
+                onExportPDFSignList={(filteredList) =>
+                  setPrintModalState({
+                    isOpen: true,
+                    reportType: 'employees_sign',
+                    employees: filteredList,
+                    matrixRows: [],
+                    year: 2026,
+                    viewMode: 'all',
+                  })
+                }
                 onExportExcel={(filteredList) => {
                   exportEmployeesToExcel(filteredList);
                   showToast(
@@ -1257,11 +1373,15 @@ export default function App() {
                 onUpdateCompanyUnit={handleUpdateCompany}
                 onDeleteCompanyUnit={handleDeleteCompany}
                 groups={companyGroups}
+                positions={companyPositions}
                 employees={companyEmployees}
                 allEmployees={employees}
                 onAddGroup={handleAddGroup}
                 onUpdateGroup={handleUpdateGroup}
                 onDeleteGroup={handleDeleteGroup}
+                onAddPosition={handleAddPosition}
+                onUpdatePosition={handleUpdatePosition}
+                onDeletePosition={handleDeletePosition}
                 defaultAnnualLeaveQuota={
                   activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
                 }
@@ -1287,6 +1407,7 @@ export default function App() {
         isOpen={isEmpModalOpen}
         editingEmployee={editingEmployee}
         groups={effectiveGroups}
+        positions={companyPositions}
         existingCodes={employees.map((e) => e.employeeCode)}
         nextSuggestedCode={nextSuggestedCode}
         defaultAnnualLeaveQuota={

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Building2,
   FolderCog,
+  Briefcase,
   UsersRound,
   Plus,
   Pencil,
@@ -23,6 +24,7 @@ import {
   DepartmentGroup,
   Employee,
   HRBackupPayload,
+  PositionItem,
   UserAccount,
   UserRole,
 } from '../types/hr';
@@ -39,6 +41,7 @@ interface SystemSettingsViewProps {
   onDeleteCompanyUnit: (id: string) => void;
 
   groups: DepartmentGroup[];
+  positions: PositionItem[];
   employees: Employee[];
   allEmployees: Employee[];
   defaultAnnualLeaveQuota: number;
@@ -46,6 +49,9 @@ interface SystemSettingsViewProps {
   onAddGroup: (grp: Omit<DepartmentGroup, 'id'>) => void;
   onUpdateGroup: (id: string, grp: Omit<DepartmentGroup, 'id'>) => void;
   onDeleteGroup: (id: string) => void;
+  onAddPosition: (pos: Omit<PositionItem, 'id'>) => void;
+  onUpdatePosition: (id: string, name: string) => void;
+  onDeletePosition: (id: string) => void;
 
   accounts: UserAccount[];
   currentAccountId: string;
@@ -88,6 +94,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   onUpdateCompanyUnit,
   onDeleteCompanyUnit,
   groups,
+  positions,
   employees,
   allEmployees,
   defaultAnnualLeaveQuota,
@@ -95,6 +102,9 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   onAddGroup,
   onUpdateGroup,
   onDeleteGroup,
+  onAddPosition,
+  onUpdatePosition,
+  onDeletePosition,
   accounts,
   currentAccountId,
   onAddAccount,
@@ -127,13 +137,17 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [isUploadingInlineLogo, setIsUploadingInlineLogo] = useState(false);
 
   // =========================================================================
-  // TAB 2 STATE: DEPARTMENTS & DEFAULT LEAVE QUOTA
+  // TAB 2 STATE: DEPARTMENTS, POSITIONS & DEFAULT LEAVE QUOTA
   // =========================================================================
   const [editingGrpId, setEditingGrpId] = useState<string | null>(null);
   const [grpName, setGrpName] = useState('');
   const [grpCode, setGrpCode] = useState('');
   const [grpColor, setGrpColor] = useState(GROUP_COLORS[0]);
   const [quotaInput, setQuotaInput] = useState<number>(defaultAnnualLeaveQuota);
+
+  // Position (`positions` table) state
+  const [editingPosId, setEditingPosId] = useState<string | null>(null);
+  const [posNameInput, setPosNameInput] = useState('');
 
   useEffect(() => {
     setQuotaInput(defaultAnnualLeaveQuota);
@@ -304,6 +318,25 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     setGrpName(grp.name);
     setGrpCode(grp.code);
     setGrpColor(grp.color);
+  };
+
+  const handlePositionSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPos = posNameInput.trim();
+    if (!cleanPos) return;
+
+    if (editingPosId) {
+      onUpdatePosition(editingPosId, cleanPos);
+      setEditingPosId(null);
+    } else {
+      onAddPosition({ name: cleanPos });
+    }
+    setPosNameInput('');
+  };
+
+  const startEditPosition = (pos: PositionItem) => {
+    setEditingPosId(pos.id);
+    setPosNameInput(pos.name);
   };
 
   // =========================================================================
@@ -936,6 +969,134 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               })}
             </div>
           )}
+
+          {/* ===================================================================
+              QUẢN LÝ CHỨC DANH / VỊ TRÍ (BẢNG POSITIONS TRÊN SUPABASE)
+          =================================================================== */}
+          <div className="mt-8 pt-6 border-t border-slate-200/80">
+            <div className="flex items-center gap-3 pb-4">
+              <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-[#0D9488]">
+                <Briefcase className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Quản lý Chức danh / Vị trí ({positions.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Khởi tạo và đồng bộ danh sách Chức danh / Vị trí với bảng positions trên Supabase (tự động cập nhật vào ô Dropdown trong form Nhân viên)
+                </p>
+              </div>
+            </div>
+
+            {/* Add / Edit Position Form */}
+            <form
+              onSubmit={handlePositionSubmit}
+              className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end"
+            >
+              <div className="sm:col-span-9">
+                <label
+                  htmlFor="pos-name-input"
+                  className="block text-[11px] font-semibold text-slate-600 mb-1"
+                >
+                  Tên Chức danh / Vị trí *
+                </label>
+                <input
+                  id="pos-name-input"
+                  data-testid="pos-name-input"
+                  type="text"
+                  required
+                  value={posNameInput}
+                  onChange={(e) => setPosNameInput(e.target.value)}
+                  placeholder="VD: Trưởng bộ phận, Trưởng nhóm, Phó nhóm, Nhân viên..."
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                />
+              </div>
+
+              <div className="sm:col-span-3 flex items-center gap-2">
+                <button
+                  type="submit"
+                  data-testid="btn-submit-position"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  {editingPosId ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Plus className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {editingPosId ? 'Lưu chức danh' : '+ Thêm Chức danh'}
+                  </span>
+                </button>
+                {editingPosId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingPosId(null);
+                      setPosNameInput('');
+                    }}
+                    className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </form>
+
+            {/* Positions Grid */}
+            <div
+              data-testid="positions-list-grid"
+              className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+            >
+              {positions.map((pos) => {
+                const empCountWithPos = employees.filter(
+                  (e) => (e.position || 'Nhân viên') === pos.name
+                ).length;
+
+                return (
+                  <div
+                    key={pos.id}
+                    className="p-3.5 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between gap-2 hover:border-slate-300 transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#0D9488] shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-900 truncate">
+                          {pos.name}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          {empCountWithPos} nhân sự
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => startEditPosition(pos)}
+                        aria-label={`Sửa chức danh ${pos.name}`}
+                        className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-slate-100 cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={positions.length <= 1}
+                        onClick={() => onDeletePosition(pos.id)}
+                        aria-label={`Xóa chức danh ${pos.name}`}
+                        className={`p-1.5 rounded-md ${
+                          positions.length <= 1
+                            ? 'text-slate-300 cursor-not-allowed'
+                            : 'text-[#EF4444] hover:bg-[#FEF2F2] cursor-pointer'
+                        }`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </section>
       )}
 

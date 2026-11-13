@@ -19,6 +19,13 @@ export interface DepartmentGroup {
   description?: string;
 }
 
+export interface PositionItem {
+  id: string;
+  companyId?: string | null;
+  name: string;
+  createdAt?: string;
+}
+
 export interface Employee {
   id: string;
   companyId?: string | null;
@@ -27,10 +34,11 @@ export interface Employee {
   dob: string;          // Ngày tháng năm sinh (YYYY-MM-DD)
   gender: Gender;       // Giới tính
   cccd: string;         // Số CCCD
+  cccdDate?: string;    // Ngày cấp CCCD (YYYY-MM-DD)
   phone: string;        // Số điện thoại
   address: string;      // Địa chỉ
   department: string;   // Nhóm/Bộ phận
-  position?: string;    // Chức vụ
+  position?: string;    // Chức danh / Vị trí
   joinDate: string;     // Ngày vào làm (YYYY-MM-DD)
   standardAnnualLeave: number; // Tổng phép năm tiêu chuẩn (mặc định 12)
   status: WorkStatus;
@@ -134,8 +142,10 @@ export interface HRBackupPayload {
   defaultAnnualLeaveQuota?: number;
   companies: CompanyUnit[];
   departments: DepartmentGroup[];
+  positions?: PositionItem[];
   employees: Employee[];
   records: LeaveRecord[];
   accounts: UserAccount[];
 }
+
 

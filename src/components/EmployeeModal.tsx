@@ -1,13 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { X, Upload, Check, Loader2 } from 'lucide-react';
-import { DepartmentGroup, Employee, Gender, WorkStatus } from '../types/hr';
-import { createAvatarSvgDataUri } from '../data/mockData';
+import {
+  DepartmentGroup,
+  Employee,
+  Gender,
+  PositionItem,
+  WorkStatus,
+} from '../types/hr';
+import { createAvatarSvgDataUri, INITIAL_POSITIONS } from '../data/mockData';
 import { uploadImageToHrBucket } from '../utils/supabaseService';
 
 interface EmployeeModalProps {
   isOpen: boolean;
   editingEmployee: Employee | null;
   groups: DepartmentGroup[];
+  positions: PositionItem[];
   existingCodes: string[];
   nextSuggestedCode: string;
   defaultAnnualLeaveQuota?: number;
@@ -19,22 +26,29 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   isOpen,
   editingEmployee,
   groups,
+  positions,
   existingCodes,
   nextSuggestedCode,
   defaultAnnualLeaveQuota = 12,
   onClose,
   onSave,
 }) => {
+  const effectivePositions =
+    positions && positions.length > 0 ? positions : INITIAL_POSITIONS;
+
   const [employeeCode, setEmployeeCode] = useState('');
   const [fullName, setFullName] = useState('');
   const [dob, setDob] = useState('1996-06-15');
   const [gender, setGender] = useState<Gender>('Nam');
   const [cccd, setCccd] = useState('');
+  const [cccdDate, setCccdDate] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [department, setDepartment] = useState('');
-  const [position, setPosition] = useState('Chuyên viên');
-  const [standardAnnualLeave, setStandardAnnualLeave] = useState<number>(defaultAnnualLeaveQuota);
+  const [position, setPosition] = useState('Nhân viên');
+  const [standardAnnualLeave, setStandardAnnualLeave] = useState<number>(
+    defaultAnnualLeaveQuota
+  );
   const [status, setStatus] = useState<WorkStatus>('Đang làm việc');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -44,16 +58,22 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     if (!isOpen) return;
     setErrorMsg('');
     setIsUploadingAvatar(false);
+    const defaultPos =
+      effectivePositions.find((p) => p.name === 'Nhân viên')?.name ||
+      effectivePositions[0]?.name ||
+      'Nhân viên';
+
     if (editingEmployee) {
       setEmployeeCode(editingEmployee.employeeCode);
       setFullName(editingEmployee.fullName);
       setDob(editingEmployee.dob);
       setGender(editingEmployee.gender);
       setCccd(editingEmployee.cccd);
+      setCccdDate(editingEmployee.cccdDate || '');
       setPhone(editingEmployee.phone);
       setAddress(editingEmployee.address);
       setDepartment(editingEmployee.department);
-      setPosition(editingEmployee.position || 'Chuyên viên');
+      setPosition(editingEmployee.position || defaultPos);
       setStandardAnnualLeave(editingEmployee.standardAnnualLeave);
       setStatus(editingEmployee.status);
       setAvatarUrl(editingEmployee.avatarUrl);
@@ -63,15 +83,23 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setDob('1997-05-15');
       setGender('Nam');
       setCccd('');
+      setCccdDate('2021-05-10');
       setPhone('');
       setAddress('');
       setDepartment(groups[0]?.name || 'Phòng Kỹ thuật & CNTT');
-      setPosition('Chuyên viên');
+      setPosition(defaultPos);
       setStandardAnnualLeave(defaultAnnualLeaveQuota);
       setStatus('Đang làm việc');
       setAvatarUrl('');
     }
-  }, [isOpen, editingEmployee, nextSuggestedCode, groups, defaultAnnualLeaveQuota]);
+  }, [
+    isOpen,
+    editingEmployee,
+    nextSuggestedCode,
+    groups,
+    defaultAnnualLeaveQuota,
+    effectivePositions,
+  ]);
 
   if (!isOpen) return null;
 
@@ -126,12 +154,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         dob: dob || '1997-01-01',
         gender,
         cccd: cccd.trim() || '001097000000',
+        cccdDate: cccdDate.trim() || undefined,
         phone: phone.trim() || '0900000000',
         address: address.trim() || 'Hà Nội',
         department: department || groups[0]?.name || 'Phòng Kỹ thuật & CNTT',
-        position: position.trim() || 'Chuyên viên',
+        position: position.trim() || 'Nhân viên',
         joinDate: editingEmployee?.joinDate || new Date().toISOString().slice(0, 10),
-        standardAnnualLeave: Number(standardAnnualLeave) >= 0 ? Number(standardAnnualLeave) : 12,
+        standardAnnualLeave:
+          Number(standardAnnualLeave) >= 0 ? Number(standardAnnualLeave) : 12,
         status,
         avatarUrl: getPreviewAvatar(),
       },
@@ -157,7 +187,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 : 'Thêm Hồ sơ Nhân sự Mới'}
             </h3>
             <p className="text-xs text-slate-300 mt-0.5">
-              Điền đầy đủ thông tin định danh và quỹ phép năm tiêu chuẩn
+              Điền đầy đủ thông tin định danh, ngày cấp CCCD, chức danh và quỹ phép năm
             </p>
           </div>
           <button
@@ -240,7 +270,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 required
                 value={employeeCode}
                 onChange={(e) => setEmployeeCode(e.target.value)}
-                placeholder="VD: NV009"
+                placeholder="VD: NV001"
                 className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
@@ -268,7 +298,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 htmlFor="emp-dob-input"
                 className="block text-xs font-semibold text-slate-700 mb-1"
               >
-                Ngày tháng năm sinh
+                Ngày sinh
               </label>
               <input
                 id="emp-dob-input"
@@ -317,17 +347,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
             <div>
               <label
-                htmlFor="emp-phone-input"
+                htmlFor="emp-cccd-date-input"
                 className="block text-xs font-semibold text-slate-700 mb-1"
               >
-                Số điện thoại
+                Ngày cấp CCCD
               </label>
               <input
-                id="emp-phone-input"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="VD: 0912345678"
+                id="emp-cccd-date-input"
+                type="date"
+                value={cccdDate}
+                onChange={(e) => setCccdDate(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
@@ -344,7 +373,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="VD: Số 25 Láng Hạ, Đống Đa, Hà Nội"
+                placeholder="VD: Khu Công Nghiệp Lương Sơn, Xã Lương Sơn, Tỉnh Phú Thọ"
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
@@ -387,6 +416,48 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
             <div>
               <label
+                htmlFor="emp-pos-select"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Chức danh / Vị trí
+              </label>
+              <select
+                id="emp-pos-select"
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                {position &&
+                  !effectivePositions.some((p) => p.name === position) && (
+                    <option value={position}>{position}</option>
+                  )}
+                {effectivePositions.map((pos) => (
+                  <option key={pos.id} value={pos.name}>
+                    {pos.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="emp-phone-input"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Số điện thoại
+              </label>
+              <input
+                id="emp-phone-input"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="VD: 0912345678"
+                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+              />
+            </div>
+
+            <div>
+              <label
                 htmlFor="emp-leave-input"
                 className="block text-xs font-semibold text-slate-700 mb-1"
               >
@@ -404,7 +475,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
               />
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label
                 htmlFor="emp-status-select"
                 className="block text-xs font-semibold text-slate-700 mb-1"
@@ -422,23 +493,6 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 <option value="Nghỉ thai sản">Nghỉ thai sản</option>
                 <option value="Đã nghỉ việc">Đã nghỉ việc</option>
               </select>
-            </div>
-
-            <div>
-              <label
-                htmlFor="emp-pos-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
-              >
-                Chức danh / Vị trí
-              </label>
-              <input
-                id="emp-pos-input"
-                type="text"
-                value={position}
-                onChange={(e) => setPosition(e.target.value)}
-                placeholder="VD: Chuyên viên Nhân sự"
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
-              />
             </div>
           </div>
 
@@ -464,3 +518,4 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     </div>
   );
 };
+

@@ -325,6 +325,8 @@ export function filterEmployees(
       emp.fullName.toLowerCase().includes(q) ||
       emp.employeeCode.toLowerCase().includes(q) ||
       emp.cccd.toLowerCase().includes(q) ||
+      (emp.cccdDate || '').toLowerCase().includes(q) ||
+      (emp.position || '').toLowerCase().includes(q) ||
       emp.phone.toLowerCase().includes(q) ||
       emp.address.toLowerCase().includes(q)
     );

@@ -6,6 +6,7 @@ import {
   HRBackupPayload,
   LeaveRecord,
   LeaveRecordType,
+  PositionItem,
   RegimeSubtype,
   UserAccount,
   UserRole,
@@ -14,9 +15,9 @@ import {
 import {
   createAvatarSvgDataUri,
   INITIAL_COMPANY_UNITS,
-  INITIAL_DEPARTMENT_GROUPS,
   INITIAL_EMPLOYEES,
   INITIAL_LEAVE_RECORDS,
+  INITIAL_POSITIONS,
   INITIAL_USER_ACCOUNTS,
 } from '../data/mockData';
 import { formatDateVN, LEAVE_TYPE_META } from './hrCalculations';
@@ -64,6 +65,13 @@ export interface SupabaseDepartmentRow {
   created_at?: string;
 }
 
+export interface SupabasePositionRow {
+  id: string;
+  company_id: string | null;
+  name: string;
+  created_at?: string;
+}
+
 export interface SupabaseAppUserRow {
   id: string;
   username: string;
@@ -81,9 +89,11 @@ export interface SupabaseEmployeeRow {
   dob: string | null;
   gender: string | null;
   cccd: string | null;
+  cccd_date?: string | null;
   phone: string | null;
   address: string | null;
   department: string | null;
+  position?: string | null;
   avatar_url: string | null;
   annual_leave_quota: number | null;
   status: string | null;
@@ -204,6 +214,18 @@ export function mapSupabaseRowToDepartment(
 }
 
 /**
+ * Maps a Supabase `positions` row to `PositionItem`
+ */
+export function mapSupabaseRowToPosition(row: SupabasePositionRow): PositionItem {
+  return {
+    id: String(row.id),
+    companyId: row.company_id || null,
+    name: row.name || 'Nhân viên',
+    createdAt: row.created_at,
+  };
+}
+
+/**
  * Maps a Supabase `app_users` row to `UserAccount`
  */
 export function mapSupabaseRowToAppUser(row: SupabaseAppUserRow): UserAccount {
@@ -239,10 +261,11 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
     dob: row.dob || '1995-01-01',
     gender: (row.gender as Gender) || 'Nam',
     cccd: row.cccd || '',
+    cccdDate: row.cccd_date || '',
     phone: row.phone || '',
     address: row.address || '',
     department: row.department || 'Phòng Kỹ thuật & CNTT',
-    position: 'Chuyên viên',
+    position: row.position || 'Nhân viên',
     joinDate: row.created_at ? row.created_at.slice(0, 10) : '2024-01-01',
     standardAnnualLeave:
       row.annual_leave_quota !== null && row.annual_leave_quota !== undefined
@@ -404,6 +427,7 @@ export async function uploadImageToHrBucket(
 let initPromise: Promise<{
   companies: CompanyUnit[];
   departments: DepartmentGroup[];
+  positions: PositionItem[];
   accounts: UserAccount[];
   employees: Employee[];
   records: LeaveRecord[];
@@ -424,9 +448,11 @@ async function seedInitialDataToSupabase(companyId?: string | null): Promise<{
     dob: emp.dob,
     gender: emp.gender,
     cccd: emp.cccd,
+    cccd_date: emp.cccdDate || null,
     phone: emp.phone,
     address: emp.address,
     department: emp.department,
+    position: emp.position || 'Nhân viên',
     avatar_url: emp.avatarUrl,
     annual_leave_quota: emp.standardAnnualLeave,
     status: emp.status,
@@ -497,7 +523,7 @@ async function seedInitialDataToSupabase(companyId?: string | null): Promise<{
 }
 
 /**
- * Loads `companies`, `departments`, `app_users`, `employees`, and `leave_logs` from Supabase.
+ * Loads `companies`, `departments`, `positions`, `app_users`, `employees`, and `leave_logs` from Supabase.
  * Checks `companies.is_initialized`: if `is_initialized = true` (or localStorage flag is true),
  * NEVER auto-seeds mock data when `employees` or `leave_logs` is empty (0 records).
  */
@@ -506,6 +532,7 @@ export async function loadOrSeedSupabaseData(
 ): Promise<{
   companies: CompanyUnit[];
   departments: DepartmentGroup[];
+  positions: PositionItem[];
   accounts: UserAccount[];
   employees: Employee[];
   records: LeaveRecord[];
@@ -516,23 +543,27 @@ export async function loadOrSeedSupabaseData(
 
   initPromise = (async () => {
     try {
-      const [compRows, deptRows, userRows, empRows, logRows] = await Promise.all([
-        supabaseRestFetch<SupabaseCompanyRow[]>(
-          'companies?select=*&order=created_at.asc'
-        ).catch(() => [] as SupabaseCompanyRow[]),
-        supabaseRestFetch<SupabaseDepartmentRow[]>(
-          'departments?select=*&order=created_at.asc'
-        ).catch(() => [] as SupabaseDepartmentRow[]),
-        supabaseRestFetch<SupabaseAppUserRow[]>(
-          'app_users?select=*&order=created_at.asc'
-        ).catch(() => [] as SupabaseAppUserRow[]),
-        supabaseRestFetch<SupabaseEmployeeRow[]>(
-          'employees?select=*&order=employee_code.asc'
-        ),
-        supabaseRestFetch<SupabaseLeaveLogRow[]>(
-          'leave_logs?select=*&order=start_date.desc'
-        ),
-      ]);
+      const [compRows, deptRows, posRows, userRows, empRows, logRows] =
+        await Promise.all([
+          supabaseRestFetch<SupabaseCompanyRow[]>(
+            'companies?select=*&order=created_at.asc'
+          ).catch(() => [] as SupabaseCompanyRow[]),
+          supabaseRestFetch<SupabaseDepartmentRow[]>(
+            'departments?select=*&order=created_at.asc'
+          ).catch(() => [] as SupabaseDepartmentRow[]),
+          supabaseRestFetch<SupabasePositionRow[]>(
+            'positions?select=*&order=created_at.asc'
+          ).catch(() => [] as SupabasePositionRow[]),
+          supabaseRestFetch<SupabaseAppUserRow[]>(
+            'app_users?select=*&order=created_at.asc'
+          ).catch(() => [] as SupabaseAppUserRow[]),
+          supabaseRestFetch<SupabaseEmployeeRow[]>(
+            'employees?select=*&order=employee_code.asc'
+          ),
+          supabaseRestFetch<SupabaseLeaveLogRow[]>(
+            'leave_logs?select=*&order=start_date.desc'
+          ),
+        ]);
 
       // 1. Companies & is_initialized check
       let companies = (compRows || []).map(mapSupabaseRowToCompany);
@@ -585,9 +616,37 @@ export async function loadOrSeedSupabaseData(
         mapSupabaseRowToDepartment(r, i)
       );
 
+      // 5. Positions (`positions` table, seeded with 4 default positions if empty)
+      let positions: PositionItem[] = [];
+      if (posRows && posRows.length > 0) {
+        positions = posRows.map(mapSupabaseRowToPosition);
+      } else {
+        try {
+          const seedPosPayloads = INITIAL_POSITIONS.map((p) => ({
+            company_id: companies[0]?.id || null,
+            name: p.name,
+          }));
+          const insertedPos = await supabaseRestFetch<SupabasePositionRow[]>(
+            'positions?select=*',
+            {
+              method: 'POST',
+              headers: { Prefer: 'return=representation' },
+              body: JSON.stringify(seedPosPayloads),
+            }
+          );
+          positions =
+            insertedPos && insertedPos.length > 0
+              ? insertedPos.map(mapSupabaseRowToPosition)
+              : INITIAL_POSITIONS;
+        } catch {
+          positions = INITIAL_POSITIONS;
+        }
+      }
+
       return {
         companies,
         departments,
+        positions,
         accounts,
         employees,
         records,
@@ -599,6 +658,7 @@ export async function loadOrSeedSupabaseData(
       return {
         companies: INITIAL_COMPANY_UNITS,
         departments: [],
+        positions: INITIAL_POSITIONS,
         accounts: INITIAL_USER_ACCOUNTS,
         employees: [],
         records: [],
@@ -747,6 +807,66 @@ export async function deleteDepartmentFromSupabase(id: string): Promise<void> {
 }
 
 /* ============================================================================
+   POSITIONS CRUD (`positions` table)
+============================================================================ */
+export async function createPositionInSupabase(
+  pos: Omit<PositionItem, 'id'>,
+  companyId?: string | null
+): Promise<PositionItem> {
+  const payload = {
+    company_id: pos.companyId || companyId || null,
+    name: pos.name,
+  };
+
+  const rows = await supabaseRestFetch<SupabasePositionRow[]>(
+    'positions?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([payload]),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to create position in Supabase');
+  }
+
+  return mapSupabaseRowToPosition(rows[0]);
+}
+
+export async function updatePositionInSupabase(
+  id: string,
+  name: string,
+  companyId?: string | null
+): Promise<PositionItem> {
+  const payload: Record<string, unknown> = { name };
+  if (companyId !== undefined) {
+    payload.company_id = companyId;
+  }
+
+  const rows = await supabaseRestFetch<SupabasePositionRow[]>(
+    `positions?id=eq.${encodeURIComponent(id)}&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to update position in Supabase');
+  }
+
+  return mapSupabaseRowToPosition(rows[0]);
+}
+
+export async function deletePositionFromSupabase(id: string): Promise<void> {
+  await supabaseRestFetch<void>(`positions?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/* ============================================================================
    APP USERS CRUD (`app_users` table)
 ============================================================================ */
 export async function createAppUserInSupabase(
@@ -833,6 +953,7 @@ export async function restoreFromBackupInSupabase(
 ): Promise<{
   companies: CompanyUnit[];
   departments: DepartmentGroup[];
+  positions: PositionItem[];
   employees: Employee[];
   records: LeaveRecord[];
   accounts: UserAccount[];
@@ -901,6 +1022,36 @@ export async function restoreFromBackupInSupabase(
     // Keep backup departments in local state
   }
 
+  // 2b. Sync positions if provided
+  let finalPositions: PositionItem[] =
+    Array.isArray(backup.positions) && backup.positions.length > 0
+      ? backup.positions
+      : INITIAL_POSITIONS;
+  try {
+    if (Array.isArray(backup.positions) && backup.positions.length > 0) {
+      await supabaseRestFetch<void>('positions?id=not.is.null', {
+        method: 'DELETE',
+      }).catch(() => {});
+      const posPayloads = backup.positions.map((p) => ({
+        company_id: p.companyId || targetCompId,
+        name: p.name,
+      }));
+      const insertedPos = await supabaseRestFetch<SupabasePositionRow[]>(
+        'positions?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(posPayloads),
+        }
+      );
+      if (insertedPos && insertedPos.length > 0) {
+        finalPositions = insertedPos.map(mapSupabaseRowToPosition);
+      }
+    }
+  } catch {
+    // Keep finalPositions
+  }
+
   // 3. Insert employees and map old IDs / codes to new Supabase IDs
   const backupEmployees = Array.isArray(backup.employees)
     ? backup.employees
@@ -919,9 +1070,11 @@ export async function restoreFromBackupInSupabase(
         dob: emp.dob,
         gender: emp.gender,
         cccd: emp.cccd,
+        cccd_date: emp.cccdDate || null,
         phone: emp.phone,
         address: emp.address,
         department: emp.department,
+        position: emp.position || 'Nhân viên',
         avatar_url: emp.avatarUrl,
         annual_leave_quota: emp.standardAnnualLeave,
         status: emp.status,
@@ -1023,6 +1176,7 @@ export async function restoreFromBackupInSupabase(
   return {
     companies: finalCompanies,
     departments: finalDepartments,
+    positions: finalPositions,
     employees: finalEmployees,
     records: finalRecords,
     accounts: finalAccounts,
@@ -1044,9 +1198,11 @@ export async function createEmployeeInSupabase(
     dob: empData.dob,
     gender: empData.gender,
     cccd: empData.cccd,
+    cccd_date: empData.cccdDate || null,
     phone: empData.phone,
     address: empData.address,
     department: empData.department,
+    position: empData.position || 'Nhân viên',
     avatar_url: empData.avatarUrl,
     annual_leave_quota: empData.standardAnnualLeave,
     status: empData.status,
@@ -1081,9 +1237,11 @@ export async function bulkCreateEmployeesInSupabase(
     dob: empData.dob,
     gender: empData.gender,
     cccd: empData.cccd,
+    cccd_date: empData.cccdDate || null,
     phone: empData.phone,
     address: empData.address,
     department: empData.department,
+    position: empData.position || 'Nhân viên',
     avatar_url: empData.avatarUrl,
     annual_leave_quota: empData.standardAnnualLeave,
     status: empData.status,
@@ -1115,9 +1273,11 @@ export async function updateEmployeeInSupabase(
     dob: empData.dob,
     gender: empData.gender,
     cccd: empData.cccd,
+    cccd_date: empData.cccdDate || null,
     phone: empData.phone,
     address: empData.address,
     department: empData.department,
+    position: empData.position || 'Nhân viên',
     avatar_url: empData.avatarUrl,
     annual_leave_quota: empData.standardAnnualLeave,
     status: empData.status,
@@ -1236,3 +1396,4 @@ export async function deleteLeaveLogFromSupabase(id: string): Promise<void> {
     { method: 'DELETE' }
   );
 }
+

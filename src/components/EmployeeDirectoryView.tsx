@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import {
   FileText,
+  ClipboardCheck,
   FileSpreadsheet,
   Download,
   Upload,
@@ -27,6 +28,7 @@ interface EmployeeDirectoryViewProps {
   onOpenEditEmployee: (emp: Employee) => void;
   onOpenManageGroups: () => void;
   onExportPDF: (filteredEmployees: Employee[]) => void;
+  onExportPDFSignList: (filteredEmployees: Employee[]) => void;
   onExportExcel: (filteredEmployees: Employee[]) => void;
   onDownloadTemplate: () => void;
   onImportExcelFile: (file: File) => void;
@@ -45,6 +47,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   onOpenEditEmployee,
   onOpenManageGroups,
   onExportPDF,
+  onExportPDFSignList,
   onExportExcel,
   onDownloadTemplate,
   onImportExcelFile,
@@ -104,8 +107,8 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isAdmin
-                  ? 'Quản lý hồ sơ cá nhân, bộ phận làm việc và định mức phép năm tiêu chuẩn'
-                  : 'Chế độ Nhân viên (User): Tra cứu danh bạ nhân sự và định mức phép tiêu chuẩn'}
+                  ? 'Quản lý hồ sơ cá nhân, bộ phận làm việc và chức danh vị trí'
+                  : 'Chế độ Nhân viên (User): Tra cứu danh bạ nhân sự và phòng ban làm việc'}
               </p>
             </div>
           </div>
@@ -114,6 +117,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              data-testid="btn-export-pdf-full"
               onClick={() => onExportPDF(filteredEmployees)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
@@ -123,6 +127,17 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
 
             <button
               type="button"
+              data-testid="btn-export-pdf-sign-list"
+              onClick={() => onExportPDFSignList(filteredEmployees)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <ClipboardCheck className="w-3.5 h-3.5 text-[#0D9488]" />
+              <span>Xuất PDF Danh sách</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="btn-export-excel"
               onClick={() => onExportExcel(filteredEmployees)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
@@ -134,6 +149,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
               <>
                 <button
                   type="button"
+                  data-testid="btn-download-excel-template"
                   onClick={onDownloadTemplate}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
@@ -143,6 +159,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
 
                 <button
                   type="button"
+                  data-testid="btn-import-excel"
                   onClick={() => fileInputRef.current?.click()}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
@@ -161,6 +178,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
 
                 <button
                   type="button"
+                  data-testid="btn-add-employee"
                   onClick={onOpenAddEmployee}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
                 >
@@ -194,7 +212,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm kiếm theo Họ tên, Mã NV, Số CCCD, Số điện thoại hoặc Địa chỉ..."
+              placeholder="Tìm kiếm theo Họ tên, Mã nhân viên, Số CCCD hoặc Địa chỉ..."
               aria-label="Tìm kiếm nhân sự"
               className="w-full pl-9 pr-4 py-2 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] transition-colors"
             />
@@ -255,12 +273,16 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       </div>
 
-      {/* Employee Data Table Card */}
+      {/* Employee Data Table Card (11 exact columns in strict order) */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1000px]">
+          <table
+            data-testid="employees-table"
+            className="w-full text-left border-collapse min-w-[1050px]"
+          >
             <thead>
               <tr className="bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase">
+                {/* 1. Checkbox chọn */}
                 <th className="py-3 px-2.5 w-9 text-center">
                   <input
                     type="checkbox"
@@ -272,26 +294,34 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     className="w-3.5 h-3.5 rounded accent-[#0D9488] cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-2 w-10 text-center">STT</th>
-                <th className="py-3 px-2 w-12 text-center">Ảnh</th>
-                <th className="py-3 px-2.5">Mã NV</th>
-                <th className="py-3 px-2.5 sticky left-0 z-10 bg-[#0F232E] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">
+                {/* 2. STT */}
+                <th className="py-3 px-2 w-12 text-center">STT</th>
+                {/* 3. Mã nhân viên */}
+                <th className="py-3 px-3">Mã nhân viên</th>
+                {/* 4. Họ tên (kèm ảnh đại diện nhỏ nếu có) */}
+                <th className="py-3 px-3 sticky left-0 z-10 bg-[#0F232E] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">
                   Họ tên
                 </th>
-                <th className="py-3 px-2.5">Ngày sinh</th>
+                {/* 5. Ngày sinh */}
+                <th className="py-3 px-2.5 text-center">Ngày sinh</th>
+                {/* 6. Giới tính */}
                 <th className="py-3 px-2 text-center">Giới tính</th>
+                {/* 7. Địa chỉ */}
+                <th className="py-3 px-3">Địa chỉ</th>
+                {/* 8. Số CCCD */}
                 <th className="py-3 px-2.5">Số CCCD</th>
-                <th className="py-3 px-2.5">Số ĐT</th>
-                <th className="py-3 px-2.5">Địa chỉ</th>
-                <th className="py-3 px-2.5">Nhóm / Bộ phận</th>
-                <th className="py-3 px-2 text-center">Phép năm</th>
+                {/* 9. Ngày cấp CCCD */}
+                <th className="py-3 px-2.5 text-center">Ngày cấp CCCD</th>
+                {/* 10. Nhóm / Bộ phận (kèm hiển thị phụ Chức danh/Vị trí) */}
+                <th className="py-3 px-3">Nhóm / Bộ phận</th>
+                {/* 11. Thao tác */}
                 <th className="py-3 px-2.5 text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/70 text-xs">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center text-slate-500">
+                  <td colSpan={11} className="py-12 text-center text-slate-500">
                     Không tìm thấy nhân sự nào khớp với bộ lọc hiện tại.
                   </td>
                 </tr>
@@ -307,7 +337,8 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                           : 'hover:bg-slate-50/90'
                       }`}
                     >
-                      <td className="py-2.5 px-3 text-center">
+                      {/* 1. Checkbox chọn */}
+                      <td className="py-2.5 px-2.5 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -316,57 +347,75 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                           className="w-3.5 h-3.5 rounded accent-[#0D9488] cursor-pointer"
                         />
                       </td>
-                      <td className="py-2.5 px-2.5 text-center font-mono tabular-nums text-slate-500">
+                      {/* 2. STT */}
+                      <td className="py-2.5 px-2 text-center font-mono tabular-nums text-slate-500">
                         {idx + 1}
                       </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <img
-                          src={emp.avatarUrl}
-                          alt={emp.fullName}
-                          referrerPolicy="no-referrer"
-                          className="w-8 h-8 rounded-full object-cover mx-auto border border-slate-200"
-                        />
-                      </td>
+                      {/* 3. Mã nhân viên */}
                       <td className="py-2.5 px-3 font-mono tabular-nums font-bold text-[#0D9488] whitespace-nowrap">
                         {emp.employeeCode}
                       </td>
+                      {/* 4. Họ tên (kèm ảnh đại diện nhỏ nếu có) */}
                       <td
-                        className={`py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] ${
+                        className={`py-2.5 px-3 whitespace-nowrap sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] ${
                           isSelected
                             ? 'bg-teal-50 group-hover:bg-teal-50'
                             : 'bg-white group-hover:bg-slate-50'
                         }`}
                       >
-                        <div>{emp.fullName}</div>
-                        <div className="text-[11px] font-normal text-slate-400">
-                          {emp.status}
+                        <div className="flex items-center gap-2.5">
+                          {emp.avatarUrl && (
+                            <img
+                              src={emp.avatarUrl}
+                              alt={emp.fullName}
+                              referrerPolicy="no-referrer"
+                              className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0"
+                            />
+                          )}
+                          <div>
+                            <div className="font-bold text-slate-900">
+                              {emp.fullName}
+                            </div>
+                            <div className="text-[11px] font-normal text-slate-400">
+                              {emp.status}
+                            </div>
+                          </div>
                         </div>
                       </td>
-                      <td className="py-2.5 px-3 font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                        {formatDateVN(emp.dob)}
+                      {/* 5. Ngày sinh */}
+                      <td className="py-2.5 px-2.5 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                        {emp.dob ? formatDateVN(emp.dob) : '—'}
                       </td>
-                      <td className="py-2.5 px-2.5 text-center text-slate-700 whitespace-nowrap">
+                      {/* 6. Giới tính */}
+                      <td className="py-2.5 px-2 text-center text-slate-700 whitespace-nowrap">
                         {emp.gender}
                       </td>
-                      <td className="py-2.5 px-3 font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                        {emp.cccd}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                        {emp.phone}
-                      </td>
+                      {/* 7. Địa chỉ */}
                       <td
-                        className="py-2.5 px-3 text-slate-600 max-w-[220px] truncate"
+                        className="py-2.5 px-3 text-slate-600 max-w-[240px] truncate"
                         title={emp.address}
                       >
-                        {emp.address}
+                        {emp.address || '—'}
                       </td>
-                      <td className="py-2.5 px-3 font-medium text-slate-800 whitespace-nowrap">
-                        {emp.department}
+                      {/* 8. Số CCCD */}
+                      <td className="py-2.5 px-2.5 font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                        {emp.cccd || '—'}
                       </td>
-                      <td className="py-2.5 px-3 text-center font-mono tabular-nums font-bold text-slate-900">
-                        {emp.standardAnnualLeave} ngày
+                      {/* 9. Ngày cấp CCCD */}
+                      <td className="py-2.5 px-2.5 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                        {emp.cccdDate ? formatDateVN(emp.cccdDate) : '—'}
                       </td>
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      {/* 10. Nhóm / Bộ phận (kèm hiển thị phụ Chức danh/Vị trí) */}
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="font-semibold text-slate-800">
+                          {emp.department}
+                        </div>
+                        <div className="text-[11px] font-medium text-[#0D9488]">
+                          {emp.position || 'Nhân viên'}
+                        </div>
+                      </td>
+                      {/* 11. Thao tác */}
+                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                         {isAdmin ? (
                           <div className="inline-flex items-center gap-1">
                             <button
@@ -403,3 +452,4 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
     </div>
   );
 };
+

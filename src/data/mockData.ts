@@ -3,8 +3,16 @@ import {
   DepartmentGroup,
   Employee,
   LeaveRecord,
+  PositionItem,
   UserAccount,
 } from '../types/hr';
+
+export const INITIAL_POSITIONS: PositionItem[] = [
+  { id: 'pos-1', name: 'Trưởng bộ phận' },
+  { id: 'pos-2', name: 'Trưởng nhóm' },
+  { id: 'pos-3', name: 'Phó nhóm' },
+  { id: 'pos-4', name: 'Nhân viên' },
+];
 
 export const INITIAL_COMPANY_UNITS: CompanyUnit[] = [
   {

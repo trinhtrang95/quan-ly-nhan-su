@@ -7,9 +7,11 @@ import {
 } from '../types/hr';
 import { formatDateVN } from '../utils/hrCalculations';
 
+export type ReportPrintType = 'employees' | 'employees_sign' | 'annual_matrix';
+
 interface PrintReportModalProps {
   isOpen: boolean;
-  reportType: 'employees' | 'annual_matrix';
+  reportType: ReportPrintType;
   employees: Employee[];
   matrixRows: EmployeeAnnualMatrixRow[];
   year: number;
@@ -28,6 +30,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const isSignList = reportType === 'employees_sign';
+  const isFullEmployeeList = reportType === 'employees';
+
   const handleTriggerPrint = () => {
     window.print();
   };
@@ -36,22 +41,36 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
     const contentEl = document.getElementById('printable-a4-sheet');
     if (!contentEl) return;
 
+    const pageCss = isSignList
+      ? `@page { size: A4 portrait; margin: 20mm 15mm 20mm 30mm; }
+         body { font-family: "Times New Roman", Times, serif; font-size: 13pt; color: #000000; margin: 0; }
+         h2 { font-family: "Times New Roman", Times, serif; font-size: 14pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 16px 0; }
+         table { width: 100%; border-collapse: collapse; font-family: "Times New Roman", Times, serif; font-size: 13pt; }
+         th { font-weight: bold; padding: 10px 8px; border: 1px solid #000000; text-align: center; }
+         td { padding: 12px 8px; border: 1px solid #000000; }
+         .text-center { text-align: center; }
+         .text-left { text-align: left; }`
+      : `@page { size: A4 landscape; margin: 12mm; }
+         body { font-family: "Times New Roman", Arial, sans-serif; color: #0F232E; margin: 12px; }
+         h2 { font-size: 15pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 14px 0; }
+         table { width: 100%; border-collapse: collapse; font-size: 11pt; margin-top: 10px; }
+         th { background-color: #0F232E; color: #FFFFFF; padding: 7px 6px; border: 1px solid #334155; text-align: center; }
+         td { padding: 6px; border: 1px solid #CBD5E1; text-align: center; }
+         .text-left { text-align: left; }`;
+
+    const docTitle = isSignList
+      ? 'Danh_Sach_Ky_Nhan_Nhan_Vien_Phong_Ky_Thuat_A4'
+      : isFullEmployeeList
+      ? 'Danh_Sach_Nhan_Vien_Phong_Ky_Thuat_A4'
+      : `Bao_Cao_Ton_Phep_Nam_${year}_A4_Landscape`;
+
     const fullHtml = `<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <title>${
-    reportType === 'employees'
-      ? 'Bao_Cao_Danh_Sach_Nhan_Su_A4'
-      : `Bao_Cao_Ton_Phep_Nam_${year}_A4_Landscape`
-  }</title>
+  <title>${docTitle}</title>
   <style>
-    @page { size: A4 landscape; margin: 10mm; }
-    body { font-family: Arial, sans-serif; color: #0F232E; margin: 20px; }
-    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 12px; }
-    th { background-color: #0F232E; color: #FFFFFF; padding: 6px; border: 1px solid #334155; text-transform: uppercase; }
-    td { padding: 5px 6px; border: 1px solid #CBD5E1; text-align: center; }
-    .text-left { text-align: left; }
+    ${pageCss}
   </style>
 </head>
 <body>
@@ -66,10 +85,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download =
-      reportType === 'employees'
-        ? `HR_PRO_Bao_Cao_PDF_Danh_Sach_Nhan_Su.html`
-        : `HR_PRO_Bao_Cao_PDF_Ton_Phep_Nam_${year}_A4.html`;
+    a.download = `${docTitle}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -83,17 +99,37 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
       aria-labelledby="print-modal-title"
       className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
     >
-      <div className="bg-white rounded-xl border border-slate-200 shadow-2xl w-full max-w-6xl overflow-hidden my-auto">
+      {/* Dynamic @page rule for direct browser print */}
+      <style>
+        {isSignList
+          ? `@media print {
+               @page { size: A4 portrait; margin: 20mm 15mm 20mm 30mm; }
+               body { font-family: "Times New Roman", Times, serif !important; }
+             }`
+          : `@media print {
+               @page { size: A4 landscape; margin: 12mm; }
+             }`}
+      </style>
+
+      <div
+        className={`bg-white rounded-xl border border-slate-200 shadow-2xl w-full ${
+          isSignList ? 'max-w-4xl' : 'max-w-6xl'
+        } overflow-hidden my-auto`}
+      >
         {/* Top Action Bar (hidden when printing) */}
         <div className="no-print bg-[#0F232E] text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 id="print-modal-title" className="text-sm font-bold">
-              {reportType === 'employees'
-                ? 'Xem trước Bản in PDF — Danh sách Hồ sơ Nhân sự (Khổ ngang A4)'
+              {isSignList
+                ? 'Xem trước Bản in PDF — Danh sách Ký nhận Nhân viên (Khổ dọc A4 - NĐ 30/2020/NĐ-CP)'
+                : isFullEmployeeList
+                ? 'Xem trước Bản in PDF — DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT'
                 : `Xem trước Bản in PDF — Ma trận Tồn phép Năm ${year} (Khổ ngang A4)`}
             </h3>
             <p className="text-xs text-slate-300">
-              Định dạng chuẩn khổ ngang A4 sẵn sàng in hoặc lưu thành tệp PDF
+              {isSignList
+                ? 'Chuẩn A4 dọc (Lề trái 30mm, phải 15mm, trên/dưới 20mm), font Times New Roman 13pt-14pt'
+                : 'Sẵn sàng in trực tiếp hoặc lưu thành tệp PDF'}
             </p>
           </div>
 
@@ -127,70 +163,151 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
           </div>
         </div>
 
-        {/* Printable A4 Landscape Sheet */}
+        {/* Printable Sheet */}
         <div
           id="printable-a4-sheet"
-          className="p-6 md:p-8 max-h-[80vh] overflow-y-auto bg-white text-slate-900"
+          className={`max-h-[80vh] overflow-y-auto bg-white text-slate-900 ${
+            isSignList
+              ? 'py-[20mm] pr-[15mm] pl-[30mm] font-serif text-[13pt]'
+              : 'p-6 md:p-8'
+          }`}
+          style={
+            isSignList
+              ? { fontFamily: '"Times New Roman", Times, serif' }
+              : undefined
+          }
         >
-          {/* Official Vietnamese Enterprise Header */}
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b-2 border-slate-800">
-            <div>
-              <div className="text-xs font-bold uppercase text-slate-800">
-                CÔNG TY CỔ PHẦN CÔNG NGHỆ &amp; DỊCH VỤ HR PRO
-              </div>
-              <div className="text-xs text-slate-600">
-                PHÒNG HÀNH CHÍNH - NHÂN SỰ
-              </div>
-              <div className="text-[11px] font-mono text-slate-500 mt-0.5">
-                Ngày xuất báo cáo: {new Date().toLocaleDateString('vi-VN')}
-              </div>
-            </div>
-            <div className="text-left sm:text-right">
-              <div className="text-xs font-bold uppercase text-slate-800">
-                CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
-              </div>
-              <div className="text-xs font-semibold text-slate-700">
-                Độc lập - Tự do - Hạnh phúc
-              </div>
-            </div>
-          </div>
-
-          <div className="text-center my-5">
-            <h2 className="text-lg font-extrabold text-[#0F232E] uppercase">
-              {reportType === 'employees'
-                ? 'BÁO CÁO DANH SÁCH TRÍCH NGANG HỒ SƠ NHÂN SỰ'
-                : `BÁO CÁO TỔNG HỢP TỒN PHÉP NĂM & CHẤM CÔNG NĂM ${year}`}
+          {/* Single Centered Title — No National Motto, No Company Header, No Signatures */}
+          <div className="text-center mb-5">
+            <h2
+              data-testid="pdf-report-main-title"
+              className={
+                isSignList
+                  ? 'text-[14pt] font-bold text-black uppercase tracking-wide'
+                  : 'text-lg font-extrabold text-[#0F232E] uppercase tracking-wide'
+              }
+            >
+              {reportType === 'annual_matrix'
+                ? `BÁO CÁO TỔNG HỢP TỒN PHÉP NĂM & CHẤM CÔNG NĂM ${year}`
+                : 'DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT'}
             </h2>
-            <p className="text-xs text-slate-600 mt-1">
-              {reportType === 'employees'
-                ? `Tổng số nhân sự trong danh sách: ${employees.length} nhân sự`
-                : `Chế độ kết xuất: ${
-                    viewMode === 'all'
-                      ? 'Tổng hợp tất cả'
-                      : viewMode === 'annual_leave'
-                      ? 'Thống kê Phép năm'
-                      : viewMode === 'unpaid_leave'
-                      ? 'Thống kê Nghỉ không lương'
-                      : 'Thống kê Giờ đi muộn'
-                  } | Tổng số: ${matrixRows.length} nhân sự`}
-            </p>
+            {reportType === 'annual_matrix' && (
+              <p className="text-xs text-slate-600 mt-1">
+                {`Chế độ kết xuất: ${
+                  viewMode === 'all'
+                    ? 'Tổng hợp tất cả'
+                    : viewMode === 'annual_leave'
+                    ? 'Thống kê Phép năm'
+                    : viewMode === 'unpaid_leave'
+                    ? 'Thống kê Nghỉ không lương'
+                    : 'Thống kê Giờ đi muộn'
+                } | Tổng số: ${matrixRows.length} nhân sự`}
+              </p>
+            )}
           </div>
 
-          {reportType === 'employees' ? (
+          {/* CASE 1: XUẤT PDF DANH SÁCH (KÝ NHẬN - 4 CỘT CHUẨN NGHỊ ĐỊNH 30/2020/NĐ-CP) */}
+          {isSignList && (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs border border-slate-300">
+              <table
+                data-testid="pdf-sign-list-table"
+                className="w-full border-collapse border border-black text-[13pt] text-black"
+                style={{ fontFamily: '"Times New Roman", Times, serif' }}
+              >
                 <thead>
-                  <tr className="bg-[#0F232E] text-white uppercase text-[11px]">
-                    <th className="p-2 border border-slate-600 text-center">STT</th>
-                    <th className="p-2 border border-slate-600">Mã NV</th>
-                    <th className="p-2 border border-slate-600">Họ và tên</th>
-                    <th className="p-2 border border-slate-600 text-center">Ngày sinh</th>
-                    <th className="p-2 border border-slate-600 text-center">Giới tính</th>
-                    <th className="p-2 border border-slate-600">Số CCCD</th>
-                    <th className="p-2 border border-slate-600">Số điện thoại</th>
+                  <tr className="font-bold">
+                    <th
+                      style={{ width: '12%' }}
+                      className="py-2.5 px-2 border border-black text-center"
+                    >
+                      STT
+                    </th>
+                    <th
+                      style={{ width: '22%' }}
+                      className="py-2.5 px-2 border border-black text-center"
+                    >
+                      Mã nhân viên
+                    </th>
+                    <th
+                      style={{ width: '41%' }}
+                      className="py-2.5 px-3 border border-black text-left"
+                    >
+                      Họ tên
+                    </th>
+                    <th
+                      style={{ width: '25%' }}
+                      className="py-2.5 px-2 border border-black text-center"
+                    >
+                      Ký/Nhận
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((emp, idx) => (
+                    <tr key={emp.id}>
+                      <td
+                        style={{ padding: '12px 8px' }}
+                        className="border border-black text-center"
+                      >
+                        {idx + 1}
+                      </td>
+                      <td
+                        style={{ padding: '12px 8px' }}
+                        className="border border-black text-center font-semibold"
+                      >
+                        {emp.employeeCode}
+                      </td>
+                      <td
+                        style={{ padding: '12px 10px' }}
+                        className="border border-black text-left"
+                      >
+                        {emp.fullName}
+                      </td>
+                      <td
+                        style={{ padding: '12px 8px' }}
+                        className="border border-black text-center"
+                      >
+                        {/* Cột Ký/Nhận để trống hoàn toàn cho nhân viên ký tay */}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* CASE 2: XUẤT PDF BẢNG ĐẦY ĐỦ THÔNG TIN (9 CỘT ĐÚNG THỨ TỰ) */}
+          {isFullEmployeeList && (
+            <div className="overflow-x-auto">
+              <table
+                data-testid="pdf-full-employees-table"
+                className="w-full text-left border-collapse text-xs border border-slate-300"
+              >
+                <thead>
+                  <tr className="bg-[#0F232E] text-white text-[11px] font-bold">
+                    <th className="p-2 border border-slate-600 text-center">
+                      STT
+                    </th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Mã nhân viên
+                    </th>
+                    <th className="p-2 border border-slate-600">Họ tên</th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Ngày sinh
+                    </th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Giới tính
+                    </th>
                     <th className="p-2 border border-slate-600">Địa chỉ</th>
-                    <th className="p-2 border border-slate-600">Nhóm / Bộ phận</th>
-                    <th className="p-2 border border-slate-600 text-center">Phép năm</th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Số CCCD
+                    </th>
+                    <th className="p-2 border border-slate-600 text-center">
+                      Ngày cấp CCCD
+                    </th>
+                    <th className="p-2 border border-slate-600">
+                      Nhóm / Bộ phận
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,46 +316,52 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                       <td className="p-2 border border-slate-300 text-center font-mono">
                         {idx + 1}
                       </td>
-                      <td className="p-2 border border-slate-300 font-mono font-bold">
+                      <td className="p-2 border border-slate-300 text-center font-mono font-bold">
                         {emp.employeeCode}
                       </td>
                       <td className="p-2 border border-slate-300 font-semibold">
                         {emp.fullName}
                       </td>
                       <td className="p-2 border border-slate-300 text-center font-mono">
-                        {formatDateVN(emp.dob)}
+                        {emp.dob ? formatDateVN(emp.dob) : ''}
                       </td>
                       <td className="p-2 border border-slate-300 text-center">
                         {emp.gender}
                       </td>
-                      <td className="p-2 border border-slate-300 font-mono">
+                      <td className="p-2 border border-slate-300">
+                        {emp.address}
+                      </td>
+                      <td className="p-2 border border-slate-300 text-center font-mono">
                         {emp.cccd}
                       </td>
-                      <td className="p-2 border border-slate-300 font-mono">
-                        {emp.phone}
+                      <td className="p-2 border border-slate-300 text-center font-mono">
+                        {emp.cccdDate ? formatDateVN(emp.cccdDate) : ''}
                       </td>
-                      <td className="p-2 border border-slate-300">{emp.address}</td>
                       <td className="p-2 border border-slate-300">
                         {emp.department}
-                      </td>
-                      <td className="p-2 border border-slate-300 text-center font-mono font-bold">
-                        {emp.standardAnnualLeave}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          ) : (
+          )}
+
+          {/* CASE 3: BÁO CÁO MA TRẬN TỒN PHÉP NĂM */}
+          {reportType === 'annual_matrix' && (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-[11px] border border-slate-300">
                 <thead>
                   <tr className="bg-[#0F232E] text-white uppercase">
-                    <th className="p-1.5 border border-slate-600 text-center">STT</th>
+                    <th className="p-1.5 border border-slate-600 text-center">
+                      STT
+                    </th>
                     <th className="p-1.5 border border-slate-600">Mã NV</th>
                     <th className="p-1.5 border border-slate-600">Họ tên</th>
                     <th className="p-1.5 border border-slate-600">Bộ phận</th>
-                    <th className="p-1.5 border border-slate-600 text-center">Tổng phép</th>
+                    <th className="p-1.5 border border-slate-600 text-center">
+                      Tổng phép
+                    </th>
                     {Array.from({ length: 12 }, (_, idx) => (
                       <th
                         key={idx + 1}
@@ -247,15 +370,26 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                         T{idx + 1}
                       </th>
                     ))}
-                    <th className="p-1.5 border border-slate-600 text-center">Đã nghỉ</th>
-                    <th className="p-1.5 border border-slate-600 text-center">Tồn phép</th>
-                    <th className="p-1.5 border border-slate-600 text-center">K.Lương</th>
-                    <th className="p-1.5 border border-slate-600 text-center">Đi muộn</th>
+                    <th className="p-1.5 border border-slate-600 text-center">
+                      Đã nghỉ
+                    </th>
+                    <th className="p-1.5 border border-slate-600 text-center">
+                      Tồn phép
+                    </th>
+                    <th className="p-1.5 border border-slate-600 text-center">
+                      K.Lương
+                    </th>
+                    <th className="p-1.5 border border-slate-600 text-center">
+                      Đi muộn
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {matrixRows.map((row, idx) => (
-                    <tr key={row.employee.id} className="border-b border-slate-200">
+                    <tr
+                      key={row.employee.id}
+                      className="border-b border-slate-200"
+                    >
                       <td className="p-1.5 border border-slate-300 text-center font-mono">
                         {idx + 1}
                       </td>
@@ -278,7 +412,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                             key={mIdx + 1}
                             className="p-1.5 border border-slate-300 text-center font-mono"
                           >
-                            {cell.annualLeaveDays > 0 ? cell.annualLeaveDays : '-'}
+                            {cell.annualLeaveDays > 0
+                              ? cell.annualLeaveDays
+                              : '-'}
                           </td>
                         );
                       })}
@@ -300,27 +436,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
               </table>
             </div>
           )}
-
-          {/* Signatures Block */}
-          <div className="mt-8 grid grid-cols-3 text-center text-xs">
-            <div>
-              <div className="font-bold text-slate-800">NGƯỜI LẬP BIỂU</div>
-              <div className="text-[11px] text-slate-500">(Ký, ghi rõ họ tên)</div>
-              <div className="mt-14 font-semibold text-slate-800">Bùi Phương Thảo</div>
-            </div>
-            <div>
-              <div className="font-bold text-slate-800">TRƯỞNG PHÒNG HC-NS</div>
-              <div className="text-[11px] text-slate-500">(Ký, ghi rõ họ tên)</div>
-              <div className="mt-14 font-semibold text-slate-800">Trần Thu Trang</div>
-            </div>
-            <div>
-              <div className="font-bold text-slate-800">GIÁM ĐỐC PHÊ DUYỆT</div>
-              <div className="text-[11px] text-slate-500">(Ký, đóng dấu)</div>
-              <div className="mt-14 font-semibold text-slate-800">Nguyễn Minh Quân</div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
   );
 };
+
