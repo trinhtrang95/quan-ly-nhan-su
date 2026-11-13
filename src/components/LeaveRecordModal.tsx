@@ -8,6 +8,7 @@ import {
   Trash2,
   CalendarClock,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import {
   Employee,
@@ -16,13 +17,14 @@ import {
   RegimeSubtype,
 } from '../types/hr';
 import { createLeaveSlipSvgDataUri } from '../data/mockData';
-import { formatDateVN, LEAVE_TYPE_META } from '../utils/hrCalculations';
+import { formatDateVN, LEAVE_TYPE_META, calculateAnnualMatrixReport } from '../utils/hrCalculations';
 import { uploadImageToHrBucket } from '../utils/supabaseService';
 
 interface LeaveRecordModalProps {
   isOpen: boolean;
   editingRecord: LeaveRecord | null;
   employees: Employee[];
+  leaveRecords: LeaveRecord[];
   defaultEmployeeId?: string;
   defaultMonth?: number;
   defaultYear?: number;
@@ -34,6 +36,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   isOpen,
   editingRecord,
   employees,
+  leaveRecords,
   defaultEmployeeId,
   defaultMonth,
   defaultYear,
@@ -77,10 +80,22 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
     } else {
       const initialEmp = defaultEmployeeId || employees[0]?.id || '';
       setEmployeeId(initialEmp);
-      setType('annual_leave');
-      setRegimeSubtype('Ốm đau / Viện phí');
 
       const y = defaultYear || 2026;
+      const emp = employees.find((e) => e.id === initialEmp);
+      if (emp) {
+        const matrix = calculateAnnualMatrixReport([emp], leaveRecords, y);
+        const remaining = matrix[0]?.remainingAnnualLeave ?? emp.standardAnnualLeave;
+        if (remaining > 0) {
+          setType('annual_leave');
+        } else {
+          setType('unpaid_leave');
+        }
+      } else {
+        setType('annual_leave');
+      }
+
+      setRegimeSubtype('Ốm đau / Viện phí');
       const m = defaultMonth ? String(defaultMonth).padStart(2, '0') : '11';
       const defaultDate = `${y}-${m}-12`;
       setStartDate(defaultDate);
@@ -91,7 +106,22 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       setAttachmentTitle('');
       setPaperStatus('Chưa có');
     }
-  }, [isOpen, editingRecord, defaultEmployeeId, defaultMonth, defaultYear, employees]);
+  }, [isOpen, editingRecord, defaultEmployeeId, defaultMonth, defaultYear, employees, leaveRecords]);
+
+  // Smart default when changing employee for a new record
+  useEffect(() => {
+    if (!isOpen || editingRecord || !employeeId) return;
+    const emp = employees.find((e) => e.id === employeeId);
+    if (!emp) return;
+    const y = defaultYear || 2026;
+    const matrix = calculateAnnualMatrixReport([emp], leaveRecords, y);
+    const remaining = matrix[0]?.remainingAnnualLeave ?? emp.standardAnnualLeave;
+    if (remaining > 0) {
+      setType('annual_leave');
+    } else {
+      setType('unpaid_leave');
+    }
+  }, [employeeId, isOpen, editingRecord, employees, leaveRecords, defaultYear]);
 
   if (!isOpen) return null;
 
@@ -260,9 +290,15 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
 
           {/* Step 2: Leave / Late Record Type Radio Cards */}
           <div className="space-y-2">
-            <span className="block text-xs font-bold text-slate-800">
-              2. Loại hình ghi chép <span className="text-red-500">*</span>
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="block text-xs font-bold text-slate-800">
+                2. Loại hình ghi chép <span className="text-red-500">*</span>
+              </span>
+              <span className="text-[11px] text-[#0D9488] font-medium inline-flex items-center gap-1">
+                <Sparkles className="w-3 h-3" />
+                <span>Tự động gợi ý theo quỹ phép tồn</span>
+              </span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {(
                 [

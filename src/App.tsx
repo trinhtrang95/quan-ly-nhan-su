@@ -1441,6 +1441,7 @@ export default function App() {
         isOpen={isLeaveModalOpen}
         editingRecord={editingRecord}
         employees={companyEmployees}
+        leaveRecords={companyRecords}
         defaultEmployeeId={leaveDefaultEmpId}
         defaultMonth={leaveDefaultMonth}
         defaultYear={leaveDefaultYear}
