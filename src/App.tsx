@@ -33,11 +33,13 @@ import {
 } from './utils/exportUtils';
 import {
   bulkCreateEmployeesInSupabase,
+  clearAllDataInSupabase,
   createEmployeeInSupabase,
   createLeaveLogInSupabase,
   deleteEmployeesFromSupabase,
   deleteLeaveLogFromSupabase,
   loadOrSeedSupabaseData,
+  restoreDemoDataInSupabase,
   updateEmployeeInSupabase,
   updateLeaveLogInSupabase,
 } from './utils/supabaseService';
@@ -56,6 +58,7 @@ import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal } from './components/PrintReportModal';
 
 const STORAGE_KEYS = {
+  INITIALIZED: 'hr_pro_initialized',
   EMPLOYEES: 'hr_pro_employees_v2',
   RECORDS: 'hr_pro_leave_records_v2',
   GROUPS: 'hr_pro_groups_v2',
@@ -71,6 +74,24 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isProcessingData, setIsProcessingData] = useState<boolean>(false);
+
+  // Determine if this is the very first time the app is ever initialized
+  const [wasUninitializedOnBoot] = useState<boolean>(() => {
+    try {
+      const existingFlag = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
+      const existingEmps = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
+      const existingRecs = localStorage.getItem(STORAGE_KEYS.RECORDS);
+      if (existingFlag || existingEmps !== null || existingRecs !== null) {
+        localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+        return false;
+      }
+      localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+      return true;
+    } catch {
+      return false;
+    }
+  });
 
   // User Accounts & Auth State
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
@@ -138,18 +159,24 @@ export default function App() {
   const [employees, setEmployees] = useState<Employee[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-      return saved ? JSON.parse(saved) : INITIAL_EMPLOYEES;
+      if (saved !== null) {
+        return JSON.parse(saved);
+      }
+      return wasUninitializedOnBoot ? INITIAL_EMPLOYEES : [];
     } catch {
-      return INITIAL_EMPLOYEES;
+      return wasUninitializedOnBoot ? INITIAL_EMPLOYEES : [];
     }
   });
 
   const [records, setRecords] = useState<LeaveRecord[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.RECORDS);
-      return saved ? JSON.parse(saved) : INITIAL_LEAVE_RECORDS;
+      if (saved !== null) {
+        return JSON.parse(saved);
+      }
+      return wasUninitializedOnBoot ? INITIAL_LEAVE_RECORDS : [];
     } catch {
-      return INITIAL_LEAVE_RECORDS;
+      return wasUninitializedOnBoot ? INITIAL_LEAVE_RECORDS : [];
     }
   });
 
@@ -275,11 +302,12 @@ export default function App() {
     }, 3500);
   };
 
-  // Sync with Supabase on mount (auto-seed if Supabase tables are empty)
-  const syncFromSupabase = async (silent = false) => {
+  // Sync with Supabase on mount (only auto-seed if hr_pro_initialized did not exist)
+  const syncFromSupabase = async (silent = false, allowAutoSeed = false) => {
     setIsSyncing(true);
     try {
-      const result = await loadOrSeedSupabaseData();
+      const result = await loadOrSeedSupabaseData(allowAutoSeed);
+      localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
       if (result.connected) {
         setEmployees(result.employees);
         setRecords(result.records);
@@ -300,7 +328,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    syncFromSupabase(true);
+    syncFromSupabase(true, wasUninitializedOnBoot);
   }, []);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -386,6 +414,7 @@ export default function App() {
 
   const handleDeleteSingleEmployee = async (emp: Employee) => {
     if (!isAdmin) return;
+    localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
     setEmployees((prev) => prev.filter((e) => e.id !== emp.id));
     setRecords((prev) => prev.filter((r) => r.employeeId !== emp.id));
     setSelectedEmpIds((prev) => prev.filter((id) => id !== emp.id));
@@ -402,6 +431,7 @@ export default function App() {
 
   const handleDeleteSelectedEmployees = async () => {
     if (!isAdmin || selectedEmpIds.length === 0) return;
+    localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
     const idsToDelete = [...selectedEmpIds];
     const idSet = new Set(idsToDelete);
     setEmployees((prev) => prev.filter((e) => !idSet.has(e.id)));
@@ -631,12 +661,57 @@ export default function App() {
 
   const handleDeleteLeaveRecord = async (rec: LeaveRecord) => {
     if (!isAdmin) return;
+    localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
     setRecords((prev) => prev.filter((r) => r.id !== rec.id));
     try {
       await deleteLeaveLogFromSupabase(rec.id);
       showToast('Đã xóa bản ghi nghỉ phép / đi muộn khỏi Supabase Cloud.');
     } catch {
       showToast('Đã xóa bản ghi nghỉ phép / đi muộn.');
+    }
+  };
+
+  // Data Administration Handlers: Clear All Data vs Restore Demo Data
+  const handleClearAllData = async () => {
+    if (!isAdmin) return;
+    setIsProcessingData(true);
+    try {
+      localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+      localStorage.setItem(STORAGE_KEYS.EMPLOYEES, '[]');
+      localStorage.setItem(STORAGE_KEYS.RECORDS, '[]');
+      setEmployees([]);
+      setRecords([]);
+      setSelectedEmpIds([]);
+
+      await clearAllDataInSupabase().catch(() => {});
+      showToast(
+        'Đã xóa trắng toàn bộ dữ liệu nhân sự và nghỉ phép về 0. Hệ thống sẵn sàng nhập dữ liệu thật.'
+      );
+    } finally {
+      setIsProcessingData(false);
+    }
+  };
+
+  const handleRestoreDemoData = async () => {
+    if (!isAdmin) return;
+    setIsProcessingData(true);
+    try {
+      localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+      setGroups(INITIAL_DEPARTMENT_GROUPS);
+      try {
+        const restored = await restoreDemoDataInSupabase();
+        setEmployees(restored.employees);
+        setRecords(restored.records);
+        showToast(
+          `Đã khôi phục ${restored.employees.length} nhân sự mẫu & ${restored.records.length} bản ghi phép mẫu lên hệ thống và Supabase.`
+        );
+      } catch {
+        setEmployees(INITIAL_EMPLOYEES);
+        setRecords(INITIAL_LEAVE_RECORDS);
+        showToast('Đã khôi phục bộ dữ liệu mẫu (Demo) thành công.');
+      }
+    } finally {
+      setIsProcessingData(false);
     }
   };
 
@@ -882,6 +957,10 @@ export default function App() {
                 onAddAccount={handleAddAccount}
                 onUpdateAccountRole={handleUpdateAccountRole}
                 onDeleteAccount={handleDeleteAccount}
+                recordCount={records.length}
+                isProcessingData={isProcessingData}
+                onClearAllData={handleClearAllData}
+                onRestoreDemoData={handleRestoreDemoData}
               />
             )}
           </main>

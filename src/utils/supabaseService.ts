@@ -248,11 +248,97 @@ let initPromise: Promise<{
 }> | null = null;
 
 /**
- * Loads `employees` and `leave_logs` from Supabase via REST API.
- * If `employees` on Supabase is empty (0 rows), automatically seeds `INITIAL_EMPLOYEES`
- * and `INITIAL_LEAVE_RECORDS` into Supabase.
+ * Helper to seed INITIAL_EMPLOYEES and INITIAL_LEAVE_RECORDS into Supabase
  */
-export async function loadOrSeedSupabaseData(): Promise<{
+async function seedInitialDataToSupabase(): Promise<{
+  employees: Employee[];
+  records: LeaveRecord[];
+}> {
+  const seedEmpPayloads = INITIAL_EMPLOYEES.map((emp) => ({
+    employee_code: emp.employeeCode,
+    full_name: emp.fullName,
+    dob: emp.dob,
+    gender: emp.gender,
+    cccd: emp.cccd,
+    phone: emp.phone,
+    address: emp.address,
+    department: emp.department,
+    avatar_url: emp.avatarUrl,
+    annual_leave_quota: emp.standardAnnualLeave,
+    status: emp.status,
+  }));
+
+  const insertedEmps = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+    'employees?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(seedEmpPayloads),
+    }
+  );
+
+  const sortedEmpRows = (insertedEmps || []).sort((a, b) =>
+    (a.employee_code || '').localeCompare(b.employee_code || '')
+  );
+
+  const employees = sortedEmpRows.map(mapSupabaseRowToEmployee);
+  const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+
+  const codeToSupabaseId = new Map<string, string>();
+  for (const e of employees) {
+    codeToSupabaseId.set(e.employeeCode, e.id);
+  }
+
+  let finalLogRows: SupabaseLeaveLogRow[] = [];
+  if (employees.length > 0) {
+    const oldIdToCode = new Map<string, string>(
+      INITIAL_EMPLOYEES.map((e) => [e.id, e.employeeCode])
+    );
+
+    const seedLogPayloads = INITIAL_LEAVE_RECORDS.map((rec) => {
+      const code = oldIdToCode.get(rec.employeeId);
+      const targetEmpId =
+        (code && codeToSupabaseId.get(code)) || employees[0].id;
+      return {
+        employee_id: targetEmpId,
+        leave_type: encodeLeaveTypeForDb(rec.type, rec.regimeSubtype),
+        start_date: rec.startDate,
+        end_date: rec.endDate,
+        duration: rec.amount,
+        reason: rec.reason,
+        proof_image_url: rec.attachmentUrl || null,
+      };
+    });
+
+    const insertedLogs = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      'leave_logs?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(seedLogPayloads),
+      }
+    );
+
+    if (insertedLogs) {
+      finalLogRows = insertedLogs;
+    }
+  }
+
+  const records = finalLogRows.map((row) =>
+    mapSupabaseRowToLeaveRecord(row, empMap)
+  );
+
+  return { employees, records };
+}
+
+/**
+ * Loads `employees` and `leave_logs` from Supabase via REST API.
+ * Only seeds `INITIAL_EMPLOYEES` and `INITIAL_LEAVE_RECORDS` if `allowAutoSeed` is true
+ * (i.e. when `hr_pro_initialized` was not yet set in localStorage).
+ */
+export async function loadOrSeedSupabaseData(
+  allowAutoSeed: boolean = false
+): Promise<{
   employees: Employee[];
   records: LeaveRecord[];
   connected: boolean;
@@ -261,85 +347,26 @@ export async function loadOrSeedSupabaseData(): Promise<{
 
   initPromise = (async () => {
     try {
-      let finalEmpRows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+      const finalEmpRows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
         'employees?select=*&order=employee_code.asc'
       );
 
-      // Auto-seed if `employees` table is empty (0 rows)
-      if (!finalEmpRows || finalEmpRows.length === 0) {
-        const seedEmpPayloads = INITIAL_EMPLOYEES.map((emp) => ({
-          employee_code: emp.employeeCode,
-          full_name: emp.fullName,
-          dob: emp.dob,
-          gender: emp.gender,
-          cccd: emp.cccd,
-          phone: emp.phone,
-          address: emp.address,
-          department: emp.department,
-          avatar_url: emp.avatarUrl,
-          annual_leave_quota: emp.standardAnnualLeave,
-          status: emp.status,
-        }));
-
-        const insertedEmps = await supabaseRestFetch<SupabaseEmployeeRow[]>(
-          'employees?select=*',
-          {
-            method: 'POST',
-            headers: { Prefer: 'return=representation' },
-            body: JSON.stringify(seedEmpPayloads),
-          }
-        );
-
-        finalEmpRows = (insertedEmps || []).sort((a, b) =>
-          (a.employee_code || '').localeCompare(b.employee_code || '')
-        );
+      // Only auto-seed if `allowAutoSeed` is explicitly true AND Supabase table is empty
+      if ((!finalEmpRows || finalEmpRows.length === 0) && allowAutoSeed) {
+        const seeded = await seedInitialDataToSupabase();
+        return {
+          employees: seeded.employees,
+          records: seeded.records,
+          connected: true,
+        };
       }
 
-      const employees = finalEmpRows.map(mapSupabaseRowToEmployee);
+      const employees = (finalEmpRows || []).map(mapSupabaseRowToEmployee);
       const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
 
-      const codeToSupabaseId = new Map<string, string>();
-      for (const e of employees) {
-        codeToSupabaseId.set(e.employeeCode, e.id);
-      }
-
-      let finalLogRows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      const finalLogRows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
         'leave_logs?select=*&order=start_date.desc'
       );
-
-      if ((!finalLogRows || finalLogRows.length === 0) && employees.length > 0) {
-        const oldIdToCode = new Map<string, string>(
-          INITIAL_EMPLOYEES.map((e) => [e.id, e.employeeCode])
-        );
-
-        const seedLogPayloads = INITIAL_LEAVE_RECORDS.map((rec) => {
-          const code = oldIdToCode.get(rec.employeeId);
-          const targetEmpId =
-            (code && codeToSupabaseId.get(code)) || employees[0].id;
-          return {
-            employee_id: targetEmpId,
-            leave_type: encodeLeaveTypeForDb(rec.type, rec.regimeSubtype),
-            start_date: rec.startDate,
-            end_date: rec.endDate,
-            duration: rec.amount,
-            reason: rec.reason,
-            proof_image_url: rec.attachmentUrl || null,
-          };
-        });
-
-        const insertedLogs = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
-          'leave_logs?select=*',
-          {
-            method: 'POST',
-            headers: { Prefer: 'return=representation' },
-            body: JSON.stringify(seedLogPayloads),
-          }
-        );
-
-        if (insertedLogs) {
-          finalLogRows = insertedLogs;
-        }
-      }
 
       const records = (finalLogRows || []).map((row) =>
         mapSupabaseRowToLeaveRecord(row, empMap)
@@ -353,8 +380,8 @@ export async function loadOrSeedSupabaseData(): Promise<{
     } catch (error) {
       console.error('Supabase sync error, falling back to local data:', error);
       return {
-        employees: INITIAL_EMPLOYEES,
-        records: INITIAL_LEAVE_RECORDS,
+        employees: allowAutoSeed ? INITIAL_EMPLOYEES : [],
+        records: allowAutoSeed ? INITIAL_LEAVE_RECORDS : [],
         connected: false,
       };
     } finally {
@@ -363,6 +390,30 @@ export async function loadOrSeedSupabaseData(): Promise<{
   })();
 
   return initPromise;
+}
+
+/**
+ * Deletes ALL employees and leave_logs from Supabase (used when Admin resets system data to 0)
+ */
+export async function clearAllDataInSupabase(): Promise<void> {
+  await supabaseRestFetch<void>('leave_logs?id=not.is.null', {
+    method: 'DELETE',
+  }).catch(() => {});
+
+  await supabaseRestFetch<void>('employees?id=not.is.null', {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Clears existing rows and re-seeds demo mock data into Supabase (used when Admin clicks Restore Demo Data)
+ */
+export async function restoreDemoDataInSupabase(): Promise<{
+  employees: Employee[];
+  records: LeaveRecord[];
+}> {
+  await clearAllDataInSupabase().catch(() => {});
+  return seedInitialDataToSupabase();
 }
 
 /**

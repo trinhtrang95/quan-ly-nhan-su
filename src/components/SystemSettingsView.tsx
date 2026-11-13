@@ -10,6 +10,9 @@ import {
   X,
   ShieldCheck,
   UserCheck,
+  Database,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   CompanyUnit,
@@ -40,6 +43,11 @@ interface SystemSettingsViewProps {
   onAddAccount: (acc: Omit<UserAccount, 'id' | 'createdAt'>) => void;
   onUpdateAccountRole: (id: string, role: UserRole) => void;
   onDeleteAccount: (id: string) => void;
+
+  recordCount?: number;
+  isProcessingData?: boolean;
+  onClearAllData: () => Promise<void> | void;
+  onRestoreDemoData: () => Promise<void> | void;
 }
 
 const GROUP_COLORS = [
@@ -70,6 +78,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   onAddAccount,
   onUpdateAccountRole,
   onDeleteAccount,
+  recordCount = 0,
+  isProcessingData = false,
+  onClearAllData,
+  onRestoreDemoData,
 }) => {
   // Card 1 State: Company Unit Form
   const [editingCompId, setEditingCompId] = useState<string | null>(null);
@@ -93,6 +105,11 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [accRole, setAccRole] = useState<UserRole>('user');
   const [accEmpCode, setAccEmpCode] = useState('');
   const [accDept, setAccDept] = useState(groups[0]?.name || 'Phòng Kỹ thuật & CNTT');
+
+  // Card 4 State: Data Administration Confirmation
+  const [confirmAction, setConfirmAction] = useState<'clear' | 'restore' | null>(
+    null
+  );
 
   // Handlers for Card 1 (Company Units)
   const startEditCompany = (unit: CompanyUnit) => {
@@ -813,6 +830,144 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* =====================================================================
+          CARD 4: QUẢN TRỊ DỮ LIỆU (XÓA TRẮNG DỮ LIỆU MẪU / KHÔI PHỤC DEMO)
+      ===================================================================== */}
+      <section className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center text-[#EF4444]">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                4. Quản trị Dữ liệu (Làm mới Hệ thống &amp; Dữ liệu Mẫu)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Hiện có{' '}
+                <strong className="font-mono text-slate-800">
+                  {employees.length}
+                </strong>{' '}
+                nhân sự và{' '}
+                <strong className="font-mono text-slate-800">
+                  {recordCount}
+                </strong>{' '}
+                bản ghi nghỉ phép/đi muộn. Sau khi xóa trắng, hệ thống sẽ giữ
+                nguyên trạng thái trống (0 bản ghi) khi tải lại trang để bạn
+                nhập dữ liệu thực tế.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* Red Button: Clear all sample data */}
+          <button
+            type="button"
+            disabled={isProcessingData}
+            data-testid="clear-all-data-btn"
+            onClick={() => setConfirmAction('clear')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-red-300 bg-[#FEF2F2] hover:bg-red-100 text-[#EF4444] text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4 shrink-0" />
+            <span>Xóa trắng toàn bộ dữ liệu mẫu (Làm mới hệ thống)</span>
+          </button>
+
+          {/* Gray Button: Restore Demo Data */}
+          <button
+            type="button"
+            disabled={isProcessingData}
+            data-testid="restore-demo-data-btn"
+            onClick={() => setConfirmAction('restore')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RotateCcw className="w-4 h-4 shrink-0" />
+            <span>Khôi phục dữ liệu mẫu (Demo)</span>
+          </button>
+        </div>
+
+        {/* Inline Confirmation Prompt for Clear All Data */}
+        {confirmAction === 'clear' && (
+          <div className="mt-4 p-4 rounded-xl bg-[#FEF2F2] border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-[#EF4444] shrink-0 mt-0.5" />
+              <div className="text-xs text-red-900">
+                <div className="font-bold">
+                  Xác nhận xóa trắng toàn bộ dữ liệu nhân sự và lịch sử nghỉ phép?
+                </div>
+                <p className="text-red-700 mt-0.5">
+                  Toàn bộ danh sách nhân sự và lịch sử nghỉ phép trên cả máy tính
+                  (localStorage) và đám mây (Supabase) sẽ về 0 bản ghi và không
+                  tự động nạp lại dữ liệu mẫu khi tải lại trang.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isProcessingData}
+                onClick={() => setConfirmAction(null)}
+                className="px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingData}
+                data-testid="confirm-clear-all-data-btn"
+                onClick={async () => {
+                  await onClearAllData();
+                  setConfirmAction(null);
+                }}
+                className="px-3.5 py-2 rounded-lg bg-[#EF4444] hover:bg-red-700 text-white text-xs font-bold cursor-pointer"
+              >
+                {isProcessingData ? 'Đang xóa dữ liệu...' : 'Xác nhận Xóa trắng (Về 0)'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Inline Confirmation Prompt for Restore Demo Data */}
+        {confirmAction === 'restore' && (
+          <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <RotateCcw className="w-5 h-5 text-[#0D9488] shrink-0 mt-0.5" />
+              <div className="text-xs text-slate-800">
+                <div className="font-bold">
+                  Xác nhận khôi phục lại bộ dữ liệu mẫu (Demo)?
+                </div>
+                <p className="text-slate-600 mt-0.5">
+                  Hệ thống sẽ nạp lại 8 nhân sự mẫu và 22 bản ghi chấm phép mẫu
+                  lên ứng dụng và đồng bộ lên Supabase.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isProcessingData}
+                onClick={() => setConfirmAction(null)}
+                className="px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingData}
+                data-testid="confirm-restore-demo-data-btn"
+                onClick={async () => {
+                  await onRestoreDemoData();
+                  setConfirmAction(null);
+                }}
+                className="px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold cursor-pointer"
+              >
+                {isProcessingData ? 'Đang khôi phục...' : 'Xác nhận Khôi phục Demo'}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
