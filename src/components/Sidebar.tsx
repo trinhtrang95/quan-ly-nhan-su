@@ -60,8 +60,8 @@ const NAV_ITEMS: {
   },
   {
     id: 'annual_report',
-    label: 'Báo cáo Tồn phép năm',
-    shortLabel: 'Báo cáo năm',
+    label: 'Báo cáo tổng hợp',
+    shortLabel: 'Báo cáo tổng hợp',
     icon: FileSpreadsheet,
     iconColor: 'text-purple-400',
   },
