@@ -46,7 +46,7 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
         </div>
         <div className="min-w-0">
           <h1 className="text-sm md:text-base font-bold text-slate-900 tracking-tight truncate">
-            PHÒNG KỸ THUẬT TRANSON - Hệ thống Quản lý Nhân sự &amp; Chấm công
+            Hệ thống Quản lý Nhân sự &amp; Chấm công
           </h1>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <span className="truncate">{MODULE_TITLES[activeModule]}</span>

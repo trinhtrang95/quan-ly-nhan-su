@@ -117,8 +117,15 @@ export default function App() {
           return INITIAL_USER_ACCOUNTS[0];
         }
       }
-      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      return saved ? JSON.parse(saved) : null;
+      const savedLocal = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      if (savedLocal) {
+        return JSON.parse(savedLocal);
+      }
+      const savedSession = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      if (savedSession) {
+        return JSON.parse(savedSession);
+      }
+      return null;
     } catch {
       return null;
     }
@@ -191,9 +198,21 @@ export default function App() {
   useEffect(() => {
     try {
       if (currentUser) {
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+        // Keep whichever storage currently holds the active session in sync when role updates
+        if (sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER) !== null) {
+          sessionStorage.setItem(
+            STORAGE_KEYS.CURRENT_USER,
+            JSON.stringify(currentUser)
+          );
+        } else {
+          localStorage.setItem(
+            STORAGE_KEYS.CURRENT_USER,
+            JSON.stringify(currentUser)
+          );
+        }
       } else {
         localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       }
     } catch {
       // Ignore storage quota errors
@@ -902,7 +921,25 @@ export default function App() {
         accounts={accounts}
         activeCompany={activeCompany}
         isCloudConnected={isCloudConnected}
-        onLoginSuccess={(acc) => {
+        onLoginSuccess={(acc, rememberMe) => {
+          try {
+            if (rememberMe) {
+              localStorage.setItem(
+                STORAGE_KEYS.CURRENT_USER,
+                JSON.stringify(acc)
+              );
+              sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+            } else {
+              sessionStorage.setItem(
+                STORAGE_KEYS.CURRENT_USER,
+                JSON.stringify(acc)
+              );
+              localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+            }
+          } catch {
+            // Ignore storage errors
+          }
+
           setCurrentUser(acc);
           if (acc.companyId) {
             const matchedComp = companyUnits.find((c) => c.id === acc.companyId);

@@ -117,11 +117,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               TS
             </div>
             {!collapsed && (
-              <div className="truncate">
-                <div className="text-white font-bold text-xs tracking-tight leading-tight truncate uppercase">
-                  PHÒNG KỸ THUẬT TRANSON
-                </div>
-                <div className="text-[11px] text-teal-300/80 font-medium truncate">
+              <div className="min-w-0">
+                <div className="text-white font-bold text-xs tracking-tight leading-snug line-clamp-2">
                   Hệ thống Quản lý Nhân sự &amp; Chấm công
                 </div>
               </div>

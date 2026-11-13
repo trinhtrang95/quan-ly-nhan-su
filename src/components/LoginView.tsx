@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
-import { Lock, User, LogIn, Eye, EyeOff, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Lock, User, LogIn, Eye, EyeOff, Loader2, Check } from 'lucide-react';
 import { CompanyUnit, UserAccount } from '../types/hr';
 import { authenticateAppUserInSupabase } from '../utils/supabaseService';
+
+export const SAVED_CREDENTIALS_KEY = 'hr_pro_saved_credentials_v2';
+
+interface SavedCredentials {
+  username: string;
+  password: string;
+  rememberMe: boolean;
+}
 
 interface LoginViewProps {
   accounts: UserAccount[];
   activeCompany: CompanyUnit;
   isCloudConnected: boolean;
-  onLoginSuccess: (account: UserAccount) => void;
+  onLoginSuccess: (account: UserAccount, rememberMe: boolean) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
@@ -16,36 +24,75 @@ export const LoginView: React.FC<LoginViewProps> = ({
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  // Auto-fill saved username & password if previously remembered
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAVED_CREDENTIALS_KEY);
+      if (raw) {
+        const parsed: SavedCredentials = JSON.parse(raw);
+        if (parsed && parsed.rememberMe) {
+          setUsername(parsed.username || '');
+          setPassword(parsed.password || '');
+          setRememberMe(true);
+        }
+      }
+    } catch {
+      // Ignore storage read errors
+    }
+  }, []);
 
   const performLogin = async (userStr: string, passStr: string) => {
     setErrorMsg('');
     setIsAuthenticating(true);
     try {
+      let authenticatedAccount: UserAccount | null = null;
+
       // 1. Authenticate against Supabase `app_users` table
       const remoteUser = await authenticateAppUserInSupabase(userStr, passStr);
       if (remoteUser) {
-        onLoginSuccess(remoteUser);
+        authenticatedAccount = remoteUser;
+      } else {
+        // 2. Fallback check against loaded accounts
+        const cleanUser = userStr.trim().toLowerCase();
+        const matched = accounts.find(
+          (acc) =>
+            (acc.username.toLowerCase() === cleanUser ||
+              (acc.employeeCode &&
+                acc.employeeCode.toLowerCase() === cleanUser)) &&
+            acc.password === passStr
+        );
+        if (matched) {
+          authenticatedAccount = matched;
+        }
+      }
+
+      if (!authenticatedAccount) {
+        setErrorMsg('Tên đăng nhập hoặc mật khẩu không chính xác.');
         return;
       }
 
-      // 2. Fallback check against loaded accounts
-      const cleanUser = userStr.trim().toLowerCase();
-      const matched = accounts.find(
-        (acc) =>
-          (acc.username.toLowerCase() === cleanUser ||
-            (acc.employeeCode && acc.employeeCode.toLowerCase() === cleanUser)) &&
-          acc.password === passStr
-      );
-
-      if (matched) {
-        onLoginSuccess(matched);
-        return;
+      // Persist or clear saved credentials based on `rememberMe`
+      try {
+        if (rememberMe) {
+          const toSave: SavedCredentials = {
+            username: userStr.trim(),
+            password: passStr,
+            rememberMe: true,
+          };
+          localStorage.setItem(SAVED_CREDENTIALS_KEY, JSON.stringify(toSave));
+        } else {
+          localStorage.removeItem(SAVED_CREDENTIALS_KEY);
+        }
+      } catch {
+        // Ignore storage errors
       }
 
-      setErrorMsg('Tên đăng nhập hoặc mật khẩu không chính xác.');
+      onLoginSuccess(authenticatedAccount, rememberMe);
     } catch {
       const cleanUser = userStr.trim().toLowerCase();
       const matched = accounts.find(
@@ -55,7 +102,23 @@ export const LoginView: React.FC<LoginViewProps> = ({
           acc.password === passStr
       );
       if (matched) {
-        onLoginSuccess(matched);
+        try {
+          if (rememberMe) {
+            localStorage.setItem(
+              SAVED_CREDENTIALS_KEY,
+              JSON.stringify({
+                username: userStr.trim(),
+                password: passStr,
+                rememberMe: true,
+              })
+            );
+          } else {
+            localStorage.removeItem(SAVED_CREDENTIALS_KEY);
+          }
+        } catch {
+          // Ignore storage errors
+        }
+        onLoginSuccess(matched, rememberMe);
       } else {
         setErrorMsg('Tên đăng nhập hoặc mật khẩu không chính xác.');
       }
@@ -71,27 +134,24 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
   return (
     <div className="min-h-screen bg-[#0F232E] flex flex-col justify-center items-center p-4 sm:p-6">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-700/30 p-7 sm:p-9">
+      <div className="w-full max-w-sm mx-auto bg-white rounded-2xl shadow-2xl border border-slate-700/30 p-6 flex flex-col gap-4">
         {/* Centered Brand Header */}
-        <div className="flex flex-col items-center text-center mb-7">
-          <div className="w-14 h-14 rounded-2xl bg-[#0F232E] border-2 border-[#0D9488] flex items-center justify-center text-[#2DD4BF] font-extrabold text-xl shadow-md mb-4">
+        <div className="flex flex-col items-center text-center">
+          <div className="w-14 h-14 rounded-2xl bg-[#0F232E] border-2 border-[#0D9488] flex items-center justify-center text-[#2DD4BF] font-extrabold text-xl shadow-md mb-3">
             TS
           </div>
-          <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight uppercase">
-            PHÒNG KỸ THUẬT TRANSON
-          </h1>
-          <p className="text-xs sm:text-sm font-medium text-slate-500 mt-1">
+          <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight leading-snug">
             Hệ thống Quản lý Nhân sự &amp; Chấm công
-          </p>
+          </h1>
         </div>
 
         {errorMsg && (
-          <div className="mb-4 p-3 rounded-lg bg-[#FEF2F2] border border-red-200 text-xs font-medium text-[#EF4444] text-center">
+          <div className="p-3 rounded-lg bg-[#FEF2F2] border border-red-200 text-xs font-medium text-[#EF4444] text-center">
             {errorMsg}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="w-full flex flex-col gap-4">
           <div>
             <label
               htmlFor="login-username"
@@ -149,7 +209,36 @@ export const LoginView: React.FC<LoginViewProps> = ({
             </div>
           </div>
 
-          <div className="pt-2">
+          {/* Checkbox: Lưu tài khoản đăng nhập */}
+          <div className="pt-0.5">
+            <label
+              htmlFor="remember-account-checkbox"
+              className="inline-flex items-center gap-2.5 cursor-pointer select-none group"
+            >
+              <div className="relative flex items-center justify-center">
+                <input
+                  id="remember-account-checkbox"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  data-testid="remember-account-checkbox"
+                  className="peer sr-only"
+                />
+                <div className="w-4 h-4 rounded border border-slate-300 bg-white peer-checked:bg-[#0D9488] peer-checked:border-[#0D9488] transition-colors flex items-center justify-center">
+                  <Check
+                    className={`w-3 h-3 text-white transition-opacity ${
+                      rememberMe ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+                </div>
+              </div>
+              <span className="text-xs font-semibold text-slate-700 group-hover:text-slate-900">
+                Lưu tài khoản đăng nhập
+              </span>
+            </label>
+          </div>
+
+          <div className="pt-1">
             <button
               type="submit"
               disabled={isAuthenticating}
