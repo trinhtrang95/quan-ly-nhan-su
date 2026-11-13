@@ -20,6 +20,7 @@ interface LoginViewProps {
 
 export const LoginView: React.FC<LoginViewProps> = ({
   accounts,
+  activeCompany,
   onLoginSuccess,
 }) => {
   const [username, setUsername] = useState('');
@@ -137,9 +138,18 @@ export const LoginView: React.FC<LoginViewProps> = ({
       <div className="w-full max-w-sm mx-auto bg-white rounded-2xl shadow-2xl border border-slate-700/30 p-6 flex flex-col gap-4">
         {/* Centered Brand Header */}
         <div className="flex flex-col items-center text-center">
-          <div className="w-14 h-14 rounded-2xl bg-[#0F232E] border-2 border-[#0D9488] flex items-center justify-center text-[#2DD4BF] font-extrabold text-xl shadow-md mb-3">
-            TS
-          </div>
+          {activeCompany.logoUrl ? (
+            <img
+              src={activeCompany.logoUrl}
+              alt={activeCompany.name}
+              referrerPolicy="no-referrer"
+              className="w-14 h-14 rounded-2xl object-cover border-2 border-[#0D9488] bg-white shadow-md mb-3"
+            />
+          ) : (
+            <div className="w-14 h-14 rounded-2xl bg-[#0F232E] border-2 border-[#0D9488] flex items-center justify-center text-[#2DD4BF] font-extrabold text-xl shadow-md mb-3">
+              TS
+            </div>
+          )}
           <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight leading-snug">
             Hệ thống Quản lý Nhân sự &amp; Chấm công
           </h1>

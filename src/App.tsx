@@ -6,6 +6,7 @@ import {
   DepartmentGroup,
   Employee,
   EmployeeAnnualMatrixRow,
+  HRBackupPayload,
   LeaveRecord,
   MatrixViewMode,
   UserAccount,
@@ -43,7 +44,7 @@ import {
   deleteEmployeesFromSupabase,
   deleteLeaveLogFromSupabase,
   loadOrSeedSupabaseData,
-  restoreDemoDataInSupabase,
+  restoreFromBackupInSupabase,
   updateAppUserRoleInSupabase,
   updateCompanyInSupabase,
   updateDepartmentInSupabase,
@@ -866,9 +867,42 @@ export default function App() {
     }
   };
 
-  // Data Administration Handlers: Clear All Data vs Restore Demo Data
-  const handleClearAllData = async () => {
+  // Data Administration Handlers: JSON Backup, Clear All Data (with optional auto-backup) & Restore from JSON
+  const handleDownloadBackup = () => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const payload: HRBackupPayload = {
+      version: '2.0',
+      exportedAt: new Date().toISOString(),
+      activeCompanyId: activeCompany.id,
+      defaultAnnualLeaveQuota:
+        activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota,
+      companies: companyUnits,
+      departments: groups,
+      employees,
+      records,
+      accounts,
+    };
+
+    const jsonString = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonString], {
+      type: 'application/json;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `HR_Backup_${todayStr}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Đã tải xuống tệp sao lưu HR_Backup_${todayStr}.json thành công.`);
+  };
+
+  const handleClearAllData = async (autoBackupFirst: boolean) => {
     if (!isAdmin) return;
+    if (autoBackupFirst) {
+      handleDownloadBackup();
+    }
     setIsProcessingData(true);
     try {
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
@@ -880,7 +914,9 @@ export default function App() {
 
       await clearAllDataInSupabase();
       showToast(
-        'Đã xóa trắng toàn bộ dữ liệu mẫu trên Supabase (employees & leave_logs = 0) và giữ is_initialized = true.'
+        autoBackupFirst
+          ? 'Đã tải bản sao lưu (.json) và xóa trắng toàn bộ dữ liệu nhân sự, phép năm trên Supabase về 0.'
+          : 'Đã xóa trắng toàn bộ dữ liệu trên Supabase (employees & leave_logs = 0) và làm mới hệ thống.'
       );
     } catch {
       showToast(
@@ -891,24 +927,70 @@ export default function App() {
     }
   };
 
-  const handleRestoreDemoData = async () => {
+  const handleRestoreFromBackupFile = async (backup: HRBackupPayload) => {
     if (!isAdmin) return;
     setIsProcessingData(true);
     try {
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-      const restored = await restoreDemoDataInSupabase(activeCompany.id);
-      setEmployees(restored.employees);
-      setRecords(restored.records);
+      const restored = await restoreFromBackupInSupabase(
+        backup,
+        activeCompany.id
+      );
+
+      if (restored.companies.length > 0) {
+        setCompanyUnits(restored.companies);
+        const preferredComp =
+          restored.companies.find((c) => c.id === backup.activeCompanyId) ||
+          restored.companies[0];
+        if (preferredComp) {
+          setActiveCompanyId(preferredComp.id);
+          if (preferredComp.defaultLeaveQuota) {
+            setDefaultAnnualLeaveQuota(preferredComp.defaultLeaveQuota);
+          }
+        }
+      }
+      if (typeof backup.defaultAnnualLeaveQuota === 'number') {
+        setDefaultAnnualLeaveQuota(backup.defaultAnnualLeaveQuota);
+      }
       if (restored.departments.length > 0) {
         setGroups(restored.departments);
-      } else {
-        setGroups(INITIAL_DEPARTMENT_GROUPS);
+      } else if (Array.isArray(backup.departments)) {
+        setGroups(backup.departments);
       }
+      if (restored.accounts.length > 0) {
+        setAccounts(restored.accounts);
+      } else if (Array.isArray(backup.accounts) && backup.accounts.length > 0) {
+        setAccounts(backup.accounts);
+      }
+      setEmployees(restored.employees);
+      setRecords(restored.records);
+      setSelectedEmpIds([]);
+
       showToast(
-        `Đã khôi phục ${restored.employees.length} nhân sự mẫu & ${restored.records.length} bản ghi phép mẫu lên Supabase.`
+        `Đã khôi phục thành công từ file Backup: ${restored.employees.length} nhân sự, ${restored.records.length} bản ghi phép & ${restored.departments.length} phòng ban.`
       );
     } catch {
-      showToast('Không thể khôi phục dữ liệu mẫu lên Supabase.');
+      // Fallback to local state restore if offline
+      if (Array.isArray(backup.companies) && backup.companies.length > 0) {
+        setCompanyUnits(backup.companies);
+      }
+      if (Array.isArray(backup.departments)) {
+        setGroups(backup.departments);
+      }
+      if (Array.isArray(backup.employees)) {
+        setEmployees(backup.employees);
+      }
+      if (Array.isArray(backup.records)) {
+        setRecords(backup.records);
+      }
+      if (Array.isArray(backup.accounts) && backup.accounts.length > 0) {
+        setAccounts(backup.accounts);
+      }
+      showToast(
+        `Đã khôi phục dữ liệu từ file Backup (.json): ${
+          backup.employees?.length || 0
+        } nhân sự & ${backup.records?.length || 0} bản ghi phép.`
+      );
     } finally {
       setIsProcessingData(false);
     }
@@ -1176,6 +1258,7 @@ export default function App() {
                 onDeleteCompanyUnit={handleDeleteCompany}
                 groups={companyGroups}
                 employees={companyEmployees}
+                allEmployees={employees}
                 onAddGroup={handleAddGroup}
                 onUpdateGroup={handleUpdateGroup}
                 onDeleteGroup={handleDeleteGroup}
@@ -1190,8 +1273,9 @@ export default function App() {
                 onDeleteAccount={handleDeleteAccount}
                 recordCount={records.length}
                 isProcessingData={isProcessingData}
+                onDownloadBackup={handleDownloadBackup}
                 onClearAllData={handleClearAllData}
-                onRestoreDemoData={handleRestoreDemoData}
+                onRestoreFromBackupFile={handleRestoreFromBackupFile}
               />
             )}
           </main>

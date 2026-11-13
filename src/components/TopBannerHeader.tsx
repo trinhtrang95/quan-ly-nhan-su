@@ -41,9 +41,18 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
     <header className="no-print bg-white rounded-xl border border-slate-200/80 shadow-xs px-4 py-3 md:px-6 md:py-3.5 mb-5 flex items-center justify-between gap-4">
       {/* Zone 1: Brand Title, Active Company & Supabase Cloud Status */}
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-10 h-10 rounded-xl bg-[#0F232E] flex items-center justify-center text-[#2DD4BF] font-extrabold text-sm shrink-0 shadow-xs">
-          TS
-        </div>
+        {activeCompany.logoUrl ? (
+          <img
+            src={activeCompany.logoUrl}
+            alt={activeCompany.name}
+            referrerPolicy="no-referrer"
+            className="w-10 h-10 rounded-xl object-cover border border-slate-200 bg-white shrink-0 shadow-xs"
+          />
+        ) : (
+          <div className="w-10 h-10 rounded-xl bg-[#0F232E] flex items-center justify-center text-[#2DD4BF] font-extrabold text-sm shrink-0 shadow-xs">
+            TS
+          </div>
+        )}
         <div className="min-w-0">
           <h1 className="text-sm md:text-base font-bold text-slate-900 tracking-tight truncate">
             Hệ thống Quản lý Nhân sự &amp; Chấm công

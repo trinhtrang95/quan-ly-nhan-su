@@ -120,9 +120,22 @@ export interface CompanyUnit {
   name: string;
   code: string;
   shortName: string;
+  logoUrl?: string;
   address: string;
   phone: string;
   defaultLeaveQuota?: number;
   isInitialized?: boolean;
+}
+
+export interface HRBackupPayload {
+  version: string;
+  exportedAt: string;
+  activeCompanyId?: string;
+  defaultAnnualLeaveQuota?: number;
+  companies: CompanyUnit[];
+  departments: DepartmentGroup[];
+  employees: Employee[];
+  records: LeaveRecord[];
+  accounts: UserAccount[];
 }
 

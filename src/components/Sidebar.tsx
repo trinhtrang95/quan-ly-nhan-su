@@ -113,9 +113,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Header + Collapse Toggle */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-slate-700/50">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-lg bg-[#0D9488] flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm">
-              TS
-            </div>
+            {activeCompany?.logoUrl ? (
+              <img
+                src={activeCompany.logoUrl}
+                alt={activeCompany.name}
+                referrerPolicy="no-referrer"
+                className="w-9 h-9 rounded-lg object-cover border border-teal-500/40 bg-white shrink-0 shadow-sm"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-lg bg-[#0D9488] flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm">
+                TS
+              </div>
+            )}
             {!collapsed && (
               <div className="min-w-0">
                 <div className="text-white font-bold text-xs tracking-tight leading-snug line-clamp-2">

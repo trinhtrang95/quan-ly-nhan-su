@@ -3,6 +3,7 @@ import {
   DepartmentGroup,
   Employee,
   Gender,
+  HRBackupPayload,
   LeaveRecord,
   LeaveRecordType,
   RegimeSubtype,
@@ -47,6 +48,7 @@ export interface SupabaseCompanyRow {
   id: string;
   code: string;
   name: string;
+  logo_url?: string | null;
   address: string | null;
   phone: string | null;
   default_leave_quota: number | null;
@@ -137,13 +139,14 @@ async function supabaseRestFetch<T>(
  * Maps a Supabase `companies` row to `CompanyUnit`
  */
 export function mapSupabaseRowToCompany(row: SupabaseCompanyRow): CompanyUnit {
-  const code = row.code || 'HR-HQ';
-  const shortName = code.split('-')[0].slice(0, 4).toUpperCase() || 'HR';
+  const code = row.code || 'UNIT';
+  const shortName = 'TS';
   return {
     id: String(row.id),
     code,
-    name: row.name || 'Công ty Mặc định',
+    name: row.name || 'Đơn vị Mặc định',
     shortName,
+    logoUrl: row.logo_url || undefined,
     address: row.address || '',
     phone: row.phone || '',
     defaultLeaveQuota:
@@ -356,12 +359,12 @@ export async function authenticateAppUserInSupabase(
 }
 
 /**
- * Uploads an image File (avatar or leave proof photo) to Supabase Storage bucket `hr-images`
+ * Uploads an image File (avatar, leave proof photo, or company logo) to Supabase Storage bucket `hr-images`
  * using pure fetch and returns its Public URL. Falls back to Data URI if storage upload fails.
  */
 export async function uploadImageToHrBucket(
   file: File,
-  folder: 'avatars' | 'proofs'
+  folder: 'avatars' | 'proofs' | 'logos'
 ): Promise<string> {
   try {
     const ext = (file.name.split('.').pop() || 'png').replace(/[^a-zA-Z0-9]/g, '');
@@ -617,8 +620,9 @@ export async function createCompanyInSupabase(
   unit: Omit<CompanyUnit, 'id'>
 ): Promise<CompanyUnit> {
   const payload = {
-    code: unit.code,
+    code: unit.code || `UNIT-${Date.now().toString().slice(-4)}`,
     name: unit.name,
+    logo_url: unit.logoUrl || null,
     address: unit.address || null,
     phone: unit.phone || null,
     default_leave_quota: unit.defaultLeaveQuota ?? 12,
@@ -648,6 +652,7 @@ export async function updateCompanyInSupabase(
   const payload: Record<string, unknown> = {};
   if (updates.code !== undefined) payload.code = updates.code;
   if (updates.name !== undefined) payload.name = updates.name;
+  if (updates.logoUrl !== undefined) payload.logo_url = updates.logoUrl || null;
   if (updates.address !== undefined) payload.address = updates.address;
   if (updates.phone !== undefined) payload.phone = updates.phone;
   if (updates.defaultLeaveQuota !== undefined) {
@@ -820,43 +825,207 @@ export async function clearAllDataInSupabase(): Promise<void> {
 }
 
 /**
- * Clears existing rows and re-seeds demo mock data into Supabase (used when Admin clicks Restore Demo Data)
+ * Restores data from a parsed HRBackupPayload (.json) into Supabase
  */
-export async function restoreDemoDataInSupabase(
-  companyId?: string | null
+export async function restoreFromBackupInSupabase(
+  backup: HRBackupPayload,
+  fallbackCompanyId?: string | null
 ): Promise<{
+  companies: CompanyUnit[];
+  departments: DepartmentGroup[];
   employees: Employee[];
   records: LeaveRecord[];
-  departments: DepartmentGroup[];
+  accounts: UserAccount[];
 }> {
   await clearAllDataInSupabase().catch(() => {});
 
-  // Also seed default departments if `departments` table is empty
-  let deptRows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
-    'departments?select=*'
-  ).catch(() => [] as SupabaseDepartmentRow[]);
-
-  if (!deptRows || deptRows.length === 0) {
-    const deptPayloads = INITIAL_DEPARTMENT_GROUPS.map((g) => ({
-      company_id: companyId || null,
-      name: g.name,
-      description: `${g.code}|${g.color}|${g.description || ''}`,
-    }));
-    deptRows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
-      'departments?select=*',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(deptPayloads),
+  // 1. Sync companies if provided
+  let finalCompanies: CompanyUnit[] = Array.isArray(backup.companies)
+    ? backup.companies
+    : [];
+  try {
+    const existingComps = await supabaseRestFetch<SupabaseCompanyRow[]>(
+      'companies?select=*'
+    );
+    const existingIds = new Set((existingComps || []).map((c) => String(c.id)));
+    for (const comp of finalCompanies) {
+      if (existingIds.has(comp.id)) {
+        await updateCompanyInSupabase(comp.id, comp).catch(() => {});
+      } else {
+        await createCompanyInSupabase(comp).catch(() => {});
       }
-    ).catch(() => [] as SupabaseDepartmentRow[]);
+    }
+    const refreshedComps = await supabaseRestFetch<SupabaseCompanyRow[]>(
+      'companies?select=*&order=created_at.asc'
+    );
+    if (refreshedComps && refreshedComps.length > 0) {
+      finalCompanies = refreshedComps.map(mapSupabaseRowToCompany);
+    }
+  } catch {
+    // Keep backup companies in local state
   }
 
-  const seeded = await seedInitialDataToSupabase(companyId);
+  const targetCompId =
+    finalCompanies[0]?.id || fallbackCompanyId || null;
+
+  // 2. Sync departments if provided
+  let finalDepartments: DepartmentGroup[] = Array.isArray(backup.departments)
+    ? backup.departments
+    : [];
+  try {
+    if (finalDepartments.length > 0) {
+      await supabaseRestFetch<void>('departments?id=not.is.null', {
+        method: 'DELETE',
+      }).catch(() => {});
+
+      const deptPayloads = finalDepartments.map((g) => ({
+        company_id: g.companyId || targetCompId,
+        name: g.name,
+        description: `${g.code || ''}|${g.color || '#0D9488'}|${g.description || ''}`,
+      }));
+      const insertedDepts = await supabaseRestFetch<SupabaseDepartmentRow[]>(
+        'departments?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(deptPayloads),
+        }
+      );
+      if (insertedDepts) {
+        finalDepartments = insertedDepts.map((r, i) =>
+          mapSupabaseRowToDepartment(r, i)
+        );
+      }
+    }
+  } catch {
+    // Keep backup departments in local state
+  }
+
+  // 3. Insert employees and map old IDs / codes to new Supabase IDs
+  const backupEmployees = Array.isArray(backup.employees)
+    ? backup.employees
+    : [];
+  let finalEmployees: Employee[] = backupEmployees;
+  const oldEmpIdToCode = new Map<string, string>();
+  for (const e of backupEmployees) {
+    oldEmpIdToCode.set(e.id, e.employeeCode);
+  }
+
+  try {
+    if (backupEmployees.length > 0) {
+      const empPayloads = backupEmployees.map((emp) => ({
+        employee_code: emp.employeeCode,
+        full_name: emp.fullName,
+        dob: emp.dob,
+        gender: emp.gender,
+        cccd: emp.cccd,
+        phone: emp.phone,
+        address: emp.address,
+        department: emp.department,
+        avatar_url: emp.avatarUrl,
+        annual_leave_quota: emp.standardAnnualLeave,
+        status: emp.status,
+        company_id: emp.companyId || targetCompId,
+      }));
+
+      const insertedEmps = await supabaseRestFetch<SupabaseEmployeeRow[]>(
+        'employees?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(empPayloads),
+        }
+      );
+      if (insertedEmps) {
+        finalEmployees = insertedEmps.map(mapSupabaseRowToEmployee);
+      }
+    } else {
+      finalEmployees = [];
+    }
+  } catch {
+    // Keep backupEmployees
+  }
+
+  const codeToNewEmpId = new Map<string, string>();
+  const empMap = new Map<string, Employee>();
+  for (const e of finalEmployees) {
+    codeToNewEmpId.set(e.employeeCode, e.id);
+    empMap.set(e.id, e);
+  }
+
+  // 4. Insert leave_logs
+  const backupRecords = Array.isArray(backup.records) ? backup.records : [];
+  let finalRecords: LeaveRecord[] = backupRecords;
+  try {
+    if (backupRecords.length > 0 && finalEmployees.length > 0) {
+      const logPayloads = backupRecords.map((rec) => {
+        const code = oldEmpIdToCode.get(rec.employeeId);
+        const mappedEmpId =
+          (code && codeToNewEmpId.get(code)) ||
+          (empMap.has(rec.employeeId) ? rec.employeeId : finalEmployees[0].id);
+        return {
+          employee_id: mappedEmpId,
+          leave_type: encodeLeaveTypeForDb(rec.type, rec.regimeSubtype),
+          start_date: rec.startDate,
+          end_date: rec.endDate,
+          duration: rec.amount,
+          reason: rec.reason,
+          proof_image_url: rec.attachmentUrl || null,
+        };
+      });
+
+      const insertedLogs = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+        'leave_logs?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(logPayloads),
+        }
+      );
+      if (insertedLogs) {
+        finalRecords = insertedLogs.map((r) =>
+          mapSupabaseRowToLeaveRecord(r, empMap)
+        );
+      }
+    } else {
+      finalRecords = [];
+    }
+  } catch {
+    // Keep backupRecords
+  }
+
+  // 5. Sync app_users if provided
+  let finalAccounts: UserAccount[] = Array.isArray(backup.accounts)
+    ? backup.accounts
+    : INITIAL_USER_ACCOUNTS;
+  try {
+    const existingUsers = await supabaseRestFetch<SupabaseAppUserRow[]>(
+      'app_users?select=*'
+    );
+    const existingUsernames = new Set(
+      (existingUsers || []).map((u) => u.username.toLowerCase())
+    );
+    for (const acc of finalAccounts) {
+      if (!existingUsernames.has(acc.username.toLowerCase())) {
+        await createAppUserInSupabase(acc, targetCompId).catch(() => {});
+      }
+    }
+    const refreshedUsers = await supabaseRestFetch<SupabaseAppUserRow[]>(
+      'app_users?select=*&order=created_at.asc'
+    );
+    if (refreshedUsers && refreshedUsers.length > 0) {
+      finalAccounts = refreshedUsers.map(mapSupabaseRowToAppUser);
+    }
+  } catch {
+    // Keep finalAccounts
+  }
+
   return {
-    employees: seeded.employees,
-    records: seeded.records,
-    departments: (deptRows || []).map((r, i) => mapSupabaseRowToDepartment(r, i)),
+    companies: finalCompanies,
+    departments: finalDepartments,
+    employees: finalEmployees,
+    records: finalRecords,
+    accounts: finalAccounts,
   };
 }
 
