@@ -12,6 +12,7 @@ export type RegimeSubtype = 'Ốm đau / Viện phí' | 'Thai sản' | 'Hiếu /
 
 export interface DepartmentGroup {
   id: string;
+  companyId?: string | null;
   name: string;
   code: string;
   color: string;
@@ -20,6 +21,7 @@ export interface DepartmentGroup {
 
 export interface Employee {
   id: string;
+  companyId?: string | null;
   employeeCode: string; // Mã nhân viên (VD: NV001)
   fullName: string;     // Họ tên
   dob: string;          // Ngày tháng năm sinh (YYYY-MM-DD)
@@ -107,6 +109,7 @@ export interface UserAccount {
   password: string;
   fullName: string;
   role: UserRole;
+  companyId?: string | null;
   employeeCode?: string;
   department?: string;
   createdAt: string;
@@ -119,5 +122,7 @@ export interface CompanyUnit {
   shortName: string;
   address: string;
   phone: string;
+  defaultLeaveQuota?: number;
+  isInitialized?: boolean;
 }
 

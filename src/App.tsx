@@ -14,8 +14,6 @@ import {
 import {
   INITIAL_COMPANY_UNITS,
   INITIAL_DEPARTMENT_GROUPS,
-  INITIAL_EMPLOYEES,
-  INITIAL_LEAVE_RECORDS,
   INITIAL_USER_ACCOUNTS,
 } from './data/mockData';
 import {
@@ -34,12 +32,21 @@ import {
 import {
   bulkCreateEmployeesInSupabase,
   clearAllDataInSupabase,
+  createAppUserInSupabase,
+  createCompanyInSupabase,
+  createDepartmentInSupabase,
   createEmployeeInSupabase,
   createLeaveLogInSupabase,
+  deleteAppUserFromSupabase,
+  deleteCompanyFromSupabase,
+  deleteDepartmentFromSupabase,
   deleteEmployeesFromSupabase,
   deleteLeaveLogFromSupabase,
   loadOrSeedSupabaseData,
   restoreDemoDataInSupabase,
+  updateAppUserRoleInSupabase,
+  updateCompanyInSupabase,
+  updateDepartmentInSupabase,
   updateEmployeeInSupabase,
   updateLeaveLogInSupabase,
 } from './utils/supabaseService';
@@ -76,24 +83,23 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isProcessingData, setIsProcessingData] = useState<boolean>(false);
 
-  // Determine if this is the very first time the app is ever initialized
-  const [wasUninitializedOnBoot] = useState<boolean>(() => {
+  // Check if already initialized locally
+  const [localInitialized] = useState<boolean>(() => {
     try {
       const existingFlag = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
       const existingEmps = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-      const existingRecs = localStorage.getItem(STORAGE_KEYS.RECORDS);
-      if (existingFlag || existingEmps !== null || existingRecs !== null) {
+      if (existingFlag === 'true' || existingEmps !== null) {
         localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-        return false;
+        return true;
       }
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
       return true;
     } catch {
-      return false;
+      return true;
     }
   });
 
-  // User Accounts & Auth State
+  // User Accounts (`app_users`) & Auth State
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
@@ -118,7 +124,7 @@ export default function App() {
     }
   });
 
-  // Company Units & Active Company State
+  // Company Units (`companies`) & Active Company State
   const [companyUnits, setCompanyUnits] = useState<CompanyUnit[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.COMPANIES);
@@ -146,37 +152,31 @@ export default function App() {
     }
   });
 
-  // Core Data State (with localStorage cache + live Supabase sync)
+  // Core Data State (`departments`, `employees`, `leave_logs`)
   const [groups, setGroups] = useState<DepartmentGroup[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.GROUPS);
-      return saved ? JSON.parse(saved) : INITIAL_DEPARTMENT_GROUPS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_DEPARTMENT_GROUPS;
+      return [];
     }
   });
 
   const [employees, setEmployees] = useState<Employee[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-      if (saved !== null) {
-        return JSON.parse(saved);
-      }
-      return wasUninitializedOnBoot ? INITIAL_EMPLOYEES : [];
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return wasUninitializedOnBoot ? INITIAL_EMPLOYEES : [];
+      return [];
     }
   });
 
   const [records, setRecords] = useState<LeaveRecord[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.RECORDS);
-      if (saved !== null) {
-        return JSON.parse(saved);
-      }
-      return wasUninitializedOnBoot ? INITIAL_LEAVE_RECORDS : [];
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return wasUninitializedOnBoot ? INITIAL_LEAVE_RECORDS : [];
+      return [];
     }
   });
 
@@ -302,19 +302,30 @@ export default function App() {
     }, 3500);
   };
 
-  // Sync with Supabase on mount (only auto-seed if hr_pro_initialized did not exist)
-  const syncFromSupabase = async (silent = false, allowAutoSeed = false) => {
+  // Sync all 5 tables (`companies`, `departments`, `app_users`, `employees`, `leave_logs`) from Supabase
+  const syncFromSupabase = async (silent = false) => {
     setIsSyncing(true);
     try {
-      const result = await loadOrSeedSupabaseData(allowAutoSeed);
+      const result = await loadOrSeedSupabaseData(localInitialized);
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
       if (result.connected) {
+        setCompanyUnits(result.companies);
+        setActiveCompanyId((prevId) => {
+          const found = result.companies.find((c) => c.id === prevId);
+          const chosen = found || result.companies[0];
+          if (chosen?.defaultLeaveQuota) {
+            setDefaultAnnualLeaveQuota(chosen.defaultLeaveQuota);
+          }
+          return chosen ? chosen.id : prevId;
+        });
+        setGroups(result.departments);
+        setAccounts(result.accounts);
         setEmployees(result.employees);
         setRecords(result.records);
         setIsCloudConnected(true);
         if (!silent) {
           showToast(
-            `Đã đồng bộ ${result.employees.length} nhân sự & ${result.records.length} bản ghi từ Supabase Cloud.`
+            `Đã đồng bộ Supabase: ${result.companies.length} đơn vị, ${result.departments.length} phòng ban, ${result.employees.length} nhân sự & ${result.records.length} bản ghi phép.`
           );
         }
       } else {
@@ -328,7 +339,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    syncFromSupabase(true, wasUninitializedOnBoot);
+    syncFromSupabase(true);
   }, []);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -337,49 +348,104 @@ export default function App() {
     companyUnits[0] ||
     INITIAL_COMPANY_UNITS[0];
 
+  // Filter employees and departments by active company (including legacy rows where companyId is null)
+  const companyEmployees =
+    companyUnits.length <= 1
+      ? employees
+      : employees.filter(
+          (e) => !e.companyId || e.companyId === activeCompany.id
+        );
+
+  const companyEmployeeIds = new Set(companyEmployees.map((e) => e.id));
+  const companyRecords =
+    companyUnits.length <= 1
+      ? records
+      : records.filter((r) => companyEmployeeIds.has(r.employeeId));
+
+  const companyGroups =
+    companyUnits.length <= 1
+      ? groups
+      : groups.filter((g) => !g.companyId || g.companyId === activeCompany.id);
+
+  // Include any departments referenced by existing employees so filters & forms are always complete
+  const effectiveGroups: DepartmentGroup[] = (() => {
+    const existingNames = new Set(companyGroups.map((g) => g.name));
+    const extraGroups: DepartmentGroup[] = [];
+    for (const emp of companyEmployees) {
+      if (emp.department && !existingNames.has(emp.department)) {
+        existingNames.add(emp.department);
+        extraGroups.push({
+          id: `emp-dept-${emp.department}`,
+          companyId: activeCompany.id,
+          name: emp.department,
+          code: emp.department.slice(0, 4).toUpperCase(),
+          color: '#0D9488',
+        });
+      }
+    }
+    return [...companyGroups, ...extraGroups];
+  })();
+
   // Derived Real-time Dashboard & Matrix Calculations
   const kpis = calculateDashboardKPIs(
-    employees,
-    records,
+    companyEmployees,
+    companyRecords,
     '2026-11-12',
     11,
     2026
   );
-  const departmentDist = calculateDepartmentDistribution(employees, groups);
-  const leaveTypeDist = calculateMonthlyLeaveTypeDistribution(records, 11, 2026);
+  const departmentDist = calculateDepartmentDistribution(
+    companyEmployees,
+    effectiveGroups
+  );
+  const leaveTypeDist = calculateMonthlyLeaveTypeDistribution(
+    companyRecords,
+    11,
+    2026
+  );
   const matrixRows2026 = calculateAnnualMatrixReport(
-    employees,
-    records,
+    companyEmployees,
+    companyRecords,
     2026,
     'ALL'
   );
-  const sortedRecords = [...records].sort((a, b) =>
+  const sortedRecords = [...companyRecords].sort((a, b) =>
     b.startDate.localeCompare(a.startDate)
   );
 
-  // Next suggested employee code (e.g., NV009)
+  // Next suggested employee code (e.g., NV001)
   const nextSuggestedCode = (() => {
     const nums = employees
       .map((e) => {
         const m = e.employeeCode.match(/\d+/);
         return m ? parseInt(m[0], 10) : 0;
       })
-      .filter((n) => !isNaN(n));
+      .filter((n) => !isNaN(n) && n < 100000);
     const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
     return `NV${String(maxNum + 1).padStart(3, '0')}`;
   })();
 
-  // Employee Handlers (persisted to Supabase + instant UI update)
+  // Employee Handlers (persisted to Supabase `employees` with `company_id`)
   const handleSaveEmployee = async (
     empData: Omit<Employee, 'id'>,
     existingId?: string
   ) => {
+    const payloadWithCompany: Omit<Employee, 'id'> = {
+      ...empData,
+      companyId: empData.companyId || activeCompany.id,
+    };
+
     if (existingId) {
       setEmployees((prev) =>
-        prev.map((e) => (e.id === existingId ? { ...empData, id: existingId } : e))
+        prev.map((e) =>
+          e.id === existingId ? { ...payloadWithCompany, id: existingId } : e
+        )
       );
       try {
-        const updated = await updateEmployeeInSupabase(existingId, empData);
+        const updated = await updateEmployeeInSupabase(
+          existingId,
+          payloadWithCompany
+        );
         setEmployees((prev) =>
           prev.map((e) => (e.id === existingId ? updated : e))
         );
@@ -393,11 +459,11 @@ export default function App() {
       }
     } else {
       const tempId = `emp-${Date.now()}`;
-      const optimisticEmp: Employee = { ...empData, id: tempId };
+      const optimisticEmp: Employee = { ...payloadWithCompany, id: tempId };
       setEmployees((prev) => [...prev, optimisticEmp]);
 
       try {
-        const created = await createEmployeeInSupabase(empData);
+        const created = await createEmployeeInSupabase(payloadWithCompany);
         setEmployees((prev) =>
           prev.map((e) => (e.id === tempId ? created : e))
         );
@@ -470,10 +536,13 @@ export default function App() {
       return;
     }
 
+    const withCompany = imported.map(({ id: _unused, ...rest }) => ({
+      ...rest,
+      companyId: activeCompany.id,
+    }));
+
     try {
-      const inserted = await bulkCreateEmployeesInSupabase(
-        imported.map(({ id: _unused, ...rest }) => rest)
-      );
+      const inserted = await bulkCreateEmployeesInSupabase(withCompany);
       setEmployees((prev) => [...prev, ...inserted]);
       showToast(
         `Đã nhập và đồng bộ ${inserted.length} nhân sự từ Excel lên Supabase Cloud.`
@@ -484,19 +553,35 @@ export default function App() {
     }
   };
 
-  // Group Handlers
-  const handleAddGroup = (grpData: Omit<DepartmentGroup, 'id'>) => {
-    const newGrp: DepartmentGroup = {
+  // Department (`departments` table) Handlers
+  const handleAddGroup = async (grpData: Omit<DepartmentGroup, 'id'>) => {
+    const tempId = `grp-${Date.now()}`;
+    const optimistic: DepartmentGroup = {
       ...grpData,
-      id: `grp-${Date.now()}`,
+      id: tempId,
+      companyId: activeCompany.id,
     };
-    setGroups((prev) => [...prev, newGrp]);
-    showToast(`Đã thêm bộ phận mới: ${newGrp.name}.`);
+    setGroups((prev) => [...prev, optimistic]);
+
+    try {
+      const created = await createDepartmentInSupabase(grpData, activeCompany.id);
+      setGroups((prev) => prev.map((g) => (g.id === tempId ? created : g)));
+      showToast(`Đã lưu phòng ban "${created.name}" lên bảng departments (Supabase).`);
+    } catch {
+      showToast(`Đã thêm bộ phận mới: ${optimistic.name}.`);
+    }
   };
 
-  const handleUpdateGroup = (id: string, data: Omit<DepartmentGroup, 'id'>) => {
+  const handleUpdateGroup = async (
+    id: string,
+    data: Omit<DepartmentGroup, 'id'>
+  ) => {
     const oldGroup = groups.find((g) => g.id === id);
-    setGroups((prev) => prev.map((g) => (g.id === id ? { ...data, id } : g)));
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === id ? { ...data, id, companyId: activeCompany.id } : g
+      )
+    );
     if (oldGroup && oldGroup.name !== data.name) {
       setEmployees((prev) =>
         prev.map((emp) =>
@@ -506,33 +591,77 @@ export default function App() {
         )
       );
     }
-    showToast(`Đã cập nhật thông tin phòng ban: ${data.name}.`);
+
+    try {
+      const updated = await updateDepartmentInSupabase(
+        id,
+        data,
+        activeCompany.id
+      );
+      setGroups((prev) => prev.map((g) => (g.id === id ? updated : g)));
+      showToast(`Đã cập nhật phòng ban "${updated.name}" trên Supabase.`);
+    } catch {
+      showToast(`Đã cập nhật thông tin phòng ban: ${data.name}.`);
+    }
   };
 
-  const handleDeleteGroup = (id: string) => {
+  const handleDeleteGroup = async (id: string) => {
     setGroups((prev) => prev.filter((g) => g.id !== id));
-    showToast('Đã xóa bộ phận khỏi danh mục.');
+    try {
+      await deleteDepartmentFromSupabase(id);
+      showToast('Đã xóa phòng ban khỏi bảng departments (Supabase).');
+    } catch {
+      showToast('Đã xóa bộ phận khỏi danh mục.');
+    }
   };
 
-  // Company Unit Handlers
-  const handleAddCompany = (unitData: Omit<CompanyUnit, 'id'>) => {
-    const newUnit: CompanyUnit = {
+  // Company Unit (`companies` table) Handlers
+  const handleAddCompany = async (unitData: Omit<CompanyUnit, 'id'>) => {
+    const tempId = `comp-${Date.now()}`;
+    const optimistic: CompanyUnit = {
       ...unitData,
-      id: `comp-${Date.now()}`,
+      id: tempId,
+      defaultLeaveQuota: defaultAnnualLeaveQuota,
+      isInitialized: true,
     };
-    setCompanyUnits((prev) => [...prev, newUnit]);
-    setActiveCompanyId(newUnit.id);
-    showToast(`Đã thêm đơn vị mới: ${newUnit.name}.`);
+    setCompanyUnits((prev) => [...prev, optimistic]);
+    setActiveCompanyId(tempId);
+
+    try {
+      const created = await createCompanyInSupabase({
+        ...unitData,
+        defaultLeaveQuota: defaultAnnualLeaveQuota,
+        isInitialized: true,
+      });
+      setCompanyUnits((prev) =>
+        prev.map((c) => (c.id === tempId ? created : c))
+      );
+      setActiveCompanyId(created.id);
+      showToast(`Đã thêm đơn vị "${created.name}" lên bảng companies (Supabase).`);
+    } catch {
+      showToast(`Đã thêm đơn vị mới: ${optimistic.name}.`);
+    }
   };
 
-  const handleUpdateCompany = (id: string, unitData: Omit<CompanyUnit, 'id'>) => {
+  const handleUpdateCompany = async (
+    id: string,
+    unitData: Omit<CompanyUnit, 'id'>
+  ) => {
     setCompanyUnits((prev) =>
-      prev.map((c) => (c.id === id ? { ...unitData, id } : c))
+      prev.map((c) => (c.id === id ? { ...c, ...unitData, id } : c))
     );
-    showToast(`Đã cập nhật đơn vị: ${unitData.name}.`);
+    try {
+      const updated = await updateCompanyInSupabase(id, unitData);
+      setCompanyUnits((prev) =>
+        prev.map((c) => (c.id === id ? updated : c))
+      );
+      showToast(`Đã cập nhật đơn vị "${updated.name}" trên Supabase.`);
+    } catch {
+      showToast(`Đã cập nhật đơn vị: ${unitData.name}.`);
+    }
   };
 
-  const handleDeleteCompany = (id: string) => {
+  const handleDeleteCompany = async (id: string) => {
     if (companyUnits.length <= 1) return;
     setCompanyUnits((prev) => {
       const remaining = prev.filter((c) => c.id !== id);
@@ -541,54 +670,101 @@ export default function App() {
       }
       return remaining;
     });
-    showToast('Đã xóa đơn vị thành viên.');
+
+    try {
+      await deleteCompanyFromSupabase(id);
+      showToast('Đã xóa đơn vị thành viên khỏi bảng companies (Supabase).');
+    } catch {
+      showToast('Đã xóa đơn vị thành viên.');
+    }
   };
 
-  // Default Annual Leave Quota Handler
-  const handleUpdateDefaultQuota = (quota: number) => {
+  // Default Annual Leave Quota (`companies.default_leave_quota`) Handler
+  const handleUpdateDefaultQuota = async (quota: number) => {
     setDefaultAnnualLeaveQuota(quota);
-    showToast(
-      `Đã cập nhật số ngày phép chuẩn mặc định thành ${quota} ngày/năm.`
+    setCompanyUnits((prev) =>
+      prev.map((c) =>
+        c.id === activeCompany.id ? { ...c, defaultLeaveQuota: quota } : c
+      )
     );
+    try {
+      await updateCompanyInSupabase(activeCompany.id, {
+        defaultLeaveQuota: quota,
+      });
+      showToast(
+        `Đã lưu định mức phép chuẩn (${quota} ngày/năm) vào bảng companies trên Supabase.`
+      );
+    } catch {
+      showToast(
+        `Đã cập nhật số ngày phép chuẩn mặc định thành ${quota} ngày/năm.`
+      );
+    }
   };
 
-  // User Account Handlers
-  const handleAddAccount = (
+  // User Account (`app_users` table) Handlers
+  const handleAddAccount = async (
     accData: Omit<UserAccount, 'id' | 'createdAt'>
   ) => {
-    const newAcc: UserAccount = {
+    const tempId = `acc-${Date.now()}`;
+    const optimistic: UserAccount = {
       ...accData,
-      id: `acc-${Date.now()}`,
+      id: tempId,
+      companyId: activeCompany.id,
       createdAt: new Date().toISOString().slice(0, 10),
     };
-    setAccounts((prev) => [...prev, newAcc]);
-    showToast(
-      `Đã tạo tài khoản ${newAcc.username} (${
-        newAcc.role === 'admin' ? 'Quản trị viên' : 'Nhân viên'
-      }).`
-    );
+    setAccounts((prev) => [...prev, optimistic]);
+
+    try {
+      const created = await createAppUserInSupabase(accData, activeCompany.id);
+      setAccounts((prev) => prev.map((a) => (a.id === tempId ? created : a)));
+      showToast(
+        `Đã tạo tài khoản "${created.username}" trên bảng app_users (Supabase).`
+      );
+    } catch {
+      showToast(
+        `Đã tạo tài khoản ${optimistic.username} (${
+          optimistic.role === 'admin' ? 'Quản trị viên' : 'Nhân viên'
+        }).`
+      );
+    }
   };
 
-  const handleUpdateAccountRole = (id: string, role: UserRole) => {
+  const handleUpdateAccountRole = async (id: string, role: UserRole) => {
     setAccounts((prev) =>
       prev.map((a) => (a.id === id ? { ...a, role } : a))
     );
     if (currentUser?.id === id) {
       setCurrentUser((prev) => (prev ? { ...prev, role } : null));
     }
-    showToast(
-      `Đã đổi phân quyền tài khoản sang ${
-        role === 'admin' ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN'
-      }.`
-    );
+
+    try {
+      const updated = await updateAppUserRoleInSupabase(id, role);
+      setAccounts((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      showToast(
+        `Đã cập nhật quyền "${
+          role === 'admin' ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN'
+        }" trên bảng app_users (Supabase).`
+      );
+    } catch {
+      showToast(
+        `Đã đổi phân quyền tài khoản sang ${
+          role === 'admin' ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN'
+        }.`
+      );
+    }
   };
 
-  const handleDeleteAccount = (id: string) => {
+  const handleDeleteAccount = async (id: string) => {
     setAccounts((prev) => prev.filter((a) => a.id !== id));
-    showToast('Đã xóa tài khoản khỏi hệ thống.');
+    try {
+      await deleteAppUserFromSupabase(id);
+      showToast('Đã xóa tài khoản khỏi bảng app_users (Supabase).');
+    } catch {
+      showToast('Đã xóa tài khoản khỏi hệ thống.');
+    }
   };
 
-  // Leave / Late Record Handlers (persisted to Supabase + instant UI update)
+  // Leave / Late Record Handlers (`leave_logs` table on Supabase)
   const handleSaveLeaveRecord = async (
     recData: Omit<LeaveRecord, 'id'>,
     existingId?: string
@@ -683,9 +859,13 @@ export default function App() {
       setRecords([]);
       setSelectedEmpIds([]);
 
-      await clearAllDataInSupabase().catch(() => {});
+      await clearAllDataInSupabase();
       showToast(
-        'Đã xóa trắng toàn bộ dữ liệu nhân sự và nghỉ phép về 0. Hệ thống sẵn sàng nhập dữ liệu thật.'
+        'Đã xóa trắng toàn bộ dữ liệu mẫu trên Supabase (employees & leave_logs = 0) và giữ is_initialized = true.'
+      );
+    } catch {
+      showToast(
+        'Đã xóa trắng toàn bộ dữ liệu nhân sự và nghỉ phép về 0.'
       );
     } finally {
       setIsProcessingData(false);
@@ -697,19 +877,19 @@ export default function App() {
     setIsProcessingData(true);
     try {
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-      setGroups(INITIAL_DEPARTMENT_GROUPS);
-      try {
-        const restored = await restoreDemoDataInSupabase();
-        setEmployees(restored.employees);
-        setRecords(restored.records);
-        showToast(
-          `Đã khôi phục ${restored.employees.length} nhân sự mẫu & ${restored.records.length} bản ghi phép mẫu lên hệ thống và Supabase.`
-        );
-      } catch {
-        setEmployees(INITIAL_EMPLOYEES);
-        setRecords(INITIAL_LEAVE_RECORDS);
-        showToast('Đã khôi phục bộ dữ liệu mẫu (Demo) thành công.');
+      const restored = await restoreDemoDataInSupabase(activeCompany.id);
+      setEmployees(restored.employees);
+      setRecords(restored.records);
+      if (restored.departments.length > 0) {
+        setGroups(restored.departments);
+      } else {
+        setGroups(INITIAL_DEPARTMENT_GROUPS);
       }
+      showToast(
+        `Đã khôi phục ${restored.employees.length} nhân sự mẫu & ${restored.records.length} bản ghi phép mẫu lên Supabase.`
+      );
+    } catch {
+      showToast('Không thể khôi phục dữ liệu mẫu lên Supabase.');
     } finally {
       setIsProcessingData(false);
     }
@@ -724,6 +904,12 @@ export default function App() {
         isCloudConnected={isCloudConnected}
         onLoginSuccess={(acc) => {
           setCurrentUser(acc);
+          if (acc.companyId) {
+            const matchedComp = companyUnits.find((c) => c.id === acc.companyId);
+            if (matchedComp) {
+              setActiveCompanyId(matchedComp.id);
+            }
+          }
           if (acc.role !== 'admin' && activeModule === 'settings') {
             setActiveModule('dashboard');
           }
@@ -748,8 +934,8 @@ export default function App() {
         }}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-        employeeCount={employees.length}
-        recordCount={records.length}
+        employeeCount={companyEmployees.length}
+        recordCount={companyRecords.length}
         currentUser={currentUser}
         companyUnits={companyUnits}
         activeCompanyId={activeCompany.id}
@@ -757,6 +943,9 @@ export default function App() {
           setActiveCompanyId(compId);
           const found = companyUnits.find((c) => c.id === compId);
           if (found) {
+            if (found.defaultLeaveQuota) {
+              setDefaultAnnualLeaveQuota(found.defaultLeaveQuota);
+            }
             showToast(`Đã chuyển đơn vị làm việc sang: ${found.name}`);
           }
         }}
@@ -803,7 +992,7 @@ export default function App() {
                 kpis={kpis}
                 departmentDist={departmentDist}
                 leaveTypeDist={leaveTypeDist}
-                employees={employees}
+                employees={companyEmployees}
                 recentRecords={sortedRecords}
                 matrixRows={matrixRows2026}
                 onNavigate={setActiveModule}
@@ -822,8 +1011,8 @@ export default function App() {
 
             {activeModule === 'employees' && (
               <EmployeeDirectoryView
-                employees={employees}
-                groups={groups}
+                employees={companyEmployees}
+                groups={effectiveGroups}
                 selectedIds={selectedEmpIds}
                 isAdmin={isAdmin}
                 onToggleSelect={handleToggleSelectEmployee}
@@ -870,9 +1059,9 @@ export default function App() {
 
             {activeModule === 'leave_logs' && (
               <LeaveLateLogView
-                records={records}
-                employees={employees}
-                groups={groups}
+                records={companyRecords}
+                employees={companyEmployees}
+                groups={effectiveGroups}
                 isAdmin={isAdmin}
                 onOpenAddRecord={() => {
                   setEditingRecord(null);
@@ -891,7 +1080,7 @@ export default function App() {
                   setLightboxImage({ url, title })
                 }
                 onExportExcel={(filteredList) => {
-                  exportLeaveRecordsToExcel(filteredList, employees);
+                  exportLeaveRecordsToExcel(filteredList, companyEmployees);
                   showToast(
                     `Đã xuất tệp Excel nhật ký (${filteredList.length} bản ghi).`
                   );
@@ -901,9 +1090,9 @@ export default function App() {
 
             {activeModule === 'annual_report' && (
               <AnnualMatrixReportView
-                employees={employees}
-                records={records}
-                groups={groups}
+                employees={companyEmployees}
+                records={companyRecords}
+                groups={effectiveGroups}
                 onExportMatrixExcel={(rows, year, viewMode) => {
                   exportAnnualMatrixToExcel(rows, year, viewMode);
                   showToast(`Đã xuất tệp Excel Báo cáo Ma trận Tồn phép năm ${year}.`);
@@ -912,7 +1101,7 @@ export default function App() {
                   setPrintModalState({
                     isOpen: true,
                     reportType: 'annual_matrix',
-                    employees,
+                    employees: companyEmployees,
                     matrixRows: rows,
                     year,
                     viewMode,
@@ -939,18 +1128,23 @@ export default function App() {
                   setActiveCompanyId(id);
                   const found = companyUnits.find((c) => c.id === id);
                   if (found) {
+                    if (found.defaultLeaveQuota) {
+                      setDefaultAnnualLeaveQuota(found.defaultLeaveQuota);
+                    }
                     showToast(`Đã đặt ${found.name} làm đơn vị đang làm việc.`);
                   }
                 }}
                 onAddCompanyUnit={handleAddCompany}
                 onUpdateCompanyUnit={handleUpdateCompany}
                 onDeleteCompanyUnit={handleDeleteCompany}
-                groups={groups}
-                employees={employees}
+                groups={companyGroups}
+                employees={companyEmployees}
                 onAddGroup={handleAddGroup}
                 onUpdateGroup={handleUpdateGroup}
                 onDeleteGroup={handleDeleteGroup}
-                defaultAnnualLeaveQuota={defaultAnnualLeaveQuota}
+                defaultAnnualLeaveQuota={
+                  activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
+                }
                 onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
                 accounts={accounts}
                 currentAccountId={currentUser.id}
@@ -971,18 +1165,20 @@ export default function App() {
       <EmployeeModal
         isOpen={isEmpModalOpen}
         editingEmployee={editingEmployee}
-        groups={groups}
+        groups={effectiveGroups}
         existingCodes={employees.map((e) => e.employeeCode)}
         nextSuggestedCode={nextSuggestedCode}
-        defaultAnnualLeaveQuota={defaultAnnualLeaveQuota}
+        defaultAnnualLeaveQuota={
+          activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
+        }
         onClose={() => setIsEmpModalOpen(false)}
         onSave={handleSaveEmployee}
       />
 
       <GroupManageModal
         isOpen={isGroupModalOpen}
-        groups={groups}
-        employees={employees}
+        groups={companyGroups}
+        employees={companyEmployees}
         onClose={() => setIsGroupModalOpen(false)}
         onAddGroup={handleAddGroup}
         onDeleteGroup={handleDeleteGroup}
@@ -991,7 +1187,7 @@ export default function App() {
       <LeaveRecordModal
         isOpen={isLeaveModalOpen}
         editingRecord={editingRecord}
-        employees={employees}
+        employees={companyEmployees}
         defaultEmployeeId={leaveDefaultEmpId}
         defaultMonth={leaveDefaultMonth}
         defaultYear={leaveDefaultYear}

@@ -356,18 +356,33 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
               >
                 Nhóm / Bộ phận
               </label>
-              <select
-                id="emp-dept-select"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                {groups.map((grp) => (
-                  <option key={grp.id} value={grp.name}>
-                    {grp.name}
-                  </option>
-                ))}
-              </select>
+              {groups.length > 0 ? (
+                <select
+                  id="emp-dept-select"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                >
+                  {department &&
+                    !groups.some((g) => g.name === department) && (
+                      <option value={department}>{department}</option>
+                    )}
+                  {groups.map((grp) => (
+                    <option key={grp.id} value={grp.name}>
+                      {grp.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="emp-dept-select"
+                  type="text"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  placeholder="Nhập tên phòng ban / bộ phận..."
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                />
+              )}
             </div>
 
             <div>

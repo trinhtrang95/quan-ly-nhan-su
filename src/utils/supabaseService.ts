@@ -1,15 +1,22 @@
 import {
+  CompanyUnit,
+  DepartmentGroup,
   Employee,
   Gender,
   LeaveRecord,
   LeaveRecordType,
   RegimeSubtype,
+  UserAccount,
+  UserRole,
   WorkStatus,
 } from '../types/hr';
 import {
   createAvatarSvgDataUri,
+  INITIAL_COMPANY_UNITS,
+  INITIAL_DEPARTMENT_GROUPS,
   INITIAL_EMPLOYEES,
   INITIAL_LEAVE_RECORDS,
+  INITIAL_USER_ACCOUNTS,
 } from '../data/mockData';
 import { formatDateVN, LEAVE_TYPE_META } from './hrCalculations';
 
@@ -27,6 +34,44 @@ export const SUPABASE_ANON_KEY =
 
 export const HR_IMAGES_BUCKET = 'hr-images';
 
+const DEPT_PALETTE = [
+  '#0D9488',
+  '#0284C7',
+  '#7C3AED',
+  '#D97706',
+  '#E11D48',
+  '#16A34A',
+];
+
+export interface SupabaseCompanyRow {
+  id: string;
+  code: string;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  default_leave_quota: number | null;
+  is_initialized: boolean | null;
+  created_at?: string;
+}
+
+export interface SupabaseDepartmentRow {
+  id: string;
+  company_id: string | null;
+  name: string;
+  description: string | null;
+  created_at?: string;
+}
+
+export interface SupabaseAppUserRow {
+  id: string;
+  username: string;
+  password: string;
+  full_name: string;
+  role: string;
+  company_id: string | null;
+  created_at?: string;
+}
+
 export interface SupabaseEmployeeRow {
   id: string;
   employee_code: string;
@@ -40,6 +85,7 @@ export interface SupabaseEmployeeRow {
   avatar_url: string | null;
   annual_leave_quota: number | null;
   status: string | null;
+  company_id?: string | null;
   created_at?: string;
 }
 
@@ -88,6 +134,90 @@ async function supabaseRestFetch<T>(
 }
 
 /**
+ * Maps a Supabase `companies` row to `CompanyUnit`
+ */
+export function mapSupabaseRowToCompany(row: SupabaseCompanyRow): CompanyUnit {
+  const code = row.code || 'HR-HQ';
+  const shortName = code.split('-')[0].slice(0, 4).toUpperCase() || 'HR';
+  return {
+    id: String(row.id),
+    code,
+    name: row.name || 'Công ty Mặc định',
+    shortName,
+    address: row.address || '',
+    phone: row.phone || '',
+    defaultLeaveQuota:
+      row.default_leave_quota !== null && row.default_leave_quota !== undefined
+        ? Number(row.default_leave_quota)
+        : 12,
+    isInitialized: Boolean(row.is_initialized),
+  };
+}
+
+/**
+ * Maps a Supabase `departments` row to `DepartmentGroup`
+ */
+export function mapSupabaseRowToDepartment(
+  row: SupabaseDepartmentRow,
+  index: number = 0
+): DepartmentGroup {
+  const rawDesc = row.description || '';
+  let code = '';
+  let color = DEPT_PALETTE[index % DEPT_PALETTE.length];
+  let description = rawDesc;
+
+  if (rawDesc.includes('|')) {
+    const parts = rawDesc.split('|');
+    code = parts[0] || '';
+    if (parts[1] && parts[1].startsWith('#')) {
+      color = parts[1];
+    }
+    description = parts.slice(2).join('|') || '';
+  }
+
+  if (!code) {
+    const words = (row.name || 'PB')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    code =
+      words.length >= 2
+        ? words
+            .map((w) => w[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 5)
+        : (row.name || 'PB').slice(0, 4).toUpperCase();
+  }
+
+  return {
+    id: String(row.id),
+    companyId: row.company_id || null,
+    name: row.name,
+    code,
+    color,
+    description,
+  };
+}
+
+/**
+ * Maps a Supabase `app_users` row to `UserAccount`
+ */
+export function mapSupabaseRowToAppUser(row: SupabaseAppUserRow): UserAccount {
+  return {
+    id: String(row.id),
+    username: row.username,
+    password: row.password || '',
+    fullName: row.full_name || row.username,
+    role: row.role === 'admin' ? 'admin' : 'user',
+    companyId: row.company_id || null,
+    employeeCode: row.username.toUpperCase(),
+    department: row.role === 'admin' ? 'Quản trị Hệ thống' : 'Nhân viên Chấm công',
+    createdAt: row.created_at ? row.created_at.slice(0, 10) : '2026-11-13',
+  };
+}
+
+/**
  * Maps a Supabase `employees` row to our frontend `Employee` model
  */
 export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
@@ -100,6 +230,7 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
 
   return {
     id: String(row.id),
+    companyId: row.company_id || null,
     employeeCode: row.employee_code || 'NV000',
     fullName,
     dob: row.dob || '1995-01-01',
@@ -194,8 +325,34 @@ export function mapSupabaseRowToLeaveRecord(
       ? `${meta.shortLabel} - ${emp ? emp.fullName : ''} (${formatDateVN(row.start_date)})`
       : undefined,
     createdAt: row.created_at ? row.created_at.slice(0, 10) : row.start_date,
-    approvedBy: 'Trần Thu Trang',
+    approvedBy: 'Quản trị viên',
   };
+}
+
+/**
+ * Authenticates a user directly against the `app_users` table on Supabase
+ */
+export async function authenticateAppUserInSupabase(
+  usernameInput: string,
+  passwordInput: string
+): Promise<UserAccount | null> {
+  const cleanUser = usernameInput.trim();
+  if (!cleanUser) return null;
+
+  const rows = await supabaseRestFetch<SupabaseAppUserRow[]>(
+    `app_users?select=*&username=ilike.${encodeURIComponent(cleanUser)}`
+  );
+
+  if (!rows || rows.length === 0) {
+    return null;
+  }
+
+  const matched = rows.find((r) => r.password === passwordInput);
+  if (!matched) {
+    return null;
+  }
+
+  return mapSupabaseRowToAppUser(matched);
 }
 
 /**
@@ -242,15 +399,19 @@ export async function uploadImageToHrBucket(
 }
 
 let initPromise: Promise<{
+  companies: CompanyUnit[];
+  departments: DepartmentGroup[];
+  accounts: UserAccount[];
   employees: Employee[];
   records: LeaveRecord[];
+  isInitialized: boolean;
   connected: boolean;
 }> | null = null;
 
 /**
  * Helper to seed INITIAL_EMPLOYEES and INITIAL_LEAVE_RECORDS into Supabase
  */
-async function seedInitialDataToSupabase(): Promise<{
+async function seedInitialDataToSupabase(companyId?: string | null): Promise<{
   employees: Employee[];
   records: LeaveRecord[];
 }> {
@@ -266,6 +427,7 @@ async function seedInitialDataToSupabase(): Promise<{
     avatar_url: emp.avatarUrl,
     annual_leave_quota: emp.standardAnnualLeave,
     status: emp.status,
+    company_id: companyId || null,
   }));
 
   const insertedEmps = await supabaseRestFetch<SupabaseEmployeeRow[]>(
@@ -332,56 +494,112 @@ async function seedInitialDataToSupabase(): Promise<{
 }
 
 /**
- * Loads `employees` and `leave_logs` from Supabase via REST API.
- * Only seeds `INITIAL_EMPLOYEES` and `INITIAL_LEAVE_RECORDS` if `allowAutoSeed` is true
- * (i.e. when `hr_pro_initialized` was not yet set in localStorage).
+ * Loads `companies`, `departments`, `app_users`, `employees`, and `leave_logs` from Supabase.
+ * Checks `companies.is_initialized`: if `is_initialized = true` (or localStorage flag is true),
+ * NEVER auto-seeds mock data when `employees` or `leave_logs` is empty (0 records).
  */
 export async function loadOrSeedSupabaseData(
-  allowAutoSeed: boolean = false
+  localInitializedFlag: boolean = true
 ): Promise<{
+  companies: CompanyUnit[];
+  departments: DepartmentGroup[];
+  accounts: UserAccount[];
   employees: Employee[];
   records: LeaveRecord[];
+  isInitialized: boolean;
   connected: boolean;
 }> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      const finalEmpRows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
-        'employees?select=*&order=employee_code.asc'
-      );
+      const [compRows, deptRows, userRows, empRows, logRows] = await Promise.all([
+        supabaseRestFetch<SupabaseCompanyRow[]>(
+          'companies?select=*&order=created_at.asc'
+        ).catch(() => [] as SupabaseCompanyRow[]),
+        supabaseRestFetch<SupabaseDepartmentRow[]>(
+          'departments?select=*&order=created_at.asc'
+        ).catch(() => [] as SupabaseDepartmentRow[]),
+        supabaseRestFetch<SupabaseAppUserRow[]>(
+          'app_users?select=*&order=created_at.asc'
+        ).catch(() => [] as SupabaseAppUserRow[]),
+        supabaseRestFetch<SupabaseEmployeeRow[]>(
+          'employees?select=*&order=employee_code.asc'
+        ),
+        supabaseRestFetch<SupabaseLeaveLogRow[]>(
+          'leave_logs?select=*&order=start_date.desc'
+        ),
+      ]);
 
-      // Only auto-seed if `allowAutoSeed` is explicitly true AND Supabase table is empty
-      if ((!finalEmpRows || finalEmpRows.length === 0) && allowAutoSeed) {
-        const seeded = await seedInitialDataToSupabase();
-        return {
-          employees: seeded.employees,
-          records: seeded.records,
-          connected: true,
-        };
+      // 1. Companies & is_initialized check
+      let companies = (compRows || []).map(mapSupabaseRowToCompany);
+      if (companies.length === 0) {
+        const createdComp = await createCompanyInSupabase({
+          code: 'HRPRO-HQ',
+          name: 'Công ty Mặc định',
+          shortName: 'HR',
+          address: 'Việt Nam',
+          phone: '',
+          defaultLeaveQuota: 12,
+          isInitialized: true,
+        }).catch(() => INITIAL_COMPANY_UNITS[0]);
+        companies = [createdComp];
       }
 
-      const employees = (finalEmpRows || []).map(mapSupabaseRowToEmployee);
+      const dbIsInitialized =
+        companies.some((c) => c.isInitialized === true) || localInitializedFlag;
+
+      // Ensure all companies have is_initialized = true on Supabase if not yet set
+      if (!companies.some((c) => c.isInitialized === true)) {
+        await supabaseRestFetch<void>('companies?id=not.is.null', {
+          method: 'PATCH',
+          body: JSON.stringify({ is_initialized: true }),
+        }).catch(() => {});
+        companies = companies.map((c) => ({ ...c, isInitialized: true }));
+      }
+
+      // 2. Accounts (`app_users`)
+      const accounts =
+        userRows && userRows.length > 0
+          ? userRows.map(mapSupabaseRowToAppUser)
+          : INITIAL_USER_ACCOUNTS;
+
+      // 3. Employees & Leave Logs (NEVER auto-seed if dbIsInitialized is true)
+      let employees = (empRows || []).map(mapSupabaseRowToEmployee);
       const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
-
-      const finalLogRows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
-        'leave_logs?select=*&order=start_date.desc'
-      );
-
-      const records = (finalLogRows || []).map((row) =>
+      let records = (logRows || []).map((row) =>
         mapSupabaseRowToLeaveRecord(row, empMap)
       );
 
+      if (!dbIsInitialized && employees.length === 0) {
+        const seeded = await seedInitialDataToSupabase(companies[0]?.id);
+        employees = seeded.employees;
+        records = seeded.records;
+      }
+
+      // 4. Departments (`departments`)
+      const departments = (deptRows || []).map((r, i) =>
+        mapSupabaseRowToDepartment(r, i)
+      );
+
       return {
+        companies,
+        departments,
+        accounts,
         employees,
         records,
+        isInitialized: true,
         connected: true,
       };
     } catch (error) {
-      console.error('Supabase sync error, falling back to local data:', error);
+      console.error('Supabase sync error:', error);
       return {
-        employees: allowAutoSeed ? INITIAL_EMPLOYEES : [],
-        records: allowAutoSeed ? INITIAL_LEAVE_RECORDS : [],
+        companies: INITIAL_COMPANY_UNITS,
+        departments: [],
+        accounts: INITIAL_USER_ACCOUNTS,
+        employees: [],
+        records: [],
+        isInitialized: true,
         connected: false,
       };
     } finally {
@@ -392,8 +610,199 @@ export async function loadOrSeedSupabaseData(
   return initPromise;
 }
 
+/* ============================================================================
+   COMPANIES CRUD (`companies` table)
+============================================================================ */
+export async function createCompanyInSupabase(
+  unit: Omit<CompanyUnit, 'id'>
+): Promise<CompanyUnit> {
+  const payload = {
+    code: unit.code,
+    name: unit.name,
+    address: unit.address || null,
+    phone: unit.phone || null,
+    default_leave_quota: unit.defaultLeaveQuota ?? 12,
+    is_initialized: true,
+  };
+
+  const rows = await supabaseRestFetch<SupabaseCompanyRow[]>(
+    'companies?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([payload]),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to create company in Supabase');
+  }
+
+  return mapSupabaseRowToCompany(rows[0]);
+}
+
+export async function updateCompanyInSupabase(
+  id: string,
+  updates: Partial<Omit<CompanyUnit, 'id'>>
+): Promise<CompanyUnit> {
+  const payload: Record<string, unknown> = {};
+  if (updates.code !== undefined) payload.code = updates.code;
+  if (updates.name !== undefined) payload.name = updates.name;
+  if (updates.address !== undefined) payload.address = updates.address;
+  if (updates.phone !== undefined) payload.phone = updates.phone;
+  if (updates.defaultLeaveQuota !== undefined) {
+    payload.default_leave_quota = updates.defaultLeaveQuota;
+  }
+  if (updates.isInitialized !== undefined) {
+    payload.is_initialized = updates.isInitialized;
+  }
+
+  const rows = await supabaseRestFetch<SupabaseCompanyRow[]>(
+    `companies?id=eq.${encodeURIComponent(id)}&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to update company in Supabase');
+  }
+
+  return mapSupabaseRowToCompany(rows[0]);
+}
+
+export async function deleteCompanyFromSupabase(id: string): Promise<void> {
+  await supabaseRestFetch<void>(`companies?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/* ============================================================================
+   DEPARTMENTS CRUD (`departments` table)
+============================================================================ */
+export async function createDepartmentInSupabase(
+  grp: Omit<DepartmentGroup, 'id'>,
+  companyId?: string | null
+): Promise<DepartmentGroup> {
+  const payload = {
+    company_id: grp.companyId || companyId || null,
+    name: grp.name,
+    description: `${grp.code || ''}|${grp.color || '#0D9488'}|${grp.description || ''}`,
+  };
+
+  const rows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
+    'departments?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([payload]),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to create department in Supabase');
+  }
+
+  return mapSupabaseRowToDepartment(rows[0], 0);
+}
+
+export async function updateDepartmentInSupabase(
+  id: string,
+  grp: Omit<DepartmentGroup, 'id'>,
+  companyId?: string | null
+): Promise<DepartmentGroup> {
+  const payload = {
+    company_id: grp.companyId || companyId || null,
+    name: grp.name,
+    description: `${grp.code || ''}|${grp.color || '#0D9488'}|${grp.description || ''}`,
+  };
+
+  const rows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
+    `departments?id=eq.${encodeURIComponent(id)}&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to update department in Supabase');
+  }
+
+  return mapSupabaseRowToDepartment(rows[0], 0);
+}
+
+export async function deleteDepartmentFromSupabase(id: string): Promise<void> {
+  await supabaseRestFetch<void>(`departments?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/* ============================================================================
+   APP USERS CRUD (`app_users` table)
+============================================================================ */
+export async function createAppUserInSupabase(
+  acc: Omit<UserAccount, 'id' | 'createdAt'>,
+  companyId?: string | null
+): Promise<UserAccount> {
+  const payload = {
+    username: acc.username,
+    password: acc.password,
+    full_name: acc.fullName,
+    role: acc.role,
+    company_id: acc.companyId || companyId || null,
+  };
+
+  const rows = await supabaseRestFetch<SupabaseAppUserRow[]>(
+    'app_users?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([payload]),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to create app_user in Supabase');
+  }
+
+  return mapSupabaseRowToAppUser(rows[0]);
+}
+
+export async function updateAppUserRoleInSupabase(
+  id: string,
+  role: UserRole
+): Promise<UserAccount> {
+  const rows = await supabaseRestFetch<SupabaseAppUserRow[]>(
+    `app_users?id=eq.${encodeURIComponent(id)}&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ role }),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to update app_user role in Supabase');
+  }
+
+  return mapSupabaseRowToAppUser(rows[0]);
+}
+
+export async function deleteAppUserFromSupabase(id: string): Promise<void> {
+  await supabaseRestFetch<void>(`app_users?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/* ============================================================================
+   DATA RESET & DEMO RESTORE
+============================================================================ */
 /**
- * Deletes ALL employees and leave_logs from Supabase (used when Admin resets system data to 0)
+ * Deletes ALL employees and leave_logs from Supabase and ensures companies.is_initialized = true
  */
 export async function clearAllDataInSupabase(): Promise<void> {
   await supabaseRestFetch<void>('leave_logs?id=not.is.null', {
@@ -403,19 +812,57 @@ export async function clearAllDataInSupabase(): Promise<void> {
   await supabaseRestFetch<void>('employees?id=not.is.null', {
     method: 'DELETE',
   });
+
+  await supabaseRestFetch<void>('companies?id=not.is.null', {
+    method: 'PATCH',
+    body: JSON.stringify({ is_initialized: true }),
+  }).catch(() => {});
 }
 
 /**
  * Clears existing rows and re-seeds demo mock data into Supabase (used when Admin clicks Restore Demo Data)
  */
-export async function restoreDemoDataInSupabase(): Promise<{
+export async function restoreDemoDataInSupabase(
+  companyId?: string | null
+): Promise<{
   employees: Employee[];
   records: LeaveRecord[];
+  departments: DepartmentGroup[];
 }> {
   await clearAllDataInSupabase().catch(() => {});
-  return seedInitialDataToSupabase();
+
+  // Also seed default departments if `departments` table is empty
+  let deptRows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
+    'departments?select=*'
+  ).catch(() => [] as SupabaseDepartmentRow[]);
+
+  if (!deptRows || deptRows.length === 0) {
+    const deptPayloads = INITIAL_DEPARTMENT_GROUPS.map((g) => ({
+      company_id: companyId || null,
+      name: g.name,
+      description: `${g.code}|${g.color}|${g.description || ''}`,
+    }));
+    deptRows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
+      'departments?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(deptPayloads),
+      }
+    ).catch(() => [] as SupabaseDepartmentRow[]);
+  }
+
+  const seeded = await seedInitialDataToSupabase(companyId);
+  return {
+    employees: seeded.employees,
+    records: seeded.records,
+    departments: (deptRows || []).map((r, i) => mapSupabaseRowToDepartment(r, i)),
+  };
 }
 
+/* ============================================================================
+   EMPLOYEES & LEAVE LOGS CRUD
+============================================================================ */
 /**
  * Inserts a new employee into Supabase `employees`
  */
@@ -434,6 +881,7 @@ export async function createEmployeeInSupabase(
     avatar_url: empData.avatarUrl,
     annual_leave_quota: empData.standardAnnualLeave,
     status: empData.status,
+    company_id: empData.companyId || null,
   };
 
   const rows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
@@ -470,6 +918,7 @@ export async function bulkCreateEmployeesInSupabase(
     avatar_url: empData.avatarUrl,
     annual_leave_quota: empData.standardAnnualLeave,
     status: empData.status,
+    company_id: empData.companyId || null,
   }));
 
   const rows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
@@ -491,7 +940,7 @@ export async function updateEmployeeInSupabase(
   id: string,
   empData: Omit<Employee, 'id'>
 ): Promise<Employee> {
-  const payload = {
+  const payload: Record<string, unknown> = {
     employee_code: empData.employeeCode,
     full_name: empData.fullName,
     dob: empData.dob,
@@ -504,6 +953,9 @@ export async function updateEmployeeInSupabase(
     annual_leave_quota: empData.standardAnnualLeave,
     status: empData.status,
   };
+  if (empData.companyId !== undefined) {
+    payload.company_id = empData.companyId;
+  }
 
   const rows = await supabaseRestFetch<SupabaseEmployeeRow[]>(
     `employees?id=eq.${encodeURIComponent(id)}&select=*`,
