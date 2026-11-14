@@ -69,11 +69,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  // Column 3: Top Leave & Late state
-  const [topMonthFilter, setTopMonthFilter] = useState<string>(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  // Column 1 Bottom: Upcoming Birthdays filter state
+  const [birthdayFilter, setBirthdayFilter] = useState<'next_30_days' | 'this_month'>('next_30_days');
+
+  // Column 2 Bottom: Top Leave & Late state (default to ALL_YEAR = Cả năm 2026)
+  const [topMonthFilter, setTopMonthFilter] = useState<string>('ALL_YEAR');
   const [topTab, setTopTab] = useState<'leave' | 'late'>('leave');
 
   useEffect(() => {
@@ -285,8 +285,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     0,
   ];
 
-  // Available Month/Year options for Column 3 Top Ranking filter
+  // Available Month/Year options for Column 2 Top Ranking filter
   const currentYear = currentTime.getFullYear();
+  const currentMonth = currentTime.getMonth() + 1;
+  const currentDay = currentTime.getDate();
+
   const monthOptions = Array.from({ length: 12 }, (_, idx) => {
     const m = idx + 1;
     const value = `${currentYear}-${String(m).padStart(2, '0')}`;
@@ -296,7 +299,92 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   });
 
-  // Compute Top Leave / Late Ranking for Column 3
+  // Compute Upcoming Birthdays for Column 1 Bottom
+  const upcomingBirthdays = React.useMemo(() => {
+    const todayMidnight = new Date(currentYear, currentMonth - 1, currentDay);
+    const activeEmps = employees.filter((e) => e.status !== 'Đã nghỉ việc');
+
+    const parsed: {
+      id: string;
+      fullName: string;
+      dayMonthStr: string;
+      birthDay: number;
+      birthMonth: number;
+      daysUntil: number;
+    }[] = [];
+
+    for (const emp of activeEmps) {
+      if (!emp.dob) continue;
+      const formatted = formatDateVN(emp.dob);
+      const parts = formatted.split('/');
+      if (parts.length < 2) continue;
+      const bDay = parseInt(parts[0], 10);
+      const bMonth = parseInt(parts[1], 10);
+      if (
+        isNaN(bDay) ||
+        isNaN(bMonth) ||
+        bMonth < 1 ||
+        bMonth > 12 ||
+        bDay < 1 ||
+        bDay > 31
+      ) {
+        continue;
+      }
+
+      const dayMonthStr = `${String(bDay).padStart(2, '0')}/${String(bMonth).padStart(2, '0')}`;
+
+      if (birthdayFilter === 'next_30_days') {
+        let nextBday = new Date(currentYear, bMonth - 1, bDay);
+        if (nextBday < todayMidnight) {
+          nextBday = new Date(currentYear + 1, bMonth - 1, bDay);
+        }
+        const diffDays = Math.round(
+          (nextBday.getTime() - todayMidnight.getTime()) / 86400000
+        );
+        if (diffDays >= 0 && diffDays <= 30) {
+          parsed.push({
+            id: emp.id,
+            fullName: emp.fullName,
+            dayMonthStr,
+            birthDay: bDay,
+            birthMonth: bMonth,
+            daysUntil: diffDays,
+          });
+        }
+      } else {
+        // 'this_month'
+        if (bMonth === currentMonth) {
+          const bdayThisYear = new Date(currentYear, bMonth - 1, bDay);
+          const diffDays = Math.round(
+            (bdayThisYear.getTime() - todayMidnight.getTime()) / 86400000
+          );
+          parsed.push({
+            id: emp.id,
+            fullName: emp.fullName,
+            dayMonthStr,
+            birthDay: bDay,
+            birthMonth: bMonth,
+            daysUntil: diffDays,
+          });
+        }
+      }
+    }
+
+    parsed.sort((a, b) => {
+      if (birthdayFilter === 'next_30_days') {
+        return a.daysUntil - b.daysUntil || a.fullName.localeCompare(b.fullName, 'vi');
+      }
+      // For 'this_month': show today & upcoming first, then passed days in the month
+      const aUpcoming = a.daysUntil >= 0 ? 0 : 1;
+      const bUpcoming = b.daysUntil >= 0 ? 0 : 1;
+      if (aUpcoming !== bUpcoming) return aUpcoming - bUpcoming;
+      return a.birthDay - b.birthDay || a.fullName.localeCompare(b.fullName, 'vi');
+    });
+
+    return parsed;
+  }, [employees, birthdayFilter, currentYear, currentMonth, currentDay]);
+
+  // Compute Top Leave / Late Ranking for Column 2 Bottom
   const topRankingList = React.useMemo(() => {
     const filtered = records.filter((r) => {
       const matchMonth =
@@ -534,12 +622,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 3. BỐ CỤC 3 CỘT ĐỀU NHAU BÊN DƯỚI (flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch) */}
       <section
-        aria-label="Biểu đồ thống kê, Ghi chép gần đây và Top Nghỉ phép Đi muộn"
+        aria-label="Phân bổ nhân sự, Sinh nhật sắp tới, Thống kê loại hình nghỉ, Top Nghỉ phép Đi muộn và Nhật ký gần đây"
         className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch"
       >
-        {/* ================= CỘT 1 (BÊN TRÁI): XẾP CHỒNG 2 KHỐI BIỂU ĐỒ TRÊN - DƯỚI ================= */}
+        {/* ================= CỘT 1 (BÊN TRÁI - NHÓM NHÂN SỰ): XẾP CHỒNG 2 KHỐI ================= */}
         <div className="flex flex-col gap-3 h-full min-h-0">
-          {/* Khối trên: Phân bổ nhân sự theo Bộ phận */}
+          {/* Khối trên (flex-1 min-h-0): Phân bổ nhân sự theo Bộ phận */}
           <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1.5 shrink-0">
               <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
@@ -614,7 +702,96 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          {/* Khối dưới: Thống kê loại hình nghỉ trong tháng */}
+          {/* Khối dưới (flex-1 min-h-0): Sinh nhật sắp tới */}
+          <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col gap-2">
+            {/* Header: Tiêu đề bên trái + Bộ lọc nhỏ gọn bên phải (mặc định 30 ngày tới) */}
+            <div className="flex items-center justify-between gap-2 shrink-0">
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                Sinh nhật sắp tới
+              </h2>
+              <select
+                value={birthdayFilter}
+                onChange={(e) =>
+                  setBirthdayFilter(e.target.value as 'next_30_days' | 'this_month')
+                }
+                aria-label="Chọn khoảng thời gian sinh nhật sắp tới"
+                className="text-[16px] sm:text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 outline-none focus:border-[#0D9488] transition-colors cursor-pointer shrink-0"
+              >
+                <option value="next_30_days">30 ngày tới</option>
+                <option value="this_month">Tháng này</option>
+              </select>
+            </div>
+
+            {/* Nội dung danh sách sinh nhật (flex-1 min-h-0 overflow-y-auto) */}
+            <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-1.5">
+              {upcomingBirthdays.length === 0 ? (
+                <div className="h-full min-h-[100px] flex flex-col items-center justify-center text-center p-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/50">
+                  <div className="text-xs font-medium text-slate-400">
+                    {birthdayFilter === 'next_30_days'
+                      ? 'Không có nhân sự nào có sinh nhật trong 30 ngày tới'
+                      : `Không có nhân sự nào có sinh nhật trong tháng ${String(currentMonth).padStart(2, '0')}`}
+                  </div>
+                </div>
+              ) : (
+                upcomingBirthdays.map((b) => {
+                  const isToday = b.daysUntil === 0;
+                  const isPast = b.daysUntil < 0;
+
+                  return (
+                    <div
+                      key={b.id}
+                      className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border transition-colors ${
+                        isToday
+                          ? 'bg-amber-50/70 border-amber-200/90'
+                          : 'bg-slate-50/40 hover:bg-slate-50 border-slate-200/70'
+                      }`}
+                    >
+                      {/* Bên trái: Icon bánh sinh nhật + Họ và tên nhân viên (chỉ ghi họ tên) */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-6 h-6 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center text-xs shrink-0 select-none"
+                          aria-hidden="true"
+                        >
+                          🎂
+                        </span>
+                        <span
+                          className="text-xs font-bold text-slate-900 truncate"
+                          title={b.fullName}
+                        >
+                          {b.fullName}
+                        </span>
+                      </div>
+
+                      {/* Bên phải: Ngày sinh (DD/MM) + Badge đếm ngược */}
+                      <div className="flex items-center gap-1.5 shrink-0 font-mono tabular-nums">
+                        <span className="text-[11px] font-bold text-slate-600">
+                          {b.dayMonthStr}
+                        </span>
+                        {isToday ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                            🎂 Hôm nay
+                          </span>
+                        ) : isPast ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                            Đã qua {Math.abs(b.daysUntil)} ngày
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200/80">
+                            Còn {b.daysUntil} ngày
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ================= CỘT 2 (Ở GIỮA - NHÓM THỐNG KÊ NGHỈ & ĐI MUỘN): XẾP CHỒNG 2 KHỐI ================= */}
+        <div className="flex flex-col gap-3 h-full min-h-0">
+          {/* Khối trên (flex-1 min-h-0): Thống kê loại hình nghỉ trong tháng */}
           <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1.5 shrink-0">
               <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
@@ -676,7 +853,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* X-Axis Labels (Chỉ giữ tên loại hình, xóa chú thích phụ) */}
+              {/* X-Axis Labels */}
               <div className="flex justify-around gap-1.5 pt-1.5 pl-6 pr-1 text-center shrink-0">
                 {leaveTypeDist.map((item) => {
                   const cleanLabel = item.label.includes('Nghỉ chế độ')
@@ -698,11 +875,121 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Khối dưới (flex-1 min-h-0): Top Nghỉ phép & Đi muộn */}
+          <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col gap-2">
+            {/* Header & Bộ lọc điều khiển (shrink-0 flex flex-col gap-1.5) */}
+            <div className="shrink-0 flex flex-col gap-1.5">
+              {/* Hàng trên: Tiêu đề + Dropdown chọn Năm/Tháng (mặc định Cả năm 2026) */}
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                  Top Nghỉ phép &amp; Đi muộn
+                </h2>
+                <select
+                  value={topMonthFilter}
+                  onChange={(e) => setTopMonthFilter(e.target.value)}
+                  aria-label="Chọn kỳ thống kê Top Nghỉ phép và Đi muộn"
+                  className="text-[16px] sm:text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 outline-none focus:border-[#0D9488] transition-colors cursor-pointer shrink-0"
+                >
+                  <option value="ALL_YEAR">Cả năm {currentYear}</option>
+                  {monthOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Hàng dưới: Thanh chuyển đổi nhanh (Segmented Control / Tabs) */}
+              <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setTopTab('leave')}
+                  className={`py-1 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    topTab === 'leave'
+                      ? 'bg-white text-[#0F232E] shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>🏖️ Nghỉ phép</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTopTab('late')}
+                  className={`py-1 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    topTab === 'late'
+                      ? 'bg-white text-[#0F232E] shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>⏰ Đi muộn</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Danh sách xếp hạng Top nhân sự (flex-1 min-h-0 overflow-y-auto) */}
+            <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-1.5">
+              {topRankingList.length === 0 ? (
+                <div className="h-full min-h-[90px] flex flex-col items-center justify-center text-center p-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/50">
+                  <div className="text-xs font-medium text-slate-400">
+                    Không có nhân sự nào phát sinh trong kỳ này
+                  </div>
+                </div>
+              ) : (
+                topRankingList.map((item, idx) => {
+                  const rank = idx + 1;
+                  const rankBadgeClass =
+                    rank === 1
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs'
+                      : rank === 2
+                        ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                        : rank === 3
+                          ? 'bg-orange-100 text-orange-800 border border-orange-200'
+                          : 'bg-slate-100 text-slate-500 border border-slate-200/80';
+
+                  return (
+                    <div
+                      key={item.employeeId}
+                      className="flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl border border-slate-200/70 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-50 transition-colors"
+                    >
+                      {/* Left: Rank Badge + Họ và tên nhân viên */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className={`w-6 h-6 rounded-lg font-mono text-[11px] font-extrabold flex items-center justify-center shrink-0 ${rankBadgeClass}`}
+                        >
+                          #{rank}
+                        </div>
+                        <div
+                          className="text-xs font-bold text-slate-900 truncate"
+                          title={item.fullName}
+                        >
+                          {item.fullName}
+                        </div>
+                      </div>
+
+                      {/* Right: Chỉ hiển thị duy nhất badge số ngày hoặc số lượt */}
+                      <div className="text-right shrink-0 font-mono tabular-nums">
+                        {topTab === 'leave' ? (
+                          <span className="text-xs font-extrabold text-teal-700 bg-teal-50 border border-teal-200/70 px-2 py-0.5 rounded-md inline-block">
+                            {item.totalAmount} ngày
+                          </span>
+                        ) : (
+                          <span className="text-xs font-extrabold text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md inline-block">
+                            {item.recordCount} lượt
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* ================= CỘT 2 (Ở GIỮA): NGHỈ PHÉP & ĐI MUỘN GẦN ĐÂY ================= */}
+        {/* ================= CỘT 3 (BÊN PHẢI - NHẬT KÝ GẦN ĐÂY): 1 KHỐI TRẢI DÀI ================= */}
         <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col">
-          {/* Header của Cột 2 */}
+          {/* Header của Cột 3 */}
           <div className="flex items-center justify-between mb-2.5 shrink-0">
             <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
               Nghỉ phép &amp; Đi muộn Gần đây
@@ -717,7 +1004,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          {/* Bảng dữ liệu 4 cột bên trong Cột 2 (flex-1 min-h-0 overflow-y-auto) */}
+          {/* Bảng dữ liệu 4 cột bên trong Cột 3 (flex-1 min-h-0 overflow-y-auto) */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200/80">
             {recentRecords.length === 0 ? (
               <div className="h-full min-h-[180px] flex flex-col items-center justify-center text-center p-4 text-xs text-slate-400">
@@ -824,126 +1111,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   })}
                 </tbody>
               </table>
-            )}
-          </div>
-        </div>
-
-        {/* ================= CỘT 3 (BÊN PHẢI): TOP NGƯỜI NGHỈ VÀ ĐI MUỘN TRONG THÁNG ================= */}
-        <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col gap-3">
-          {/* Header & Bộ lọc điều khiển (shrink-0 flex flex-col gap-2) */}
-          <div className="shrink-0 flex flex-col gap-2">
-            {/* Hàng trên: Tiêu đề + Dropdown chọn Tháng/Năm */}
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                Top Nghỉ phép &amp; Đi muộn
-              </h2>
-              <select
-                value={topMonthFilter}
-                onChange={(e) => setTopMonthFilter(e.target.value)}
-                aria-label="Chọn tháng thống kê Top Nghỉ phép và Đi muộn"
-                className="text-[16px] sm:text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 outline-none focus:border-[#0D9488] transition-colors cursor-pointer shrink-0"
-              >
-                {monthOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-                <option value="ALL_YEAR">Cả năm {currentYear}</option>
-              </select>
-            </div>
-
-            {/* Hàng dưới: Thanh chuyển đổi nhanh (Segmented Control / Tabs) */}
-            <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg">
-              <button
-                type="button"
-                onClick={() => setTopTab('leave')}
-                className={`py-1.5 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  topTab === 'leave'
-                    ? 'bg-white text-[#0F232E] shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <span>🏖️ Nghỉ phép</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTopTab('late')}
-                className={`py-1.5 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  topTab === 'late'
-                    ? 'bg-white text-[#0F232E] shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <span>⏰ Đi muộn</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Danh sách xếp hạng Top nhân sự (flex-1 min-h-0 overflow-y-auto) */}
-          <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-2">
-            {topRankingList.length === 0 ? (
-              <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center p-4 rounded-lg border border-dashed border-slate-200 bg-slate-50/50">
-                <div className="text-xs font-medium text-slate-400">
-                  Không có nhân sự nào phát sinh trong tháng này
-                </div>
-              </div>
-            ) : (
-              topRankingList.map((item, idx) => {
-                const rank = idx + 1;
-                const rankBadgeClass =
-                  rank === 1
-                    ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs'
-                    : rank === 2
-                      ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                      : rank === 3
-                        ? 'bg-orange-100 text-orange-800 border border-orange-200'
-                        : 'bg-slate-100 text-slate-500 border border-slate-200/80';
-
-                return (
-                  <div
-                    key={item.employeeId}
-                    className="flex items-center justify-between gap-2.5 p-2.5 rounded-xl border border-slate-200/70 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-50 transition-colors"
-                  >
-                    {/* Left: Rank Badge + Họ và tên nhân viên (Bỏ Mã NV & Bộ phận) */}
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div
-                        className={`w-7 h-7 rounded-lg font-mono text-xs font-extrabold flex items-center justify-center shrink-0 ${rankBadgeClass}`}
-                      >
-                        #{rank}
-                      </div>
-                      <div
-                        className="text-xs font-bold text-slate-900 truncate"
-                        title={item.fullName}
-                      >
-                        {item.fullName}
-                      </div>
-                    </div>
-
-                    {/* Right: Chỉ số thống kê */}
-                    <div className="text-right shrink-0 font-mono tabular-nums">
-                      {topTab === 'leave' ? (
-                        <>
-                          <div className="text-xs font-extrabold text-teal-700 bg-teal-50 border border-teal-200/70 px-2 py-0.5 rounded-md inline-block">
-                            {item.totalAmount} ngày
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {item.recordCount} lượt
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-xs font-extrabold text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md inline-block">
-                            {item.recordCount} lượt
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {item.totalAmount} giờ
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
         </div>
