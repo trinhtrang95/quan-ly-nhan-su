@@ -181,8 +181,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const menuActions = [
     {
+      id: 'dashboard',
+      title: 'Trang chủ',
+      subtitle: 'Bảng điều khiển trung tâm, KPI chấm công & thống kê nhanh',
+      icon: BarChart3,
+      iconColor: 'text-sky-600 bg-sky-50',
+      action: () => onNavigate('dashboard'),
+    },
+    {
       id: 'employees',
-      title: 'Quản lý Nhân sự',
+      title: 'Danh sách nhân sự',
       subtitle: 'Danh sách hồ sơ, phòng ban & xuất nhập Excel',
       icon: Users,
       iconColor: 'text-emerald-600 bg-emerald-50',

@@ -139,9 +139,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
         {/* Centered Brand Header */}
         <div className="flex flex-col items-center text-center">
           <img
-            src={activeCompany.logoUrl || '/app-icon.svg'}
-            alt={activeCompany.name || 'Hệ thống Quản lý Nhân sự & Chấm công'}
-            referrerPolicy="no-referrer"
+            src="/app-icon.svg"
+            alt="Quản lý nhân sự"
             className="w-16 h-16 rounded-2xl object-cover border border-teal-500/40 shadow-md mb-3"
           />
           <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight leading-snug">

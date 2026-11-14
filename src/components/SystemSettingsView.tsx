@@ -21,6 +21,7 @@ import {
   Copy,
   CloudUpload,
   Terminal,
+  MonitorDown,
 } from 'lucide-react';
 import {
   CompanyUnit,
@@ -35,6 +36,7 @@ import {
   SUPABASE_LEAVE_LOGS_SQL,
   uploadImageToHrBucket,
 } from '../utils/supabaseService';
+import { usePWAInstall } from '../utils/pwaInstall';
 import {
   composeAddressFromParts,
   fetchCommunesForProvince,
@@ -134,6 +136,15 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>('units');
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
+  const { isInstalled, promptInstall } = usePWAInstall();
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+
+  const handleInstallAppClick = async () => {
+    const outcome = await promptInstall();
+    if (outcome === 'unavailable') {
+      setShowInstallGuide(true);
+    }
+  };
 
   const handleCopySql = async () => {
     try {
@@ -508,38 +519,75 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Thanh công cụ Đồng bộ Cloud & Lấy mã SQL bảng Nghỉ phép */}
-        <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-slate-600 flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-[#0D9488] shrink-0" />
-            <span>
-              Công cụ đồng bộ bảng <strong>leave_logs</strong> (Nghỉ phép &amp; Đi muộn) trên Supabase Cloud:
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {onSyncLocalToCloud && (
-              <button
-                type="button"
-                disabled={isProcessingData}
-                onClick={onSyncLocalToCloud}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
-              >
-                {isProcessingData ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <CloudUpload className="w-3.5 h-3.5" />
-                )}
-                <span>Đồng bộ dữ liệu từ máy lên Cloud</span>
-              </button>
-            )}
+        {/* Thẻ Cấu hình Ứng dụng Desktop / Mobile (PWA) & Công cụ Đồng bộ Cloud */}
+        <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-3">
+          {/* Thẻ Cài đặt Ứng dụng về máy (Desktop / Mobile) */}
+          <div className="p-3.5 rounded-xl bg-gradient-to-r from-[#0F232E] to-[#163546] text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <img
+                src="/app-icon.svg"
+                alt="Quản lý nhân sự"
+                className="w-10 h-10 rounded-xl border border-teal-400/40 shrink-0 shadow-xs"
+              />
+              <div>
+                <div className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                  <span>Ứng dụng Quản lý Nhân sự độc lập (Standalone App)</span>
+                  {isInstalled && (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-[10px] font-semibold text-emerald-300">
+                      Đã cài đặt
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Cài đặt trực tiếp ra ngoài màn hình Desktop (Windows / Mac) và thanh Taskbar hoặc màn hình chính Điện thoại để sử dụng nhanh như phần mềm độc lập.
+                </p>
+              </div>
+            </div>
+
             <button
               type="button"
-              onClick={() => setIsSqlModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0F232E] hover:bg-[#163546] text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+              onClick={handleInstallAppClick}
+              data-testid="pwa-install-btn"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-[#0D9488] to-[#10B981] hover:from-[#0F766E] hover:to-[#059669] text-white text-xs font-bold shadow-sm transition-all shrink-0 cursor-pointer"
             >
-              <Terminal className="w-3.5 h-3.5 text-teal-300" />
-              <span>Lấy mã SQL chuẩn hóa Bảng Nghỉ phép</span>
+              <MonitorDown className="w-4 h-4 shrink-0" />
+              <span>💻 Cài đặt App về máy (Desktop / Mobile)</span>
             </button>
+          </div>
+
+          {/* Thanh công cụ Đồng bộ Cloud & Lấy mã SQL bảng Nghỉ phép */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="text-xs text-slate-600 flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-[#0D9488] shrink-0" />
+              <span>
+                Công cụ đồng bộ bảng <strong>leave_logs</strong> (Nghỉ phép &amp; Đi muộn) trên Supabase Cloud:
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {onSyncLocalToCloud && (
+                <button
+                  type="button"
+                  disabled={isProcessingData}
+                  onClick={onSyncLocalToCloud}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                >
+                  {isProcessingData ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CloudUpload className="w-3.5 h-3.5" />
+                  )}
+                  <span>Đồng bộ dữ liệu từ máy lên Cloud</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0F232E] hover:bg-[#163546] text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+              >
+                <Terminal className="w-3.5 h-3.5 text-teal-300" />
+                <span>Lấy mã SQL chuẩn hóa Bảng Nghỉ phép</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1838,6 +1886,74 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                   Đóng
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PWA Installation Guide Modal */}
+      {showInstallGuide && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+          onClick={() => setShowInstallGuide(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl p-5 text-slate-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <img
+                  src="/app-icon.svg"
+                  alt="Quản lý nhân sự"
+                  className="w-10 h-10 rounded-xl shadow-xs"
+                />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Cài đặt Ứng dụng về Máy tính / Điện thoại
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Chạy độc lập ngoài màn hình Desktop &amp; Taskbar
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallGuide(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-3.5 space-y-3 text-xs text-slate-600 leading-relaxed">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <p className="font-bold text-slate-800 mb-1">
+                  💻 Trên máy tính (Chrome / Microsoft Edge / Cốc Cốc):
+                </p>
+                <p>
+                  Nhấn vào biểu tượng <strong>Cài đặt (hình màn hình có mũi tên xuống)</strong> nằm ở góc bên phải của thanh địa chỉ trình duyệt (URL), sau đó chọn <strong>Cài đặt (Install)</strong>.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <p className="font-bold text-slate-800 mb-1">
+                  📱 Trên iPhone / iPad / Mac (Safari):
+                </p>
+                <p>
+                  Nhấn nút <strong>Chia sẻ (Share)</strong> trên thanh công cụ trình duyệt, sau đó chọn <strong>Thêm vào Màn hình chính (Add to Home Screen)</strong> hoặc <strong>Thêm vào Dock (Add to Dock)</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowInstallGuide(false)}
+                className="px-4 py-2 rounded-lg bg-[#0F232E] hover:bg-[#163546] text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Đã hiểu
+              </button>
             </div>
           </div>
         </div>
