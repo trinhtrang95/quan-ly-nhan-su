@@ -447,9 +447,8 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
             <button
               type="button"
               onClick={onOpenAddRecord}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <CalendarPlus className="w-4 h-4 shrink-0" />
               <span>+ Ghi nhận mới</span>
             </button>
 
@@ -457,9 +456,8 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
             <button
               type="button"
               onClick={onOpenBulkRecord}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Users className="w-4 h-4 text-[#2DD4BF] shrink-0" />
               <span>👥 + Ghi nhận hàng loạt</span>
             </button>
 

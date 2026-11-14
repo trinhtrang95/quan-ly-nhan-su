@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
   Search,
   Check,
   Users,
   Copy,
+  ChevronDown,
 } from 'lucide-react';
 import {
   DepartmentGroup,
@@ -14,7 +15,11 @@ import {
   RegimeSubtype,
   UserAccount,
 } from '../types/hr';
-import { calculateAnnualMatrixReport, sortEmployees } from '../utils/hrCalculations';
+import {
+  calculateAnnualMatrixReport,
+  formatDateVN,
+  sortEmployees,
+} from '../utils/hrCalculations';
 
 interface BulkLeaveRecordModalProps {
   isOpen: boolean;
@@ -43,21 +48,33 @@ function getTodayIsoString(): string {
   return `${y}-${m}-${d}`;
 }
 
-const PRIORITY_DEPT_FILTERS = [
-  'Quản lý chung',
-  'JIG/AUTO 2',
-  'ME',
-  'AUTO 1',
-  'PE',
-  'ST',
-  'DOCUMENT',
-  'IOT',
-];
+/**
+ * Tự động tính ngày kết thúc (endDate) dựa trên Ngày áp dụng chung (startDate) và Số ngày nghỉ (days):
+ * - Nếu days = 1 (hoặc 0.5) => endDate = startDate (cùng ngày)
+ * - Nếu days = 2 => endDate = startDate + 1 ngày
+ * - Nếu days = 3 => endDate = startDate + 2 ngày
+ */
+function computeEndDateFromStartAndDays(startDateIso: string, days: number): string {
+  if (!startDateIso) return startDateIso;
+  const parts = startDateIso.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return startDateIso;
+
+  const [year, month, day] = parts;
+  const d = new Date(year, month - 1, day);
+  if (isNaN(d.getTime())) return startDateIso;
+
+  const extraDays = Math.max(0, Math.ceil(Number(days) || 1) - 1);
+  d.setDate(d.getDate() + extraDays);
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dayStr = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dayStr}`;
+}
 
 export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
   isOpen,
   employees,
-  groups = [],
   leaveRecords,
   currentUser,
   defaultYear,
@@ -67,8 +84,12 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
   const [activeTab, setActiveTab] = useState<'leave' | 'late'>('leave');
   const [commonDate, setCommonDate] = useState<string>(() => getTodayIsoString());
 
-  const [bulkSearch, setBulkSearch] = useState<string>('');
-  const [bulkDeptFilter, setBulkDeptFilter] = useState<string>('ALL');
+  // Combobox tìm kiếm thông minh duy nhất
+  const [comboQuery, setComboQuery] = useState<string>('');
+  const [isComboOpen, setIsComboOpen] = useState<boolean>(false);
+  const comboContainerRef = useRef<HTMLDivElement>(null);
+
+  // Danh sách nhân sự được chọn ban đầu luôn trống hoàn toàn
   const [selectedEmpIds, setSelectedEmpIds] = useState<string[]>([]);
   const [rowConfigs, setRowConfigs] = useState<Record<string, BulkRowConfig>>({});
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -90,12 +111,29 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
     return sortEmployees(employees, null, null);
   }, [employees]);
 
+  // Đóng dropdown Combobox khi bấm ra ngoài
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        comboContainerRef.current &&
+        !comboContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsComboOpen(false);
+      }
+    };
+    if (isComboOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isComboOpen]);
+
+  // Khi vừa mở Modal lên, danh sách nhân sự tích chọn ban đầu trống hoàn toàn
   useEffect(() => {
     if (!isOpen) return;
     setActiveTab('leave');
     setCommonDate(getTodayIsoString());
-    setBulkSearch('');
-    setBulkDeptFilter('ALL');
+    setComboQuery('');
+    setIsComboOpen(false);
     setSelectedEmpIds([]);
     setRowConfigs({});
     setErrorMsg('');
@@ -103,23 +141,8 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
 
   if (!isOpen) return null;
 
-  const departmentFilterOptions = (() => {
-    const set = new Set<string>();
-    PRIORITY_DEPT_FILTERS.forEach((d) => set.add(d));
-    groups.forEach((g) => {
-      if (g.name) set.add(g.name);
-    });
-    employees.forEach((e) => {
-      if (e.department) set.add(e.department);
-    });
-    return Array.from(set);
-  })();
-
-  const filteredEmployees = sortedEmployees.filter((e) => {
-    if (bulkDeptFilter !== 'ALL' && e.department !== bulkDeptFilter) {
-      return false;
-    }
-    const q = bulkSearch.trim().toLowerCase();
+  const comboboxFilteredEmployees = sortedEmployees.filter((e) => {
+    const q = comboQuery.trim().toLowerCase();
     if (!q) return true;
     return (
       e.fullName.toLowerCase().includes(q) ||
@@ -155,29 +178,6 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
         [emp.id]: createDefaultConfigForEmp(emp),
       };
     });
-  };
-
-  const handleSelectAllFiltered = () => {
-    setErrorMsg('');
-    const filteredIds = filteredEmployees.map((e) => e.id);
-    const allSelected =
-      filteredIds.length > 0 &&
-      filteredIds.every((id) => selectedEmpIds.includes(id));
-
-    if (allSelected) {
-      setSelectedEmpIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
-    } else {
-      setSelectedEmpIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
-      setRowConfigs((prev) => {
-        const next = { ...prev };
-        for (const emp of filteredEmployees) {
-          if (!next[emp.id]) {
-            next[emp.id] = createDefaultConfigForEmp(emp);
-          }
-        }
-        return next;
-      });
-    }
   };
 
   const updateRowConfig = (empId: string, patch: Partial<BulkRowConfig>) => {
@@ -224,7 +224,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
     setErrorMsg('');
 
     if (selectedEmpIds.length === 0) {
-      setErrorMsg('Vui lòng tích chọn ít nhất 1 nhân sự để ghi nhận hàng loạt.');
+      setErrorMsg('Vui lòng tìm và tích chọn ít nhất 1 nhân sự để ghi nhận hàng loạt.');
       return;
     }
 
@@ -260,7 +260,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
       const recordAmount =
         activeTab === 'late' ? Number(cfg.lateHours) : Number(cfg.leaveAmount);
 
-      if (recordAmount <= 0) {
+      if (recordAmount <= 0 || isNaN(recordAmount)) {
         setErrorMsg(
           `Số lượng của nhân sự ${emp?.fullName || ''} phải lớn hơn 0.`
         );
@@ -273,6 +273,11 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
         continue;
       }
 
+      const computedEndDate =
+        activeTab === 'leave'
+          ? computeEndDateFromStartAndDays(commonDate, recordAmount)
+          : commonDate;
+
       const defaultReason =
         activeTab === 'late'
           ? 'Đi muộn có báo cáo quản lý bộ phận'
@@ -284,7 +289,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
         regimeSubtype:
           recordType === 'regime_leave' ? cfg.regimeSubtype : undefined,
         startDate: commonDate,
-        endDate: commonDate,
+        endDate: computedEndDate,
         amount: recordAmount,
         reason: (cfg.reason || '').trim() || defaultReason,
         paperStatus: 'Chưa có',
@@ -297,7 +302,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
       setErrorMsg(
         `Chống trùng lặp: Tất cả nhân sự đã chọn (${duplicateNames.join(
           ', '
-        )}) đều đã có bản ghi cùng loại trong ngày ${commonDate}.`
+        )}) đều đã có bản ghi cùng loại trong ngày ${formatDateVN(commonDate)}.`
       );
       return;
     }
@@ -346,45 +351,162 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
               </div>
             )}
 
-            {/* 1. THANH TRÊN CÙNG: 2 TAB (NGHỈ PHÉP HÀNG LOẠT | ĐI MUỘN HÀNG LOẠT) + NGÀY ÁP DỤNG CHUNG */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50 p-2 rounded-xl border border-slate-200/80">
-              <div className="grid grid-cols-2 gap-1.5 bg-slate-200/70 p-1 rounded-lg flex-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('leave');
-                    setErrorMsg('');
-                  }}
-                  className={`py-1.5 px-3 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    activeTab === 'leave'
-                      ? 'bg-[#0F232E] text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  <span>📅 Nghỉ phép Hàng loạt</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('late');
-                    setErrorMsg('');
-                  }}
-                  className={`py-1.5 px-3 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    activeTab === 'late'
-                      ? 'bg-[#0F232E] text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  <span>⏰ Đi muộn Hàng loạt</span>
-                </button>
+            {/* 1. THANH CHUYỂN ĐỔI 2 TAB LỚN TRÊN CÙNG */}
+            <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('leave');
+                  setErrorMsg('');
+                }}
+                className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  activeTab === 'leave'
+                    ? 'bg-[#0F232E] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                <span>📅 Nghỉ phép Hàng loạt</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('late');
+                  setErrorMsg('');
+                }}
+                className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  activeTab === 'late'
+                    ? 'bg-[#0F232E] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                <span>⏰ Đi muộn Hàng loạt</span>
+              </button>
+            </div>
+
+            {/* 2. THANH COMBOBOX TÌM KIẾM THÔNG MINH DUY NHẤT + NGÀY ÁP DỤNG CHUNG (NẰM NGAY DƯỚI 2 TAB LỚN) */}
+            <div className="p-2.5 rounded-xl bg-white border border-slate-200/90 flex flex-col sm:flex-row sm:items-end gap-2.5">
+              {/* Ô Combobox tìm kiếm thông minh duy nhất giống hệt nút Ghi nhận mới */}
+              <div className="flex-1 min-w-0 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="bulk-emp-combobox"
+                    className="text-xs font-bold text-slate-800"
+                  >
+                    Tìm &amp; chọn nhân sự áp dụng <span className="text-red-500">*</span>
+                  </label>
+                  {selectedEmpIds.length > 0 && (
+                    <span className="text-[11px] font-bold text-[#0F766E] bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md">
+                      Đã chọn: {selectedEmpIds.length} nhân sự
+                    </span>
+                  )}
+                </div>
+
+                <div ref={comboContainerRef} className="relative">
+                  <div
+                    onClick={() => setIsComboOpen(true)}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50/60 hover:bg-white focus-within:bg-white focus-within:border-[#0D9488] transition-colors cursor-text"
+                  >
+                    <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <input
+                      id="bulk-emp-combobox"
+                      type="text"
+                      value={comboQuery}
+                      onFocus={() => setIsComboOpen(true)}
+                      onChange={(e) => {
+                        setComboQuery(e.target.value);
+                        setIsComboOpen(true);
+                      }}
+                      placeholder="Gõ Mã NV hoặc Họ và tên để tìm & tích chọn nhân sự xuống bảng..."
+                      aria-label="Tìm và tích chọn nhân sự hàng loạt"
+                      className="w-full text-xs font-semibold text-slate-800 bg-transparent outline-none"
+                    />
+                    {comboQuery && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setComboQuery('');
+                        }}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                        aria-label="Xóa từ khóa tìm kiếm"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                  </div>
+
+                  {isComboOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-56 overflow-y-auto z-40 divide-y divide-slate-100">
+                      {comboboxFilteredEmployees.length === 0 ? (
+                        <div className="px-3 py-2.5 text-xs text-slate-400 text-center">
+                          Không tìm thấy nhân sự phù hợp
+                        </div>
+                      ) : (
+                        comboboxFilteredEmployees.map((emp) => {
+                          const isSelected = selectedEmpIds.includes(emp.id);
+                          const rem =
+                            remainingLeaveMap.get(emp.id) ??
+                            emp.standardAnnualLeave;
+                          return (
+                            <button
+                              key={emp.id}
+                              type="button"
+                              onClick={() => {
+                                handleToggleEmployee(emp);
+                                setComboQuery('');
+                              }}
+                              className={`w-full px-3 py-1.5 text-left text-xs flex items-center justify-between gap-2 hover:bg-teal-50/70 transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-teal-50/90 font-bold text-[#0F766E]'
+                                  : 'text-slate-800'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span
+                                  className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
+                                    isSelected
+                                      ? 'bg-[#0D9488] border-[#0D9488] text-white'
+                                      : 'border-slate-300 bg-white'
+                                  }`}
+                                >
+                                  {isSelected && <Check className="w-3 h-3" />}
+                                </span>
+                                <div className="truncate">
+                                  <span className="font-mono font-bold text-slate-700">
+                                    {emp.employeeCode}
+                                  </span>{' '}
+                                  — <span className="font-bold">{emp.fullName}</span>{' '}
+                                  <span className="text-slate-500">
+                                    ({emp.department || 'Chưa phân nhóm'})
+                                  </span>
+                                </div>
+                              </div>
+                              <span
+                                className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                                  rem > 0
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : 'bg-red-50 text-red-600'
+                                }`}
+                              >
+                                Tồn: {rem} ngày
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              {/* Ô chọn Ngày áp dụng chung */}
+              <div className="sm:w-48 shrink-0 space-y-1">
                 <label
                   htmlFor="bulk-common-date"
-                  className="text-xs font-bold text-slate-700 whitespace-nowrap"
+                  className="block text-xs font-bold text-slate-800 whitespace-nowrap"
                 >
-                  Ngày áp dụng chung:
+                  Ngày áp dụng chung <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="bulk-common-date"
@@ -392,109 +514,19 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                   required
                   value={commonDate}
                   onChange={(e) => setCommonDate(e.target.value)}
-                  className="px-2.5 py-1.5 text-xs font-mono font-bold bg-white rounded-lg border border-slate-300 focus:outline-none focus:border-[#0D9488]"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono font-bold bg-slate-50/60 hover:bg-white focus:bg-white rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
                 />
               </div>
             </div>
 
-            {/* 2. KHỐI CHỌN NHANH NHÂN SỰ */}
-            <div className="p-2.5 rounded-xl bg-white border border-slate-200/90 space-y-2">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                <div className="relative sm:w-52 shrink-0">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={bulkSearch}
-                    onChange={(e) => setBulkSearch(e.target.value)}
-                    placeholder="Tìm Mã NV / Họ tên..."
-                    className="w-full pl-8 pr-2.5 py-1 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-[#0D9488]"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setBulkDeptFilter('ALL')}
-                    className={`px-2 py-1 rounded-md text-[11px] font-bold shrink-0 border transition-colors cursor-pointer ${
-                      bulkDeptFilter === 'ALL'
-                        ? 'bg-[#0F232E] text-white border-[#0F232E]'
-                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200/70'
-                    }`}
-                  >
-                    Tất cả
-                  </button>
-                  {departmentFilterOptions.map((dept) => (
-                    <button
-                      key={dept}
-                      type="button"
-                      onClick={() => setBulkDeptFilter(dept)}
-                      className={`px-2 py-1 rounded-md text-[11px] font-bold shrink-0 border transition-colors cursor-pointer ${
-                        bulkDeptFilter === dept
-                          ? 'bg-[#0D9488] text-white border-[#0D9488]'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-teal-50'
-                      }`}
-                    >
-                      {dept}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleSelectAllFiltered}
-                  className="px-2.5 py-1 rounded-md text-[11px] font-bold text-[#0F766E] bg-teal-50 hover:bg-teal-100 border border-teal-200 shrink-0 cursor-pointer"
-                >
-                  {filteredEmployees.length > 0 &&
-                  filteredEmployees.every((e) => selectedEmpIds.includes(e.id))
-                    ? 'Bỏ chọn nhóm'
-                    : 'Chọn cả nhóm'}
-                </button>
-              </div>
-
-              {/* Danh sách nhân sự dạng chip */}
-              <div className="max-h-28 overflow-y-auto p-1.5 rounded-lg bg-slate-50 border border-slate-200/80 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
-                {filteredEmployees.map((emp) => {
-                  const checked = selectedEmpIds.includes(emp.id);
-                  return (
-                    <button
-                      key={emp.id}
-                      type="button"
-                      onClick={() => handleToggleEmployee(emp)}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-left text-[11px] transition-all cursor-pointer ${
-                        checked
-                          ? 'bg-teal-50 border-[#0D9488] text-[#0F766E] font-bold shadow-2xs'
-                          : 'bg-white border-slate-200/90 text-slate-700 hover:bg-slate-100/70'
-                      }`}
-                    >
-                      <span
-                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 ${
-                          checked
-                            ? 'bg-[#0D9488] border-[#0D9488] text-white'
-                            : 'border-slate-300 bg-white'
-                        }`}
-                      >
-                        {checked && <Check className="w-2.5 h-2.5" />}
-                      </span>
-                      <span
-                        className="truncate"
-                        title={`${emp.employeeCode} - ${emp.fullName} (${emp.department || ''})`}
-                      >
-                        {emp.fullName}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 3. BẢNG ĐIỀU CHỈNH TỪNG NGƯỜI (SIÊU GỌN 3-4 CỘT, BỎ CỘT GIẤY PHÉP & ẢNH) */}
+            {/* 3. BẢNG ĐIỀU CHỈNH TỪNG NGƯỜI */}
             <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
               {selectedEmpIds.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400 bg-slate-50/40">
-                  Hãy bấm tích chọn nhân sự ở danh sách phía trên để nhập hàng loạt.
+                <div className="py-10 px-4 text-center text-xs text-slate-400 bg-slate-50/40">
+                  Danh sách đang trống. Hãy gõ tên hoặc mã nhân viên vào ô tìm kiếm phía trên để chọn nhân sự cần ghi nhận.
                 </div>
               ) : (
-                <div className="max-h-56 overflow-y-auto">
+                <div className="max-h-64 overflow-y-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead className="sticky top-0 bg-[#0F232E] text-white text-[10px] font-bold uppercase tracking-wider z-10">
                       <tr>
@@ -506,8 +538,8 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                             LOẠI NGHỈ
                           </th>
                         )}
-                        <th className="py-2 px-2.5 whitespace-nowrap w-52">
-                          SỐ LƯỢNG
+                        <th className="py-2 px-2.5 whitespace-nowrap w-56">
+                          {activeTab === 'leave' ? 'SỐ LƯỢNG (NGÀY)' : 'SỐ LƯỢNG (GIỜ)'}
                         </th>
                         <th className="py-2 px-2.5 whitespace-nowrap">
                           <div className="flex items-center justify-between gap-2">
@@ -535,6 +567,10 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                           remainingLeaveMap.get(empId) ?? emp.standardAnnualLeave;
                         const cfg =
                           rowConfigs[empId] || createDefaultConfigForEmp(emp);
+                        const computedEndDate = computeEndDateFromStartAndDays(
+                          commonDate,
+                          cfg.leaveAmount
+                        );
 
                         return (
                           <tr
@@ -549,7 +585,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                                     {emp.fullName}
                                   </div>
                                   <div className="text-[10px] text-slate-500 font-medium">
-                                    {emp.department || 'Chưa phân bộ phận'}
+                                    {emp.employeeCode} • {emp.department || 'Chưa phân bộ phận'}
                                   </div>
                                 </div>
                                 <span
@@ -586,62 +622,41 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                               </td>
                             )}
 
-                            {/* Cột 3: SỐ LƯỢNG */}
+                            {/* Cột 3: SỐ LƯỢNG (Ô input số gọn gàng + Tự động tính khoảng ngày nghỉ) */}
                             <td className="py-2 px-2.5 align-middle whitespace-nowrap">
                               {activeTab === 'leave' ? (
-                                <div className="flex items-center gap-1">
-                                  {[1, 0.5].map((preset) => (
-                                    <button
-                                      key={preset}
-                                      type="button"
-                                      onClick={() =>
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="number"
+                                      min={0.5}
+                                      max={180}
+                                      step={0.5}
+                                      value={cfg.leaveAmount}
+                                      onChange={(e) =>
                                         updateRowConfig(empId, {
-                                          leaveAmount: preset,
+                                          leaveAmount: Number(e.target.value),
                                         })
                                       }
-                                      className={`px-2 py-1 rounded-md text-[11px] font-bold border transition-colors cursor-pointer ${
-                                        cfg.leaveAmount === preset
-                                          ? 'bg-[#0D9488] text-white border-[#0D9488]'
-                                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-teal-50'
-                                      }`}
-                                    >
-                                      {preset} ngày
-                                    </button>
-                                  ))}
-                                  <input
-                                    type="number"
-                                    min={0.5}
-                                    max={180}
-                                    step={0.5}
-                                    value={cfg.leaveAmount}
-                                    onChange={(e) =>
-                                      updateRowConfig(empId, {
-                                        leaveAmount: Number(e.target.value),
-                                      })
-                                    }
-                                    className="w-14 px-1.5 py-1 text-xs font-mono font-bold text-center rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
-                                  />
+                                      aria-label={`Số ngày nghỉ của ${emp.fullName}`}
+                                      className="w-16 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#0D9488]"
+                                    />
+                                    <span className="text-xs font-semibold text-slate-600">
+                                      ngày
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-500">
+                                    {computedEndDate === commonDate ? (
+                                      <span>Ngày {formatDateVN(commonDate)}</span>
+                                    ) : (
+                                      <span className="text-[#0F766E] font-semibold">
+                                        {formatDateVN(commonDate)} → {formatDateVN(computedEndDate)}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-1">
-                                  {[0.5, 1, 1.5, 2].map((preset) => (
-                                    <button
-                                      key={preset}
-                                      type="button"
-                                      onClick={() =>
-                                        updateRowConfig(empId, {
-                                          lateHours: preset,
-                                        })
-                                      }
-                                      className={`px-1.5 py-1 rounded-md text-[11px] font-bold border transition-colors cursor-pointer ${
-                                        cfg.lateHours === preset
-                                          ? 'bg-amber-600 text-white border-amber-600'
-                                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-amber-50'
-                                      }`}
-                                    >
-                                      {preset}h
-                                    </button>
-                                  ))}
+                                <div className="flex items-center gap-1.5">
                                   <input
                                     type="number"
                                     min={0.25}
@@ -653,8 +668,12 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                                         lateHours: Number(e.target.value),
                                       })
                                     }
-                                    className="w-14 px-1.5 py-1 text-xs font-mono font-bold text-center rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                                    aria-label={`Số giờ đi muộn của ${emp.fullName}`}
+                                    className="w-16 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#0D9488]"
                                   />
+                                  <span className="text-xs font-semibold text-slate-600">
+                                    giờ
+                                  </span>
                                 </div>
                               )}
                             </td>
