@@ -1362,7 +1362,7 @@ export default function App() {
       {/* Right Main Content Viewport */}
       <div
         className={`flex-1 min-w-0 flex flex-col h-screen ${
-          activeModule === 'dashboard'
+          activeModule === 'dashboard' || activeModule === 'leave_logs'
             ? 'overflow-y-auto lg:overflow-hidden pb-20 md:pb-8 lg:pb-0'
             : 'overflow-y-auto pb-20 md:pb-8'
         }`}
@@ -1371,11 +1371,20 @@ export default function App() {
           className={`w-full max-w-[1600px] mx-auto flex-1 ${
             activeModule === 'dashboard'
               ? 'px-0 pt-0 min-h-0'
-              : 'px-3 sm:px-5 md:px-6 pt-4 md:pt-5'
+              : activeModule === 'leave_logs'
+                ? 'px-3 sm:px-5 md:px-6 pt-3 pb-3 min-h-0 flex flex-col'
+                : 'px-3 sm:px-5 md:px-6 pt-4 md:pt-5'
           }`}
         >
           {/* Main Active Module Content */}
-          <main aria-label="Nội dung phân hệ chính" className={activeModule === 'dashboard' ? 'h-full' : ''}>
+          <main
+            aria-label="Nội dung phân hệ chính"
+            className={
+              activeModule === 'dashboard' || activeModule === 'leave_logs'
+                ? 'h-full min-h-0 flex flex-col'
+                : ''
+            }
+          >
             {activeModule === 'dashboard' && (
               <DashboardView
                 currentUser={currentUser}
@@ -1489,6 +1498,10 @@ export default function App() {
                   if (!isAdmin) return;
                   setEditingRecord(rec);
                   setIsLeaveModalOpen(true);
+                }}
+                onQuickUpdateRecord={(rec, patch) => {
+                  const { id, ...rest } = rec;
+                  handleSaveLeaveRecord({ ...rest, ...patch }, id);
                 }}
                 onDeleteRecord={handleDeleteLeaveRecord}
                 onInspectAttachment={(url, title) =>
