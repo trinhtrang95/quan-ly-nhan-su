@@ -31,6 +31,7 @@ interface LeaveLateLogViewProps {
   employees: Employee[];
   groups: DepartmentGroup[];
   isAdmin?: boolean;
+  initialTypeFilter?: string;
   onOpenAddRecord: () => void;
   onOpenEditRecord: (rec: LeaveRecord) => void;
   onDeleteRecord: (rec: LeaveRecord) => void;
@@ -43,6 +44,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
   employees,
   groups,
   isAdmin = true,
+  initialTypeFilter = 'ALL',
   onOpenAddRecord,
   onOpenEditRecord,
   onDeleteRecord,
@@ -51,12 +53,16 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
 }) => {
   const [startDateFilter, setStartDateFilter] = useState<string>('');
   const [endDateFilter, setEndDateFilter] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [typeFilter, setTypeFilter] = useState<string>(initialTypeFilter);
   const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
   const exportDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setTypeFilter(initialTypeFilter);
+  }, [initialTypeFilter]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -80,7 +86,17 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
 
       if (startDateFilter && rec.startDate < startDateFilter) return false;
       if (endDateFilter && rec.startDate > endDateFilter) return false;
-      if (typeFilter !== 'ALL' && rec.type !== typeFilter) return false;
+      if (typeFilter === 'PAPER_MISSING') {
+        const currentStatus =
+          rec.paperStatus || (rec.attachmentUrl ? 'Đã có' : 'Chưa có');
+        if (currentStatus !== 'Chưa có') return false;
+      } else if (typeFilter === 'PAPER_READY') {
+        const currentStatus =
+          rec.paperStatus || (rec.attachmentUrl ? 'Đã có' : 'Chưa có');
+        if (currentStatus !== 'Đã có') return false;
+      } else if (typeFilter !== 'ALL' && rec.type !== typeFilter) {
+        return false;
+      }
       if (departmentFilter !== 'ALL' && emp.department !== departmentFilter)
         return false;
 
@@ -319,6 +335,8 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               <option value="unpaid_leave">Nghỉ không lương</option>
               <option value="regime_leave">Nghỉ chế độ (BHXH)</option>
               <option value="late_early">Đi muộn</option>
+              <option value="PAPER_MISSING">Trạng thái: Chưa có giấy phép</option>
+              <option value="PAPER_READY">Trạng thái: Đã có giấy phép</option>
             </select>
           </div>
 

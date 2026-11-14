@@ -309,6 +309,8 @@ export default function App() {
   const [leaveDefaultMonth, setLeaveDefaultMonth] = useState<number | undefined>(
     undefined
   );
+  const [leaveInitialTypeFilter, setLeaveInitialTypeFilter] =
+    useState<string>('ALL');
   const [leaveDefaultYear, setLeaveDefaultYear] = useState<number | undefined>(
     undefined
   );
@@ -1188,6 +1190,7 @@ export default function App() {
         activeModule={activeModule}
         onSelectModule={(mod) => {
           if (mod === 'settings' && !isAdmin) return;
+          setLeaveInitialTypeFilter('ALL');
           setActiveModule(mod);
         }}
         collapsed={sidebarCollapsed}
@@ -1215,10 +1218,22 @@ export default function App() {
       />
 
       {/* Right Main Content Viewport */}
-      <div className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto pb-20 md:pb-8">
-        <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-5 md:px-6 pt-4 md:pt-5 flex-1">
+      <div
+        className={`flex-1 min-w-0 flex flex-col h-screen ${
+          activeModule === 'dashboard'
+            ? 'overflow-y-auto lg:overflow-hidden pb-20 md:pb-8 lg:pb-0'
+            : 'overflow-y-auto pb-20 md:pb-8'
+        }`}
+      >
+        <div
+          className={`w-full max-w-[1600px] mx-auto flex-1 ${
+            activeModule === 'dashboard'
+              ? 'px-0 pt-0 min-h-0'
+              : 'px-3 sm:px-5 md:px-6 pt-4 md:pt-5'
+          }`}
+        >
           {/* Main Active Module Content */}
-          <main aria-label="Nội dung phân hệ chính">
+          <main aria-label="Nội dung phân hệ chính" className={activeModule === 'dashboard' ? 'h-full' : ''}>
             {activeModule === 'dashboard' && (
               <DashboardView
                 currentUser={currentUser}
@@ -1229,7 +1244,14 @@ export default function App() {
                 records={companyRecords}
                 recentRecords={sortedRecords}
                 matrixRows={matrixRows2026}
-                onNavigate={setActiveModule}
+                onNavigate={(mod) => {
+                  setLeaveInitialTypeFilter('ALL');
+                  setActiveModule(mod);
+                }}
+                onFilterMissingPaper={() => {
+                  setLeaveInitialTypeFilter('PAPER_MISSING');
+                  setActiveModule('leave_logs');
+                }}
                 onOpenAddLeave={() => {
                   setEditingRecord(null);
                   setLeaveDefaultEmpId(undefined);
@@ -1313,6 +1335,7 @@ export default function App() {
                 employees={companyEmployees}
                 groups={effectiveGroups}
                 isAdmin={isAdmin}
+                initialTypeFilter={leaveInitialTypeFilter}
                 onOpenAddRecord={() => {
                   setEditingRecord(null);
                   setLeaveDefaultEmpId(undefined);
