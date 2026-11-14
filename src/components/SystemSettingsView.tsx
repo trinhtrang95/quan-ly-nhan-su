@@ -22,6 +22,9 @@ import {
   CloudUpload,
   Terminal,
   MonitorDown,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   CompanyUnit,
@@ -64,9 +67,11 @@ interface SystemSettingsViewProps {
   onAddGroup: (grp: Omit<DepartmentGroup, 'id'>) => void;
   onUpdateGroup: (id: string, grp: Omit<DepartmentGroup, 'id'>) => void;
   onDeleteGroup: (id: string) => void;
+  onReorderGroups?: (reorderedGroups: DepartmentGroup[]) => void;
   onAddPosition: (pos: Omit<PositionItem, 'id'>) => void;
   onUpdatePosition: (id: string, name: string) => void;
   onDeletePosition: (id: string) => void;
+  onReorderPositions?: (reorderedPositions: PositionItem[]) => void;
 
   accounts: UserAccount[];
   currentAccountId: string;
@@ -118,9 +123,11 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   onAddGroup,
   onUpdateGroup,
   onDeleteGroup,
+  onReorderGroups,
   onAddPosition,
   onUpdatePosition,
   onDeletePosition,
+  onReorderPositions,
   accounts,
   currentAccountId,
   onAddAccount,
@@ -419,6 +426,69 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const startEditPosition = (pos: PositionItem) => {
     setEditingPosId(pos.id);
     setPosNameInput(pos.name);
+  };
+
+  // Drag-and-drop state for Department Groups (Tầng 1) & Positions (Tầng 2)
+  const [draggedGroupIndex, setDraggedGroupIndex] = useState<number | null>(null);
+  const [dragOverGroupIndex, setDragOverGroupIndex] = useState<number | null>(null);
+
+  const [draggedPosIndex, setDraggedPosIndex] = useState<number | null>(null);
+  const [dragOverPosIndex, setDragOverPosIndex] = useState<number | null>(null);
+
+  const handleGroupDrop = (targetIndex: number) => {
+    if (
+      draggedGroupIndex === null ||
+      draggedGroupIndex === targetIndex ||
+      !onReorderGroups
+    ) {
+      setDraggedGroupIndex(null);
+      setDragOverGroupIndex(null);
+      return;
+    }
+    const next = [...groups];
+    const [moved] = next.splice(draggedGroupIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    onReorderGroups(next.map((g, idx) => ({ ...g, sortOrder: idx })));
+    setDraggedGroupIndex(null);
+    setDragOverGroupIndex(null);
+  };
+
+  const moveGroupByOffset = (index: number, offset: -1 | 1) => {
+    if (!onReorderGroups) return;
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= groups.length) return;
+    const next = [...groups];
+    const [moved] = next.splice(index, 1);
+    next.splice(targetIndex, 0, moved);
+    onReorderGroups(next.map((g, idx) => ({ ...g, sortOrder: idx })));
+  };
+
+  const handlePosDrop = (targetIndex: number) => {
+    if (
+      draggedPosIndex === null ||
+      draggedPosIndex === targetIndex ||
+      !onReorderPositions
+    ) {
+      setDraggedPosIndex(null);
+      setDragOverPosIndex(null);
+      return;
+    }
+    const next = [...positions];
+    const [moved] = next.splice(draggedPosIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    onReorderPositions(next.map((p, idx) => ({ ...p, sortOrder: idx })));
+    setDraggedPosIndex(null);
+    setDragOverPosIndex(null);
+  };
+
+  const movePosByOffset = (index: number, offset: -1 | 1) => {
+    if (!onReorderPositions) return;
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= positions.length) return;
+    const next = [...positions];
+    const [moved] = next.splice(index, 1);
+    next.splice(targetIndex, 0, moved);
+    onReorderPositions(next.map((p, idx) => ({ ...p, sortOrder: idx })));
   };
 
   // =========================================================================
@@ -1153,73 +1223,154 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             </div>
           </form>
 
-          {/* Department Cards Grid */}
+          {/* Department Cards Grid (Draggable Priority Order - Tầng 1) */}
           {groups.length === 0 ? (
             <div className="mt-4 p-8 text-center rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
               Chưa có phòng ban nào được tạo. Hãy nhập tên phòng ban ở khung bên trên và bấm <strong>+ Thêm Phòng ban</strong>.
             </div>
           ) : (
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {groups.map((grp) => {
-                const count = employees.filter(
-                  (e) => e.department === grp.name
-                ).length;
-                return (
-                  <div
-                    key={grp.id}
-                    className="p-3.5 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between gap-2 hover:border-slate-300 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className="w-3 h-3 rounded-full shrink-0"
-                        style={{ backgroundColor: grp.color }}
-                      />
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-900 truncate">
-                          {grp.name}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-mono">
-                          Mã: {grp.code} · {count} nhân sự
+            <div className="mt-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-teal-50/70 border border-teal-200/70 text-[11px] text-[#0F766E] font-medium">
+                <span>
+                  💡 <strong>Kéo thả thẻ bộ phận</strong> (hoặc bấm nút ↑ ↓) để thiết lập <strong>thứ tự ưu tiên sắp xếp mặc định Tầng 1</strong> trên bảng Danh sách nhân sự.
+                </span>
+                <span className="font-mono font-bold shrink-0">
+                  Ưu tiên #1 → #{groups.length}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {groups.map((grp, idx) => {
+                  const count = employees.filter(
+                    (e) => e.department === grp.name
+                  ).length;
+                  const isDragging = draggedGroupIndex === idx;
+                  const isDragOver =
+                    dragOverGroupIndex === idx && draggedGroupIndex !== idx;
+
+                  return (
+                    <div
+                      key={grp.id}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggedGroupIndex(idx);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (dragOverGroupIndex !== idx) {
+                          setDragOverGroupIndex(idx);
+                        }
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverGroupIndex === idx) {
+                          setDragOverGroupIndex(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handleGroupDrop(idx);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedGroupIndex(null);
+                        setDragOverGroupIndex(null);
+                      }}
+                      className={`p-3 rounded-xl border bg-white flex items-center justify-between gap-2 transition-all cursor-grab active:cursor-grabbing select-none ${
+                        isDragging
+                          ? 'opacity-45 scale-[0.98] border-[#0D9488] bg-teal-50/40'
+                          : isDragOver
+                            ? 'border-2 border-dashed border-[#0D9488] bg-teal-50/60 shadow-md'
+                            : 'border-slate-200/80 hover:border-[#0D9488]/60 hover:shadow-xs'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <GripVertical
+                          className="w-4 h-4 text-slate-400 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] font-bold shrink-0 border border-slate-200">
+                          #{idx + 1}
+                        </span>
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: grp.color }}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">
+                            {grp.name}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-mono">
+                            Mã: {grp.code} · {count} nhân sự
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => startEditGroup(grp)}
-                        aria-label={`Sửa bộ phận ${grp.name}`}
-                        className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-slate-100 cursor-pointer"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={count > 0}
-                        onClick={() => onDeleteGroup(grp.id)}
-                        title={
-                          count > 0
-                            ? 'Không thể xóa bộ phận đang có nhân sự'
-                            : 'Xóa bộ phận'
-                        }
-                        aria-label={`Xóa bộ phận ${grp.name}`}
-                        className={`p-1.5 rounded-md ${
-                          count > 0
-                            ? 'text-slate-300 cursor-not-allowed'
-                            : 'text-[#EF4444] hover:bg-[#FEF2F2] cursor-pointer'
-                        }`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => moveGroupByOffset(idx, -1)}
+                          title="Tăng độ ưu tiên (Đưa lên trước)"
+                          aria-label={`Đưa bộ phận ${grp.name} lên trước`}
+                          className={`p-1 rounded-md ${
+                            idx === 0
+                              ? 'text-slate-200 cursor-not-allowed'
+                              : 'text-slate-500 hover:text-[#0D9488] hover:bg-teal-50 cursor-pointer'
+                          }`}
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === groups.length - 1}
+                          onClick={() => moveGroupByOffset(idx, 1)}
+                          title="Giảm độ ưu tiên (Đưa xuống sau)"
+                          aria-label={`Đưa bộ phận ${grp.name} xuống sau`}
+                          className={`p-1 rounded-md ${
+                            idx === groups.length - 1
+                              ? 'text-slate-200 cursor-not-allowed'
+                              : 'text-slate-500 hover:text-[#0D9488] hover:bg-teal-50 cursor-pointer'
+                          }`}
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEditGroup(grp)}
+                          aria-label={`Sửa bộ phận ${grp.name}`}
+                          className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-slate-100 cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={count > 0}
+                          onClick={() => onDeleteGroup(grp.id)}
+                          title={
+                            count > 0
+                              ? 'Không thể xóa bộ phận đang có nhân sự'
+                              : 'Xóa bộ phận'
+                          }
+                          aria-label={`Xóa bộ phận ${grp.name}`}
+                          className={`p-1.5 rounded-md ${
+                            count > 0
+                              ? 'text-slate-300 cursor-not-allowed'
+                              : 'text-[#EF4444] hover:bg-[#FEF2F2] cursor-pointer'
+                          }`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
 
           {/* ===================================================================
-              QUẢN LÝ CHỨC DANH / VỊ TRÍ (BẢNG POSITIONS TRÊN SUPABASE)
+              QUẢN LÝ CHỨC DANH / VỊ TRÍ (BẢNG POSITIONS TRÊN SUPABASE - KÉO THẢ TẦNG 2)
           =================================================================== */}
           <div className="mt-8 pt-6 border-t border-slate-200/80">
             <div className="flex items-center gap-3 pb-4">
@@ -1231,7 +1382,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                   Quản lý Chức danh / Vị trí ({positions.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Khởi tạo và đồng bộ danh sách Chức danh / Vị trí với bảng positions trên Supabase (tự động cập nhật vào ô Dropdown trong form Nhân viên)
+                  Khởi tạo, kéo thả thiết lập thứ tự ưu tiên Chức vụ (Tầng 2) và đồng bộ với bảng positions trên Supabase
                 </p>
               </div>
             </div>
@@ -1290,59 +1441,138 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               </div>
             </form>
 
-            {/* Positions Grid */}
-            <div
-              data-testid="positions-list-grid"
-              className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
-            >
-              {positions.map((pos) => {
-                const empCountWithPos = employees.filter(
-                  (e) => (e.position || 'Nhân viên') === pos.name
-                ).length;
+            {/* Positions Grid (Draggable Priority Order - Tầng 2) */}
+            <div className="mt-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-teal-50/70 border border-teal-200/70 text-[11px] text-[#0F766E] font-medium">
+                <span>
+                  💡 <strong>Kéo thả thẻ chức danh</strong> (hoặc bấm nút ↑ ↓) để thiết lập <strong>thứ tự ưu tiên sắp xếp Chức vụ trong cùng bộ phận (Tầng 2)</strong>.
+                </span>
+                <span className="font-mono font-bold shrink-0">
+                  Ưu tiên #1 → #{positions.length}
+                </span>
+              </div>
 
-                return (
-                  <div
-                    key={pos.id}
-                    className="p-3.5 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between gap-2 hover:border-slate-300 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#0D9488] shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-900 truncate">
-                          {pos.name}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-mono">
-                          {empCountWithPos} nhân sự
+              <div
+                data-testid="positions-list-grid"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+              >
+                {positions.map((pos, idx) => {
+                  const empCountWithPos = employees.filter(
+                    (e) => (e.position || 'Nhân viên') === pos.name
+                  ).length;
+                  const isDragging = draggedPosIndex === idx;
+                  const isDragOver =
+                    dragOverPosIndex === idx && draggedPosIndex !== idx;
+
+                  return (
+                    <div
+                      key={pos.id}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggedPosIndex(idx);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (dragOverPosIndex !== idx) {
+                          setDragOverPosIndex(idx);
+                        }
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverPosIndex === idx) {
+                          setDragOverPosIndex(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handlePosDrop(idx);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedPosIndex(null);
+                        setDragOverPosIndex(null);
+                      }}
+                      className={`p-3 rounded-xl border bg-white flex items-center justify-between gap-2 transition-all cursor-grab active:cursor-grabbing select-none ${
+                        isDragging
+                          ? 'opacity-45 scale-[0.98] border-[#0D9488] bg-teal-50/40'
+                          : isDragOver
+                            ? 'border-2 border-dashed border-[#0D9488] bg-teal-50/60 shadow-md'
+                            : 'border-slate-200/80 hover:border-[#0D9488]/60 hover:shadow-xs'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <GripVertical
+                          className="w-4 h-4 text-slate-400 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span className="px-1.5 py-0.5 rounded bg-teal-50 text-[#0F766E] font-mono text-[10px] font-bold shrink-0 border border-teal-200">
+                          #{idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">
+                            {pos.name}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-mono">
+                            {empCountWithPos} nhân sự
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => startEditPosition(pos)}
-                        aria-label={`Sửa chức danh ${pos.name}`}
-                        className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-slate-100 cursor-pointer"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={positions.length <= 1}
-                        onClick={() => onDeletePosition(pos.id)}
-                        aria-label={`Xóa chức danh ${pos.name}`}
-                        className={`p-1.5 rounded-md ${
-                          positions.length <= 1
-                            ? 'text-slate-300 cursor-not-allowed'
-                            : 'text-[#EF4444] hover:bg-[#FEF2F2] cursor-pointer'
-                        }`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => movePosByOffset(idx, -1)}
+                          title="Tăng độ ưu tiên (Đưa lên trước)"
+                          aria-label={`Đưa chức danh ${pos.name} lên trước`}
+                          className={`p-1 rounded-md ${
+                            idx === 0
+                              ? 'text-slate-200 cursor-not-allowed'
+                              : 'text-slate-500 hover:text-[#0D9488] hover:bg-teal-50 cursor-pointer'
+                          }`}
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === positions.length - 1}
+                          onClick={() => movePosByOffset(idx, 1)}
+                          title="Giảm độ ưu tiên (Đưa xuống sau)"
+                          aria-label={`Đưa chức danh ${pos.name} xuống sau`}
+                          className={`p-1 rounded-md ${
+                            idx === positions.length - 1
+                              ? 'text-slate-200 cursor-not-allowed'
+                              : 'text-slate-500 hover:text-[#0D9488] hover:bg-teal-50 cursor-pointer'
+                          }`}
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEditPosition(pos)}
+                          aria-label={`Sửa chức danh ${pos.name}`}
+                          className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-slate-100 cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={positions.length <= 1}
+                          onClick={() => onDeletePosition(pos.id)}
+                          aria-label={`Xóa chức danh ${pos.name}`}
+                          className={`p-1.5 rounded-md ${
+                            positions.length <= 1
+                              ? 'text-slate-300 cursor-not-allowed'
+                              : 'text-[#EF4444] hover:bg-[#FEF2F2] cursor-pointer'
+                          }`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
         </section>

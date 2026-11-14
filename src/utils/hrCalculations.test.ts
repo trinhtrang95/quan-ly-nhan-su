@@ -82,7 +82,7 @@ test('VN_34_PROVINCES contains exact 6 central cities + 28 provinces = 34 unique
   assert.deepEqual(parsedMergedAlias, {
     detail: 'Xóm 2',
     commune: 'Xã Lương Sơn',
-    province: 'Phú Thọ',
+    province: 'Hòa Bình',
   });
 
   // Empty or "-" address returns empty parts
@@ -143,6 +143,63 @@ test('sortEmployees sorts by department, status, and joinDate and pushes empty "
 
   const statusAsc = sortEmployees(sample, 'status', 'asc');
   assert.equal(statusAsc.length, 3);
+
+  const prioritySample: Employee[] = [
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: 'p1',
+      employeeCode: 'NV010',
+      fullName: 'Nhân viên ME',
+      department: 'ME',
+      position: 'Nhân viên',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: 'p2',
+      employeeCode: 'NV009',
+      fullName: 'Phó nhóm ME',
+      department: 'ME',
+      position: 'Phó nhóm',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: 'p3',
+      employeeCode: 'NV008',
+      fullName: 'Trưởng nhóm ME',
+      department: 'ME',
+      position: 'Trưởng nhóm',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: 'p4',
+      employeeCode: 'NV007',
+      fullName: 'Trưởng bộ phận ME',
+      department: 'ME',
+      position: 'Trưởng bộ phận',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: 'p5',
+      employeeCode: 'NV002',
+      fullName: 'Nhân viên JIG 2',
+      department: 'JIG/AUTO 2',
+      position: 'Nhân viên',
+    },
+    {
+      ...INITIAL_EMPLOYEES[0],
+      id: 'p6',
+      employeeCode: 'NV001',
+      fullName: 'Quản lý chung',
+      department: 'Quản lý chung',
+      position: 'Trưởng bộ phận',
+    },
+  ];
+
+  const defaultSorted = sortEmployees(prioritySample, null, null);
+  assert.deepEqual(
+    defaultSorted.map((e) => e.id),
+    ['p6', 'p5', 'p4', 'p3', 'p2', 'p1']
+  );
 });
 
 test('parseEmployeesFromCsvText supports full 12-column template and enforces unique employeeCode and registered groups', () => {

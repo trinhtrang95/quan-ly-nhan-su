@@ -228,9 +228,16 @@ export function mapSupabaseRowToDepartment(
   let code = '';
   let color = DEPT_PALETTE[index % DEPT_PALETTE.length];
   let description = rawDesc;
+  let sortOrder: number | undefined = undefined;
 
-  if (rawDesc.includes('|')) {
-    const parts = rawDesc.split('|');
+  const sortMatch = description.match(/<!--SORT:(\d+)-->/);
+  if (sortMatch) {
+    sortOrder = Number(sortMatch[1]);
+    description = description.replace(/<!--SORT:\d+-->/g, '').trim();
+  }
+
+  if (description.includes('|')) {
+    const parts = description.split('|');
     code = parts[0] || '';
     if (parts[1] && parts[1].startsWith('#')) {
       color = parts[1];
@@ -260,6 +267,7 @@ export function mapSupabaseRowToDepartment(
     code,
     color,
     description,
+    sortOrder,
   };
 }
 
@@ -1068,10 +1076,12 @@ export async function createDepartmentInSupabase(
   grp: Omit<DepartmentGroup, 'id'>,
   companyId?: string | null
 ): Promise<DepartmentGroup> {
+  const sortSuffix =
+    grp.sortOrder !== undefined ? `<!--SORT:${grp.sortOrder}-->` : '';
   const payload = {
     company_id: grp.companyId || companyId || null,
     name: grp.name,
-    description: `${grp.code || ''}|${grp.color || '#0D9488'}|${grp.description || ''}`,
+    description: `${grp.code || ''}|${grp.color || '#0D9488'}|${grp.description || ''}${sortSuffix}`,
   };
 
   const rows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
@@ -1095,10 +1105,12 @@ export async function updateDepartmentInSupabase(
   grp: Omit<DepartmentGroup, 'id'>,
   companyId?: string | null
 ): Promise<DepartmentGroup> {
+  const sortSuffix =
+    grp.sortOrder !== undefined ? `<!--SORT:${grp.sortOrder}-->` : '';
   const payload = {
     company_id: grp.companyId || companyId || null,
     name: grp.name,
-    description: `${grp.code || ''}|${grp.color || '#0D9488'}|${grp.description || ''}`,
+    description: `${grp.code || ''}|${grp.color || '#0D9488'}|${grp.description || ''}${sortSuffix}`,
   };
 
   const rows = await supabaseRestFetch<SupabaseDepartmentRow[]>(
@@ -1115,6 +1127,24 @@ export async function updateDepartmentInSupabase(
   }
 
   return mapSupabaseRowToDepartment(rows[0], 0);
+}
+
+export async function reorderDepartmentsInSupabase(
+  orderedGroups: DepartmentGroup[],
+  companyId?: string | null
+): Promise<void> {
+  await Promise.all(
+    orderedGroups.map((grp, idx) =>
+      updateDepartmentInSupabase(
+        grp.id,
+        {
+          ...grp,
+          sortOrder: idx,
+        },
+        grp.companyId || companyId || null
+      ).catch(() => {})
+    )
+  );
 }
 
 export async function deleteDepartmentFromSupabase(id: string): Promise<void> {

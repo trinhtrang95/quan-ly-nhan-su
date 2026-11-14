@@ -104,7 +104,7 @@ export type EmployeeSortField =
 
 export type SortDirection = 'asc' | 'desc' | null;
 
-const DEPARTMENT_PRIORITY_ORDER: string[] = [
+export const DEPARTMENT_PRIORITY_ORDER: string[] = [
   'quản lý chung',
   'jig/auto 2',
   'me',
@@ -115,25 +115,171 @@ const DEPARTMENT_PRIORITY_ORDER: string[] = [
   'iot',
 ];
 
-function getDepartmentPriorityRank(department?: string | null): number {
-  const clean = (department || '').trim().toLowerCase();
+export const POSITION_PRIORITY_ORDER: string[] = [
+  'trưởng bộ phận',
+  'trưởng nhóm',
+  'phó nhóm',
+  'nhân viên',
+];
+
+const DEPT_PRIORITY_STORAGE_KEY = 'hr_pro_dept_priority_order_v1';
+const POS_PRIORITY_STORAGE_KEY = 'hr_pro_pos_priority_order_v1';
+
+function normalizeDeptKey(val?: string | null): string {
+  return (val || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ');
+}
+
+function normalizePosKey(val?: string | null): string {
+  return (val || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+let customDepartmentOrder: string[] | null = (() => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(DEPT_PRIORITY_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((s) => normalizeDeptKey(String(s))).filter(Boolean);
+        }
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return null;
+})();
+
+let customPositionOrder: string[] | null = (() => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(POS_PRIORITY_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((s) => normalizePosKey(String(s))).filter(Boolean);
+        }
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return null;
+})();
+
+export function setCustomDepartmentPriorityOrder(
+  orderedNames: string[] | null
+): void {
+  if (!orderedNames || orderedNames.length === 0) {
+    customDepartmentOrder = null;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(DEPT_PRIORITY_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore
+    }
+    return;
+  }
+
+  customDepartmentOrder = orderedNames
+    .map((s) => normalizeDeptKey(s))
+    .filter(Boolean);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(
+        DEPT_PRIORITY_STORAGE_KEY,
+        JSON.stringify(customDepartmentOrder)
+      );
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function setCustomPositionPriorityOrder(
+  orderedNames: string[] | null
+): void {
+  if (!orderedNames || orderedNames.length === 0) {
+    customPositionOrder = null;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(POS_PRIORITY_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore
+    }
+    return;
+  }
+
+  customPositionOrder = orderedNames
+    .map((s) => normalizePosKey(s))
+    .filter(Boolean);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(
+        POS_PRIORITY_STORAGE_KEY,
+        JSON.stringify(customPositionOrder)
+      );
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function getDepartmentPriorityRank(department?: string | null): number {
+  const clean = normalizeDeptKey(department);
   if (!clean || clean === '-' || clean === '—') {
     return 999; // Chưa phân nhóm xếp ở cuối cùng
   }
+
+  if (customDepartmentOrder && customDepartmentOrder.length > 0) {
+    const customIdx = customDepartmentOrder.indexOf(clean);
+    if (customIdx !== -1) {
+      return customIdx;
+    }
+  }
+
   const idx = DEPARTMENT_PRIORITY_ORDER.indexOf(clean);
   if (idx !== -1) {
-    return idx;
+    return customDepartmentOrder && customDepartmentOrder.length > 0
+      ? customDepartmentOrder.length + idx
+      : idx;
   }
-  return 100; // Các nhóm mới phát sinh xếp tiếp ngay sau 8 nhóm chuẩn
+  return 100; // Các nhóm mới phát sinh xếp tiếp ngay sau các nhóm đã cấu hình
 }
 
-function getPositionPriorityRank(position?: string | null): number {
-  const clean = (position || '').trim().toLowerCase();
+export function getPositionPriorityRank(position?: string | null): number {
+  const clean = normalizePosKey(position);
   if (!clean || clean === '-' || clean === '—') return 99;
-  if (clean.includes('trưởng bộ phận')) return 1;
-  if (clean.includes('trưởng nhóm') || clean.includes('phó bộ phận')) return 2;
-  if (clean.includes('nhân viên')) return 3;
-  return 4;
+
+  if (customPositionOrder && customPositionOrder.length > 0) {
+    const exactIdx = customPositionOrder.indexOf(clean);
+    if (exactIdx !== -1) {
+      return exactIdx + 1;
+    }
+    const partialIdx = customPositionOrder.findIndex(
+      (p) => p && clean.includes(p)
+    );
+    if (partialIdx !== -1) {
+      return partialIdx + 1;
+    }
+  }
+
+  const offset =
+    customPositionOrder && customPositionOrder.length > 0
+      ? customPositionOrder.length
+      : 0;
+  if (clean.includes('trưởng bộ phận')) return offset + 1;
+  if (clean.includes('trưởng nhóm')) return offset + 2;
+  if (clean.includes('phó nhóm') || clean.includes('phó bộ phận'))
+    return offset + 3;
+  if (clean.includes('nhân viên')) return offset + 4;
+  return offset + 5;
 }
 
 export function compareEmployeesByDefaultPriority(
@@ -141,6 +287,7 @@ export function compareEmployeesByDefaultPriority(
   b: Employee
 ): number {
   // Tầng 1: Thứ tự ưu tiên Nhóm / Bộ phận
+  // Quản lý chung > JIG/AUTO 2 > ME > AUTO 1 > PE > ST > DOCUMENT > IOT (hoặc theo thứ tự Kéo thả trong Cài đặt)
   const deptRankA = getDepartmentPriorityRank(a.department);
   const deptRankB = getDepartmentPriorityRank(b.department);
   if (deptRankA !== deptRankB) {
@@ -157,7 +304,8 @@ export function compareEmployeesByDefaultPriority(
     if (deptCmp !== 0) return deptCmp;
   }
 
-  // Tầng 2: Thứ tự ưu tiên Chức vụ trong cùng 1 Nhóm (Trưởng bộ phận > Trưởng nhóm > Nhân viên)
+  // Tầng 2: Thứ tự ưu tiên Chức vụ trong cùng 1 Nhóm
+  // Trưởng bộ phận > Trưởng nhóm > Phó nhóm > Nhân viên
   const posRankA = getPositionPriorityRank(a.position);
   const posRankB = getPositionPriorityRank(b.position);
   if (posRankA !== posRankB) {
@@ -197,6 +345,27 @@ export function sortEmployees(
       if (tA === null) return 1; // Push empty to bottom
       if (tB === null) return -1; // Push empty to bottom
       if (tA !== tB) return (tA - tB) * factor;
+      return compareEmployeesByDefaultPriority(a, b);
+    }
+
+    if (field === 'department') {
+      const rankA = getDepartmentPriorityRank(a.department);
+      const rankB = getDepartmentPriorityRank(b.department);
+      if (rankA === 999 && rankB === 999) {
+        return compareEmployeesByDefaultPriority(a, b);
+      }
+      if (rankA === 999) return 1; // Push empty to bottom
+      if (rankB === 999) return -1; // Push empty to bottom
+      if (rankA !== rankB) return (rankA - rankB) * factor;
+      const cmpDept = (a.department || '').localeCompare(
+        b.department || '',
+        'vi',
+        {
+          numeric: true,
+          sensitivity: 'base',
+        }
+      );
+      if (cmpDept !== 0) return cmpDept * factor;
       return compareEmployeesByDefaultPriority(a, b);
     }
 

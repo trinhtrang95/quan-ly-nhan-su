@@ -19,6 +19,7 @@ import {
   EmployeeSortField,
   filterEmployees,
   formatDateVN,
+  getDepartmentPriorityRank,
   SortDirection,
   sortEmployees,
 } from '../utils/hrCalculations';
@@ -95,23 +96,45 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Set of registered group names from Settings
-  const registeredGroupNames = useMemo(
-    () => new Set(groups.map((g) => g.name)),
-    [groups]
-  );
+  // Sort groups by priority: Quản lý chung > JIG/AUTO 2 > ME > AUTO 1 > PE > ST > DOCUMENT > IOT > other groups
+  const sortedGroups = useMemo(() => {
+    return [...groups].sort((a, b) => {
+      const rA = getDepartmentPriorityRank(a.name);
+      const rB = getDepartmentPriorityRank(b.name);
+      if (rA !== rB) return rA - rB;
+      return (a.name || '').localeCompare(b.name || '', 'vi', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
+  }, [groups]);
 
-  // Normalize employees so any unregistered department is treated as empty ""
+  // Map of registered group names (lowercased & trimmed -> canonical name)
+  const registeredGroupMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of groups) {
+      if (g.name) {
+        map.set(g.name.trim().toLowerCase(), g.name.trim());
+      }
+    }
+    return map;
+  }, [groups]);
+
+  // Normalize employees while preserving priority departments and registered groups
   const normalizedEmployees = useMemo(
     () =>
-      employees.map((emp) => ({
-        ...emp,
-        department:
-          emp.department && registeredGroupNames.has(emp.department)
-            ? emp.department
-            : '',
-      })),
-    [employees, registeredGroupNames]
+      employees.map((emp) => {
+        const rawDept = (emp.department || '').trim();
+        if (!rawDept) return { ...emp, department: '' };
+        if (groups.length === 0) return { ...emp, department: rawDept };
+        const matched = registeredGroupMap.get(rawDept.toLowerCase());
+        if (matched) return { ...emp, department: matched };
+        if (getDepartmentPriorityRank(rawDept) < 100) {
+          return { ...emp, department: rawDept };
+        }
+        return { ...emp, department: '' };
+      }),
+    [employees, groups.length, registeredGroupMap]
   );
 
   const filteredEmployees = useMemo(
@@ -363,8 +386,10 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
               aria-label="Lọc theo Nhóm hoặc Bộ phận"
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
             >
-              <option value="ALL">Tất cả Nhóm/Bộ phận ({groups.length})</option>
-              {groups.map((grp) => (
+              <option value="ALL">
+                Tất cả Nhóm/Bộ phận ({sortedGroups.length})
+              </option>
+              {sortedGroups.map((grp) => (
                 <option key={grp.id} value={grp.name}>
                   {grp.name}
                 </option>
@@ -623,7 +648,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                       >
                         {deptDisplay}
                       </td>
-                      {/* 6. Chức vụ (Hiển thị Chức vụ trên 1 dòng duy nhất) */}
+                      {/* 6. Chức vụ (Hiển thị Chức vụ trên 1 dòng duy nhất: Trưởng bộ phận > Trưởng nhóm > Phó nhóm > Nhân viên) */}
                       <td
                         className={`py-1.5 px-3 whitespace-nowrap ${
                           posDisplay === '-'
@@ -632,6 +657,8 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                             ? 'font-semibold text-[#0F766E]'
                             : posDisplay.toLowerCase().includes('trưởng nhóm')
                             ? 'font-semibold text-[#0D9488]'
+                            : posDisplay.toLowerCase().includes('phó nhóm')
+                            ? 'font-semibold text-teal-600'
                             : 'font-medium text-slate-700'
                         }`}
                       >

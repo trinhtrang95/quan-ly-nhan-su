@@ -22,6 +22,7 @@ export interface DepartmentGroup {
   code: string;
   color: string;
   description?: string;
+  sortOrder?: number;
 }
 
 export interface PositionItem {
@@ -29,6 +30,7 @@ export interface PositionItem {
   companyId?: string | null;
   name: string;
   createdAt?: string;
+  sortOrder?: number;
 }
 
 export interface Employee {

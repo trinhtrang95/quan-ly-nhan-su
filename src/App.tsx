@@ -24,6 +24,10 @@ import {
   calculateDashboardKPIs,
   calculateDepartmentDistribution,
   calculateMonthlyLeaveTypeDistribution,
+  getDepartmentPriorityRank,
+  getPositionPriorityRank,
+  setCustomDepartmentPriorityOrder,
+  setCustomPositionPriorityOrder,
 } from './utils/hrCalculations';
 import {
   downloadEmployeeTemplateExcel,
@@ -49,6 +53,7 @@ import {
   deleteLeaveLogFromSupabase,
   deletePositionFromSupabase,
   loadOrSeedSupabaseData,
+  reorderDepartmentsInSupabase,
   restoreFromBackupInSupabase,
   syncLocalLeaveLogsToSupabase,
   updateAppUserRoleInSupabase,
@@ -410,7 +415,30 @@ export default function App() {
           }
           return chosen ? chosen.id : prevId;
         });
-        setGroups(result.departments);
+        const hasSavedSortOrder = result.departments.some(
+          (d) => d.sortOrder !== undefined
+        );
+        const sortedDepts = [...result.departments].sort((a, b) => {
+          if (
+            a.sortOrder !== undefined &&
+            b.sortOrder !== undefined &&
+            a.sortOrder !== b.sortOrder
+          ) {
+            return a.sortOrder - b.sortOrder;
+          }
+          const rA = getDepartmentPriorityRank(a.name);
+          const rB = getDepartmentPriorityRank(b.name);
+          if (rA !== rB) return rA - rB;
+          return (a.name || '').localeCompare(b.name || '', 'vi', {
+            numeric: true,
+            sensitivity: 'base',
+          });
+        });
+        if (hasSavedSortOrder) {
+          setCustomDepartmentPriorityOrder(sortedDepts.map((d) => d.name));
+        }
+
+        setGroups(sortedDepts);
         setPositions(nextPositions);
         setAccounts(result.accounts);
         setEmployees(result.employees);
@@ -485,27 +513,52 @@ export default function App() {
     companyUnits[0] ||
     INITIAL_COMPANY_UNITS[0];
 
-  const companyGroups =
-    companyUnits.length <= 1
+  const companyGroups = [
+    ...(companyUnits.length <= 1
       ? groups
-      : groups.filter((g) => !g.companyId || g.companyId === activeCompany.id);
+      : groups.filter((g) => !g.companyId || g.companyId === activeCompany.id)),
+  ].sort((a, b) => {
+    if (
+      a.sortOrder !== undefined &&
+      b.sortOrder !== undefined &&
+      a.sortOrder !== b.sortOrder
+    ) {
+      return a.sortOrder - b.sortOrder;
+    }
+    const rA = getDepartmentPriorityRank(a.name);
+    const rB = getDepartmentPriorityRank(b.name);
+    if (rA !== rB) return rA - rB;
+    return (a.name || '').localeCompare(b.name || '', 'vi', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  });
 
-  const registeredGroupNames = new Set(companyGroups.map((g) => g.name));
+  const registeredGroupMap = new Map<string, string>();
+  for (const g of companyGroups) {
+    if (g.name) {
+      registeredGroupMap.set(g.name.trim().toLowerCase(), g.name.trim());
+    }
+  }
 
-  // Filter employees by active company and clear any department not registered in Settings
+  // Filter employees by active company and normalize department
   const companyEmployees = (
     companyUnits.length <= 1
       ? employees
       : employees.filter(
           (e) => !e.companyId || e.companyId === activeCompany.id
         )
-  ).map((emp) => ({
-    ...emp,
-    department:
-      emp.department && registeredGroupNames.has(emp.department)
-        ? emp.department
-        : '',
-  }));
+  ).map((emp) => {
+    const rawDept = (emp.department || '').trim();
+    if (!rawDept) return { ...emp, department: '' };
+    if (companyGroups.length === 0) return { ...emp, department: rawDept };
+    const matched = registeredGroupMap.get(rawDept.toLowerCase());
+    if (matched) return { ...emp, department: matched };
+    if (getDepartmentPriorityRank(rawDept) < 100) {
+      return { ...emp, department: rawDept };
+    }
+    return { ...emp, department: '' };
+  });
 
   const companyEmployeeIds = new Set(companyEmployees.map((e) => e.id));
   const companyRecords =
@@ -520,7 +573,23 @@ export default function App() {
         : positions.filter(
             (p) => !p.companyId || p.companyId === activeCompany.id
           );
-    return filtered.length > 0 ? filtered : INITIAL_POSITIONS;
+    const list = filtered.length > 0 ? filtered : INITIAL_POSITIONS;
+    return [...list].sort((a, b) => {
+      if (
+        a.sortOrder !== undefined &&
+        b.sortOrder !== undefined &&
+        a.sortOrder !== b.sortOrder
+      ) {
+        return a.sortOrder - b.sortOrder;
+      }
+      const rA = getPositionPriorityRank(a.name);
+      const rB = getPositionPriorityRank(b.name);
+      if (rA !== rB) return rA - rB;
+      return (a.name || '').localeCompare(b.name || '', 'vi', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
   })();
 
   // Strictly use groups registered in Settings
@@ -792,6 +861,45 @@ export default function App() {
     } catch {
       showToast('Đã xóa bộ phận khỏi danh mục.');
     }
+  };
+
+  const handleReorderGroups = async (reorderedGroups: DepartmentGroup[]) => {
+    const orderedWithIndex = reorderedGroups.map((g, idx) => ({
+      ...g,
+      sortOrder: idx,
+    }));
+    setCustomDepartmentPriorityOrder(orderedWithIndex.map((g) => g.name));
+
+    const reorderedMap = new Map(orderedWithIndex.map((g) => [g.id, g]));
+    setGroups((prev) => {
+      const others = prev.filter((g) => !reorderedMap.has(g.id));
+      return [...orderedWithIndex, ...others];
+    });
+
+    try {
+      await reorderDepartmentsInSupabase(orderedWithIndex, activeCompany.id);
+      showToast(
+        'Đã lưu thứ tự ưu tiên Phòng ban / Nhóm mặc định (Tầng 1) lên Supabase.'
+      );
+    } catch {
+      showToast('Đã cập nhật thứ tự ưu tiên Phòng ban / Nhóm mặc định (Tầng 1).');
+    }
+  };
+
+  const handleReorderPositions = (reorderedPositions: PositionItem[]) => {
+    const orderedWithIndex = reorderedPositions.map((p, idx) => ({
+      ...p,
+      sortOrder: idx,
+    }));
+    setCustomPositionPriorityOrder(orderedWithIndex.map((p) => p.name));
+
+    const reorderedMap = new Map(orderedWithIndex.map((p) => [p.id, p]));
+    setPositions((prev) => {
+      const others = prev.filter((p) => !reorderedMap.has(p.id));
+      return [...orderedWithIndex, ...others];
+    });
+
+    showToast('Đã lưu thứ tự ưu tiên Chức danh / Vị trí mặc định (Tầng 2).');
   };
 
   // Position (`positions` table) Handlers
@@ -1577,9 +1685,11 @@ export default function App() {
                 onAddGroup={handleAddGroup}
                 onUpdateGroup={handleUpdateGroup}
                 onDeleteGroup={handleDeleteGroup}
+                onReorderGroups={handleReorderGroups}
                 onAddPosition={handleAddPosition}
                 onUpdatePosition={handleUpdatePosition}
                 onDeletePosition={handleDeletePosition}
+                onReorderPositions={handleReorderPositions}
                 defaultAnnualLeaveQuota={
                   activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
                 }
