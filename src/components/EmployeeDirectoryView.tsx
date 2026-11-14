@@ -12,7 +12,6 @@ import {
   RotateCcw,
   AlertTriangle,
   X,
-  Eye,
   ChevronDown,
 } from 'lucide-react';
 import { DepartmentGroup, Employee, LeaveRecord } from '../types/hr';
@@ -431,7 +430,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       </div>
 
-      {/* Compact 9-Column Employee Data Table with Sticky Header & max-h-[calc(100vh-200px)] */}
+      {/* Compact 10-Column Employee Data Table with Sticky Header & max-h-[calc(100vh-200px)] */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-auto relative">
           <table
@@ -441,7 +440,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             <thead>
               <tr className="sticky top-0 z-30 bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase select-none shadow-sm">
                 {/* 1. Checkbox chọn */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3 w-10 text-center">
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-10 text-center">
                   <input
                     type="checkbox"
                     checked={allFilteredSelected}
@@ -453,14 +452,14 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                   />
                 </th>
                 {/* 2. STT */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-2.5 w-14 text-center">
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-2.5 w-12 text-center">
                   STT
                 </th>
                 {/* 3. Mã nhân viên (Sortable) */}
                 <th
                   data-testid="th-sort-code"
                   onClick={() => handleSortClick('employeeCode')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Mã nhân viên</span>
@@ -471,59 +470,70 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 <th
                   data-testid="th-sort-name"
                   onClick={() => handleSortClick('fullName')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Họ tên</span>
                     {renderSortIndicator('fullName')}
                   </div>
                 </th>
-                {/* 5. Nhóm / Bộ phận (Sortable) */}
+                {/* 5. Nhóm / Bộ phận (Sortable - Cột độc lập 1 dòng) */}
                 <th
                   data-testid="th-sort-department"
                   onClick={() => handleSortClick('department')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Nhóm / Bộ phận</span>
                     {renderSortIndicator('department')}
                   </div>
                 </th>
-                {/* 6. Địa chỉ (Sortable - Chỉ hiển thị Xã/Phường, Tỉnh/TP) */}
+                {/* 6. Chức vụ (Sortable - Cột độc lập ngay bên phải Nhóm/Bộ phận) */}
+                <th
+                  data-testid="th-sort-position"
+                  onClick={() => handleSortClick('position')}
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                >
+                  <div className="inline-flex items-center">
+                    <span>Chức vụ</span>
+                    {renderSortIndicator('position')}
+                  </div>
+                </th>
+                {/* 7. Địa chỉ (Sortable - Chỉ hiển thị Xã/Phường, Tỉnh/TP) */}
                 <th
                   data-testid="th-sort-address"
                   onClick={() => handleSortClick('address')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Địa chỉ</span>
                     {renderSortIndicator('address')}
                   </div>
                 </th>
-                {/* 7. Ngày vào (Sortable) */}
+                {/* 8. Ngày vào (Sortable) */}
                 <th
                   data-testid="th-sort-join-date"
                   onClick={() => handleSortClick('joinDate')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center justify-center">
                     <span>Ngày vào</span>
                     {renderSortIndicator('joinDate')}
                   </div>
                 </th>
-                {/* 8. Trạng thái (Sortable) */}
+                {/* 9. Trạng thái (Sortable) */}
                 <th
                   data-testid="th-sort-status"
                   onClick={() => handleSortClick('status')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center justify-center">
                     <span>Trạng thái</span>
                     {renderSortIndicator('status')}
                   </div>
                 </th>
-                {/* 9. Thao tác */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 text-center whitespace-nowrap">
+                {/* 10. Thao tác */}
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 text-center whitespace-nowrap">
                   Thao tác
                 </th>
               </tr>
@@ -531,7 +541,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             <tbody className="divide-y divide-slate-200/70 text-xs">
               {sortedEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500">
+                  <td colSpan={10} className="py-12 text-center text-slate-500">
                     Không tìm thấy nhân sự nào khớp với bộ lọc hiện tại.
                   </td>
                 </tr>
@@ -540,7 +550,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                   const isSelected = selectedIds.includes(emp.id);
                   const isDrawerOpen = drawerEmployeeId === emp.id;
                   const deptDisplay = (emp.department || '').trim() || '-';
-                  const posDisplay = (emp.position || '').trim();
+                  const posDisplay = (emp.position || '').trim() || '-';
                   const shortAddressDisplay =
                     formatCommuneProvinceAddress(emp.address) || '-';
                   const joinDateDisplay = emp.joinDate
@@ -561,7 +571,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     >
                       {/* 1. Checkbox chọn */}
                       <td
-                        className="py-2.5 px-3 text-center"
+                        className="py-1.5 px-3 text-center"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <input
@@ -573,29 +583,29 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                         />
                       </td>
                       {/* 2. STT */}
-                      <td className="py-2.5 px-2.5 text-center font-mono tabular-nums text-slate-500">
+                      <td className="py-1.5 px-2.5 text-center font-mono tabular-nums text-slate-500">
                         {idx + 1}
                       </td>
                       {/* 3. Mã nhân viên */}
-                      <td className="py-2.5 px-3.5 font-mono tabular-nums font-bold text-[#0D9488] whitespace-nowrap">
+                      <td className="py-1.5 px-3 font-mono tabular-nums font-bold text-[#0D9488] whitespace-nowrap">
                         {emp.employeeCode || '-'}
                       </td>
-                      {/* 4. Họ tên (Chỉ hiển thị Avatar + Họ tên rõ ràng, KHÔNG gộp nhãn Trạng thái; hover gạch chân/đổi màu) */}
-                      <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      {/* 4. Họ tên (Avatar w-7 h-7 text-xs + Họ tên trên 1 dòng) */}
+                      <td className="py-1.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             setDrawerEmployeeId(emp.id);
                           }}
-                          className="inline-flex items-center gap-2.5 text-left group/name cursor-pointer"
+                          className="inline-flex items-center gap-2 text-left group/name cursor-pointer"
                         >
                           {emp.avatarUrl && (
                             <img
                               src={emp.avatarUrl}
                               alt={emp.fullName}
                               referrerPolicy="no-referrer"
-                              className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0"
+                              className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0 text-xs"
                             />
                           )}
                           <span className="font-bold text-slate-900 group-hover/name:text-[#0D9488] group-hover/name:underline transition-colors">
@@ -603,30 +613,33 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                           </span>
                         </button>
                       </td>
-                      {/* 5. Nhóm / Bộ phận (Tên Nhóm kèm dòng phụ nhỏ Chức danh / Vị trí) */}
+                      {/* 5. Nhóm / Bộ phận (Chỉ hiển thị tên Nhóm/Bộ phận trên 1 dòng duy nhất) */}
                       <td
-                        className={`py-2.5 px-3.5 whitespace-nowrap ${
-                          deptDisplay === '-' && !posDisplay ? 'text-center' : ''
+                        className={`py-1.5 px-3 whitespace-nowrap ${
+                          deptDisplay === '-'
+                            ? 'text-center text-slate-400 font-medium'
+                            : 'font-semibold text-slate-800'
                         }`}
                       >
-                        <div
-                          className={
-                            deptDisplay === '-'
-                              ? 'text-slate-400 font-medium'
-                              : 'font-semibold text-slate-800'
-                          }
-                        >
-                          {deptDisplay}
-                        </div>
-                        {posDisplay && (
-                          <div className="text-[11px] font-medium text-[#0D9488]">
-                            {posDisplay}
-                          </div>
-                        )}
+                        {deptDisplay}
                       </td>
-                      {/* 6. Địa chỉ (Chỉ hiển thị Xã/Phường và Tỉnh/Thành phố gọn trên 1 dòng) */}
+                      {/* 6. Chức vụ (Hiển thị Chức vụ trên 1 dòng duy nhất) */}
                       <td
-                        className={`py-2.5 px-3.5 whitespace-nowrap ${
+                        className={`py-1.5 px-3 whitespace-nowrap ${
+                          posDisplay === '-'
+                            ? 'text-center text-slate-400'
+                            : posDisplay.toLowerCase().includes('trưởng bộ phận')
+                            ? 'font-semibold text-[#0F766E]'
+                            : posDisplay.toLowerCase().includes('trưởng nhóm')
+                            ? 'font-semibold text-[#0D9488]'
+                            : 'font-medium text-slate-700'
+                        }`}
+                      >
+                        {posDisplay}
+                      </td>
+                      {/* 7. Địa chỉ (Chỉ hiển thị Xã/Phường và Tỉnh/Thành phố gọn trên 1 dòng) */}
+                      <td
+                        className={`py-1.5 px-3 whitespace-nowrap ${
                           shortAddressDisplay === '-'
                             ? 'text-center text-slate-400'
                             : 'text-slate-700 font-medium'
@@ -634,52 +647,49 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                       >
                         {shortAddressDisplay}
                       </td>
-                      {/* 7. Ngày vào */}
-                      <td className="py-2.5 px-3 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                      {/* 8. Ngày vào */}
+                      <td className="py-1.5 px-3 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap">
                         {joinDateDisplay}
                       </td>
-                      {/* 8. Trạng thái (Tách thành cột riêng biệt: Badge màu xanh/cam/đỏ) */}
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      {/* 9. Trạng thái */}
+                      <td className="py-1.5 px-3 text-center whitespace-nowrap">
                         {renderStatusBadge(emp.status)}
                       </td>
-                      {/* 8. Thao tác (3 nút icon gọn đẹp: Xem chi tiết, Sửa, Xóa) */}
+                      {/* 10. Thao tác (Chỉ giữ lại 2 nút Sửa & Xóa, có e.stopPropagation()) */}
                       <td
-                        className="py-2.5 px-3.5 text-center whitespace-nowrap"
+                        className="py-1.5 px-3 text-center whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setDrawerEmployeeId(emp.id)}
-                            aria-label={`Xem chi tiết nhân sự ${emp.fullName}`}
-                            title="Xem chi tiết hồ sơ"
-                            className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          {isAdmin && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => onOpenEditEmployee(emp)}
-                                aria-label={`Sửa nhân sự ${emp.fullName}`}
-                                title="Sửa thông tin"
-                                className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onDeleteSingle(emp)}
-                                aria-label={`Xóa nhân sự ${emp.fullName}`}
-                                title="Xóa nhân sự"
-                                className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
-                        </div>
+                        {isAdmin ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenEditEmployee(emp);
+                              }}
+                              aria-label={`Sửa nhân sự ${emp.fullName}`}
+                              title="Sửa thông tin"
+                              className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteSingle(emp);
+                              }}
+                              aria-label={`Xóa nhân sự ${emp.fullName}`}
+                              title="Xóa nhân sự"
+                              className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
                       </td>
                     </tr>
                   );

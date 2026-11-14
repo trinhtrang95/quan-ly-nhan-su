@@ -96,6 +96,7 @@ export type EmployeeSortField =
   | 'gender'
   | 'cccdDate'
   | 'department'
+  | 'position'
   | 'address'
   | 'joinDate'
   | 'status'
@@ -196,6 +197,23 @@ export function sortEmployees(
       if (tA === null) return 1; // Push empty to bottom
       if (tB === null) return -1; // Push empty to bottom
       if (tA !== tB) return (tA - tB) * factor;
+      return compareEmployeesByDefaultPriority(a, b);
+    }
+
+    if (field === 'position') {
+      const rankA = getPositionPriorityRank(a.position);
+      const rankB = getPositionPriorityRank(b.position);
+      if (rankA === 99 && rankB === 99) {
+        return compareEmployeesByDefaultPriority(a, b);
+      }
+      if (rankA === 99) return 1; // Push empty to bottom
+      if (rankB === 99) return -1; // Push empty to bottom
+      if (rankA !== rankB) return (rankA - rankB) * factor;
+      const cmpPos = (a.position || '').localeCompare(b.position || '', 'vi', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+      if (cmpPos !== 0) return cmpPos * factor;
       return compareEmployeesByDefaultPriority(a, b);
     }
 

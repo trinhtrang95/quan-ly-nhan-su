@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Upload, Check, Loader2, MapPin, ChevronDown } from 'lucide-react';
+import { X, Upload, Check, Loader2, ChevronDown } from 'lucide-react';
 import {
   DepartmentGroup,
   Employee,
@@ -10,11 +10,11 @@ import {
 import { createAvatarSvgDataUri, INITIAL_POSITIONS } from '../data/mockData';
 import { uploadImageToHrBucket } from '../utils/supabaseService';
 import {
+  ALL_COMMUNES_SUGGESTIONS,
+  ALL_PROVINCE_OPTIONS,
   composeAddressFromParts,
   fetchCommunesForProvince,
   parseAddressIntoParts,
-  VN_28_PROVINCES,
-  VN_6_CENTRAL_CITIES,
 } from '../utils/vnAddressData';
 
 interface EmployeeModalProps {
@@ -55,8 +55,12 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [addressProvince, setAddressProvince] = useState('');
   const [addressCommune, setAddressCommune] = useState('');
   const [addressDetail, setAddressDetail] = useState('');
-  const [communeSuggestions, setCommuneSuggestions] = useState<string[]>([]);
+  const [communeSuggestions, setCommuneSuggestions] = useState<string[]>(
+    ALL_COMMUNES_SUGGESTIONS
+  );
+  const [isProvinceDropdownOpen, setIsProvinceDropdownOpen] = useState(false);
   const [isCommuneDropdownOpen, setIsCommuneDropdownOpen] = useState(false);
+  const provinceWrapperRef = useRef<HTMLDivElement>(null);
   const communeWrapperRef = useRef<HTMLDivElement>(null);
 
   const [department, setDepartment] = useState('');
@@ -73,6 +77,12 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
+        provinceWrapperRef.current &&
+        !provinceWrapperRef.current.contains(e.target as Node)
+      ) {
+        setIsProvinceDropdownOpen(false);
+      }
+      if (
         communeWrapperRef.current &&
         !communeWrapperRef.current.contains(e.target as Node)
       ) {
@@ -87,6 +97,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     if (!isOpen) return;
     setErrorMsg('');
     setIsUploadingAvatar(false);
+    setIsProvinceDropdownOpen(false);
     setIsCommuneDropdownOpen(false);
 
     if (editingEmployee) {
@@ -140,14 +151,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     defaultAnnualLeaveQuota,
   ]);
 
-  // Nạp danh sách Xã/Phường gợi ý khi chọn Tỉnh/Thành phố
+  // Nạp danh sách Xã/Phường gợi ý khi chọn hoặc gõ Tỉnh/Thành phố
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    if (!addressProvince) {
-      setCommuneSuggestions([]);
-      return;
-    }
     fetchCommunesForProvince(addressProvince).then((list) => {
       if (active) {
         setCommuneSuggestions(list);
@@ -160,13 +167,28 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
   if (!isOpen) return null;
 
-  const filteredCommuneSuggestions = communeSuggestions.filter((item) => {
-    const q = addressCommune.trim().toLowerCase();
+  const filteredProvinceSuggestions = ALL_PROVINCE_OPTIONS.filter((prov) => {
+    const q = addressProvince.trim().toLowerCase();
     if (!q) return true;
-    // Nếu giá trị đang trùng khớp hoàn toàn với 1 mục đã chọn thì vẫn hiển thị toàn bộ danh sách để dễ đổi
-    if (communeSuggestions.some((c) => c.toLowerCase() === q)) return true;
-    return item.toLowerCase().includes(q);
+    if (ALL_PROVINCE_OPTIONS.some((p) => p.toLowerCase() === q)) return true;
+    return prov.toLowerCase().includes(q);
   });
+
+  const filteredCommuneSuggestions = (() => {
+    const q = addressCommune.trim().toLowerCase();
+    if (!q) return communeSuggestions.slice(0, 80);
+    if (communeSuggestions.some((c) => c.toLowerCase() === q)) {
+      return communeSuggestions.slice(0, 80);
+    }
+    const inProvince = communeSuggestions.filter((item) =>
+      item.toLowerCase().includes(q)
+    );
+    if (inProvince.length > 0) return inProvince.slice(0, 60);
+    // Nếu người dùng gõ tên xã/phường mà chưa chọn tỉnh (hoặc thuộc tỉnh khác), tìm trên toàn bộ dữ liệu xã/phường
+    return ALL_COMMUNES_SUGGESTIONS.filter((item) =>
+      item.toLowerCase().includes(q)
+    ).slice(0, 60);
+  })();
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -261,21 +283,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="employee-modal-title"
-      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
     >
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-2xl overflow-hidden my-auto">
-        {/* Modal Header */}
-        <div className="bg-[#0F232E] text-white px-5 py-4 flex items-center justify-between">
-          <div>
-            <h3 id="employee-modal-title" className="text-sm sm:text-base font-bold">
-              {editingEmployee
-                ? `Cập nhật Hồ sơ Nhân sự (${editingEmployee.employeeCode})`
-                : 'Thêm Hồ sơ Nhân sự Mới'}
-            </h3>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Chỉ bắt buộc nhập Mã nhân viên và Họ tên (*). Các trường còn lại có thể để trống (-).
-            </p>
-          </div>
+      <div className="bg-white rounded-xl border border-slate-200 shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-visible">
+        {/* Modal Header (Compact, không có dòng chú thích thừa) */}
+        <div className="bg-[#0F232E] text-white px-5 py-3 rounded-t-xl flex items-center justify-between shrink-0">
+          <h3 id="employee-modal-title" className="text-sm sm:text-base font-bold">
+            {editingEmployee
+              ? `Cập nhật Hồ sơ Nhân sự (${editingEmployee.employeeCode})`
+              : 'Thêm Hồ sơ Nhân sự Mới'}
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -286,44 +303,35 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+        {/* Form Body Compact 3-Column Layout (Vừa khít 1 màn hình, không cần cuộn) */}
+        <form onSubmit={handleSubmit} className="p-4 space-y-3 overflow-y-auto">
           {errorMsg && (
             <div
               role="alert"
               data-testid="employee-modal-error"
-              className="p-3 rounded-lg bg-[#FEF2F2] border border-red-200 text-xs font-medium text-[#EF4444]"
+              className="px-3 py-2 rounded-lg bg-[#FEF2F2] border border-red-200 text-xs font-medium text-[#EF4444]"
             >
               {errorMsg}
             </div>
           )}
 
-          {/* Avatar Preview & Upload Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
-            <img
-              src={getPreviewAvatar()}
-              alt="Xem trước ảnh đại diện"
-              referrerPolicy="no-referrer"
-              className="w-16 h-16 rounded-full object-cover border-2 border-[#0D9488] shrink-0"
-            />
-            <div className="space-y-1.5 flex-1">
-              <div className="text-xs font-bold text-slate-800">
-                Ảnh đại diện nhân sự (Không bắt buộc)
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Tải ảnh chân dung hoặc hệ thống tự động tạo Avatar chữ cái theo Họ tên.
-              </p>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer transition-colors">
+          {/* HÀNG 1: Ảnh đại diện (gọn bên trái) + Mã nhân viên + Họ và tên + Giới tính */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center p-2.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
+            <div className="md:col-span-3 flex items-center gap-2.5">
+              <img
+                src={getPreviewAvatar()}
+                alt="Ảnh đại diện"
+                referrerPolicy="no-referrer"
+                className="w-11 h-11 rounded-full object-cover border-2 border-[#0D9488] shrink-0"
+              />
+              <div className="min-w-0 flex flex-col gap-1">
+                <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer transition-colors whitespace-nowrap">
                   {isUploadingAvatar ? (
-                    <Loader2 className="w-3.5 h-3.5 text-[#0D9488] animate-spin" />
+                    <Loader2 className="w-3 h-3 text-[#0D9488] animate-spin" />
                   ) : (
-                    <Upload className="w-3.5 h-3.5 text-[#0D9488]" />
+                    <Upload className="w-3 h-3 text-[#0D9488]" />
                   )}
-                  <span>
-                    {isUploadingAvatar
-                      ? 'Đang tải lên Cloud (hr-images)...'
-                      : 'Chọn / Chụp ảnh (Lưu Cloud)'}
-                  </span>
+                  <span>{isUploadingAvatar ? 'Đang tải...' : 'Chọn ảnh'}</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -336,21 +344,18 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setAvatarUrl('')}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-red-600 cursor-pointer"
+                    className="text-[10px] font-medium text-slate-500 hover:text-red-600 text-left cursor-pointer"
                   >
                     Đặt lại mặc định
                   </button>
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Form Fields Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+            <div className="md:col-span-3">
               <label
                 htmlFor="emp-code-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
                 Mã nhân viên <span className="text-red-500">*</span>
               </label>
@@ -361,14 +366,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 value={employeeCode}
                 onChange={(e) => setEmployeeCode(e.target.value)}
                 placeholder="VD: NV001"
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
-            <div>
+            <div className="md:col-span-4">
               <label
                 htmlFor="emp-name-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
                 Họ và tên <span className="text-red-500">*</span>
               </label>
@@ -379,14 +384,37 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="VD: Nguyễn Văn An"
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
+            <div className="md:col-span-2">
+              <label
+                htmlFor="emp-gender-select"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Giới tính
+              </label>
+              <select
+                id="emp-gender-select"
+                value={gender}
+                onChange={(e) => setGender(e.target.value as Gender)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                <option value="">-- Trống --</option>
+                <option value="Nam">Nam</option>
+                <option value="Nữ">Nữ</option>
+                <option value="Khác">Khác</option>
+              </select>
+            </div>
+          </div>
+
+          {/* HÀNG 2: Ngày sinh + Số CCCD + Số điện thoại */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label
                 htmlFor="emp-dob-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
                 Ngày sinh
               </label>
@@ -395,34 +423,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 type="date"
                 value={dob}
                 onChange={(e) => setDob(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
             <div>
               <label
-                htmlFor="emp-gender-select"
-                className="block text-xs font-semibold text-slate-700 mb-1"
-              >
-                Giới tính
-              </label>
-              <select
-                id="emp-gender-select"
-                value={gender}
-                onChange={(e) => setGender(e.target.value as Gender)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                <option value="">-- Để trống (-) --</option>
-                <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
-                <option value="Khác">Khác</option>
-              </select>
-            </div>
-
-            <div>
-              <label
                 htmlFor="emp-cccd-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
                 Số CCCD / Định danh
               </label>
@@ -431,178 +439,35 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 type="text"
                 value={cccd}
                 onChange={(e) => setCccd(e.target.value)}
-                placeholder="Để trống sẽ hiển thị -"
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                placeholder="Nhập số CCCD..."
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
             <div>
               <label
-                htmlFor="emp-cccd-date-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                htmlFor="emp-phone-input"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Ngày cấp CCCD
+                Số điện thoại
               </label>
               <input
-                id="emp-cccd-date-input"
-                type="date"
-                value={cccdDate}
-                onChange={(e) => setCccdDate(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                id="emp-phone-input"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Nhập số điện thoại..."
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
+          </div>
 
-            {/* Bộ chọn Địa chỉ Hành chính 2 cấp sau sáp nhập (Tỉnh/TP -> Xã/Phường -> Địa chỉ chi tiết) */}
-            <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                  <MapPin className="w-3.5 h-3.5 text-[#0D9488]" />
-                  <span>Địa chỉ thường trú (Hành chính 2 cấp sau sáp nhập)</span>
-                </div>
-                {composedAddressPreview && (
-                  <span
-                    data-testid="address-composed-preview"
-                    className="text-[11px] font-medium text-[#0D9488] truncate max-w-[320px]"
-                    title={composedAddressPreview}
-                  >
-                    {composedAddressPreview}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* 1. Tỉnh / Thành phố (34 Tỉnh/TP sau sáp nhập) */}
-                <div>
-                  <label
-                    htmlFor="emp-addr-province"
-                    className="block text-[11px] font-semibold text-slate-600 mb-1"
-                  >
-                    1. Tỉnh / Thành phố
-                  </label>
-                  <select
-                    id="emp-addr-province"
-                    value={addressProvince}
-                    onChange={(e) => {
-                      setAddressProvince(e.target.value);
-                      setIsCommuneDropdownOpen(true);
-                    }}
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-                  >
-                    <option value="">-- Chọn Tỉnh / Thành phố (34) --</option>
-                    <optgroup label="6 Thành phố trực thuộc Trung ương">
-                      {VN_6_CENTRAL_CITIES.map((city) => (
-                        <option key={city} value={city}>
-                          {city}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="28 Tỉnh">
-                      {VN_28_PROVINCES.map((prov) => (
-                        <option key={prov} value={prov}>
-                          {prov}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-
-                {/* 2. Xã / Phường / Thị trấn (Combobox chọn nhanh + cho phép gõ tự do) */}
-                <div className="relative" ref={communeWrapperRef}>
-                  <label
-                    htmlFor="emp-addr-commune"
-                    className="block text-[11px] font-semibold text-slate-600 mb-1"
-                  >
-                    2. Xã / Phường / Thị trấn
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="emp-addr-commune"
-                      type="text"
-                      list="vn-commune-datalist"
-                      value={addressCommune}
-                      onFocus={() => {
-                        if (communeSuggestions.length > 0) {
-                          setIsCommuneDropdownOpen(true);
-                        }
-                      }}
-                      onChange={(e) => {
-                        setAddressCommune(e.target.value);
-                        setIsCommuneDropdownOpen(true);
-                      }}
-                      placeholder={
-                        addressProvince
-                          ? `Chọn hoặc gõ Xã/Phường (${addressProvince})...`
-                          : 'Chọn hoặc gõ Xã/Phường...'
-                      }
-                      className="w-full pl-2.5 pr-7 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-                    />
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      aria-label="Mở danh sách Xã Phường"
-                      onClick={() =>
-                        setIsCommuneDropdownOpen((prev) => !prev)
-                      }
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
-                    >
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <datalist id="vn-commune-datalist">
-                    {communeSuggestions.map((comm) => (
-                      <option key={comm} value={comm} />
-                    ))}
-                  </datalist>
-
-                  {isCommuneDropdownOpen &&
-                    filteredCommuneSuggestions.length > 0 && (
-                      <div className="absolute left-0 right-0 mt-1 max-h-44 overflow-y-auto bg-white rounded-lg border border-slate-200 shadow-lg z-40 py-1 text-xs">
-                        {filteredCommuneSuggestions.map((comm) => (
-                          <button
-                            key={comm}
-                            type="button"
-                            onClick={() => {
-                              setAddressCommune(comm);
-                              setIsCommuneDropdownOpen(false);
-                            }}
-                            className={`w-full text-left px-2.5 py-1.5 hover:bg-teal-50 hover:text-[#0D9488] transition-colors cursor-pointer ${
-                              addressCommune === comm
-                                ? 'bg-teal-50/70 font-semibold text-[#0D9488]'
-                                : 'text-slate-700'
-                            }`}
-                          >
-                            {comm}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                </div>
-
-                {/* 3. Địa chỉ chi tiết (Thôn/Xóm/Số nhà/Đường) */}
-                <div>
-                  <label
-                    htmlFor="emp-addr-detail"
-                    className="block text-[11px] font-semibold text-slate-600 mb-1"
-                  >
-                    3. Địa chỉ chi tiết
-                  </label>
-                  <input
-                    id="emp-addr-detail"
-                    type="text"
-                    value={addressDetail}
-                    onChange={(e) => setAddressDetail(e.target.value)}
-                    placeholder="Thôn / Xóm / Số nhà / Đường..."
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-                  />
-                </div>
-              </div>
-            </div>
-
+          {/* HÀNG 3: Nhóm / Bộ phận + Chức vụ + Ngày vào công ty */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label
                 htmlFor="emp-dept-select"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
                 Nhóm / Bộ phận
               </label>
@@ -610,7 +475,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 id="emp-dept-select"
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
               >
                 <option value="">-- Để trống (-) --</option>
                 {groups.map((grp) => (
@@ -624,15 +489,15 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             <div>
               <label
                 htmlFor="emp-pos-select"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Chức danh / Vị trí
+                Chức vụ
               </label>
               <select
                 id="emp-pos-select"
                 value={position}
                 onChange={(e) => setPosition(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
               >
                 <option value="">-- Để trống (-) --</option>
                 {position &&
@@ -650,40 +515,224 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             <div>
               <label
                 htmlFor="emp-join-date-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Ngày vào
+                Ngày vào công ty
               </label>
               <input
                 id="emp-join-date-input"
                 type="date"
                 value={joinDate}
                 onChange={(e) => setJoinDate(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+              />
+            </div>
+          </div>
+
+          {/* HÀNG 4: Trạng thái làm việc + Tỉnh / Thành phố + Xã / Phường / Thị trấn */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label
+                htmlFor="emp-status-select"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Trạng thái làm việc
+              </label>
+              <select
+                id="emp-status-select"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as WorkStatus)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                <option value="Đang làm việc">Đang làm việc</option>
+                <option value="Tạm nghỉ">Tạm nghỉ</option>
+                <option value="Đang thử việc">Đang thử việc</option>
+                <option value="Nghỉ thai sản">Nghỉ thai sản</option>
+                <option value="Đã nghỉ việc">Đã nghỉ việc</option>
+              </select>
+            </div>
+
+            {/* Tỉnh / Thành phố (Combobox + Datalist: vừa chọn nhanh vừa gõ tự do) */}
+            <div className="relative" ref={provinceWrapperRef}>
+              <label
+                htmlFor="emp-addr-province"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Tỉnh / Thành phố
+              </label>
+              <div className="relative">
+                <input
+                  id="emp-addr-province"
+                  type="text"
+                  list="vn-province-datalist"
+                  value={addressProvince}
+                  onFocus={() => setIsProvinceDropdownOpen(true)}
+                  onChange={(e) => {
+                    setAddressProvince(e.target.value);
+                    setIsProvinceDropdownOpen(true);
+                  }}
+                  placeholder="Chọn hoặc gõ Tỉnh/Thành phố..."
+                  className="w-full pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label="Mở danh sách Tỉnh Thành phố"
+                  onClick={() => setIsProvinceDropdownOpen((prev) => !prev)}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <datalist id="vn-province-datalist">
+                {ALL_PROVINCE_OPTIONS.map((prov) => (
+                  <option key={prov} value={prov} />
+                ))}
+              </datalist>
+
+              {isProvinceDropdownOpen &&
+                filteredProvinceSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 mt-1 max-h-44 overflow-y-auto bg-white rounded-lg border border-slate-200 shadow-xl z-50 py-1 text-xs">
+                    {filteredProvinceSuggestions.map((prov) => (
+                      <button
+                        key={prov}
+                        type="button"
+                        onClick={() => {
+                          setAddressProvince(prov);
+                          setIsProvinceDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 hover:bg-teal-50 hover:text-[#0D9488] transition-colors cursor-pointer ${
+                          addressProvince === prov
+                            ? 'bg-teal-50/70 font-semibold text-[#0D9488]'
+                            : 'text-slate-700'
+                        }`}
+                      >
+                        {prov}
+                      </button>
+                    ))}
+                  </div>
+                )}
+            </div>
+
+            {/* Xã / Phường / Thị trấn (Combobox + Datalist: vừa chọn nhanh từ gợi ý vừa gõ tự do 100%) */}
+            <div className="relative" ref={communeWrapperRef}>
+              <label
+                htmlFor="emp-addr-commune"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Xã / Phường / Thị trấn
+              </label>
+              <div className="relative">
+                <input
+                  id="emp-addr-commune"
+                  type="text"
+                  list="vn-commune-datalist"
+                  value={addressCommune}
+                  onFocus={() => setIsCommuneDropdownOpen(true)}
+                  onChange={(e) => {
+                    setAddressCommune(e.target.value);
+                    setIsCommuneDropdownOpen(true);
+                  }}
+                  placeholder={
+                    addressProvince
+                      ? `Chọn hoặc gõ Xã/Phường (${addressProvince})...`
+                      : 'Chọn hoặc gõ Xã/Phường bất kỳ...'
+                  }
+                  className="w-full pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label="Mở danh sách Xã Phường"
+                  onClick={() => setIsCommuneDropdownOpen((prev) => !prev)}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <datalist id="vn-commune-datalist">
+                {communeSuggestions.map((comm) => (
+                  <option key={comm} value={comm} />
+                ))}
+              </datalist>
+
+              {isCommuneDropdownOpen &&
+                filteredCommuneSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 mt-1 max-h-44 overflow-y-auto bg-white rounded-lg border border-slate-200 shadow-xl z-50 py-1 text-xs">
+                    {filteredCommuneSuggestions.map((comm) => (
+                      <button
+                        key={comm}
+                        type="button"
+                        onClick={() => {
+                          setAddressCommune(comm);
+                          setIsCommuneDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 hover:bg-teal-50 hover:text-[#0D9488] transition-colors cursor-pointer ${
+                          addressCommune === comm
+                            ? 'bg-teal-50/70 font-semibold text-[#0D9488]'
+                            : 'text-slate-700'
+                        }`}
+                      >
+                        {comm}
+                      </button>
+                    ))}
+                  </div>
+                )}
+            </div>
+          </div>
+
+          {/* HÀNG 5: Địa chỉ chi tiết (Thôn/Xóm/Số nhà) + Ngày cấp CCCD + Phép năm tiêu chuẩn */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  htmlFor="emp-addr-detail"
+                  className="block text-[11px] font-semibold text-slate-700"
+                >
+                  Địa chỉ chi tiết (Thôn/Xóm/Số nhà)
+                </label>
+                {composedAddressPreview && (
+                  <span
+                    data-testid="address-composed-preview"
+                    className="text-[10px] font-medium text-[#0D9488] truncate max-w-[140px]"
+                    title={composedAddressPreview}
+                  >
+                    {composedAddressPreview}
+                  </span>
+                )}
+              </div>
+              <input
+                id="emp-addr-detail"
+                type="text"
+                value={addressDetail}
+                onChange={(e) => setAddressDetail(e.target.value)}
+                placeholder="Thôn / Xóm / Số nhà / Đường..."
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
             <div>
               <label
-                htmlFor="emp-phone-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                htmlFor="emp-cccd-date-input"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Số điện thoại
+                Ngày cấp CCCD
               </label>
               <input
-                id="emp-phone-input"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Để trống sẽ hiển thị -"
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                id="emp-cccd-date-input"
+                type="date"
+                value={cccdDate}
+                onChange={(e) => setCccdDate(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
             <div>
               <label
                 htmlFor="emp-leave-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
                 Tổng phép năm tiêu chuẩn (Ngày)
               </label>
@@ -695,47 +744,26 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 step={0.5}
                 value={standardAnnualLeave}
                 onChange={(e) => setStandardAnnualLeave(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
-            </div>
-
-            <div>
-              <label
-                htmlFor="emp-status-select"
-                className="block text-xs font-semibold text-slate-700 mb-1"
-              >
-                Trạng thái làm việc
-              </label>
-              <select
-                id="emp-status-select"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as WorkStatus)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                <option value="Đang làm việc">Đang làm việc</option>
-                <option value="Tạm nghỉ">Tạm nghỉ</option>
-                <option value="Đang thử việc">Đang thử việc</option>
-                <option value="Nghỉ thai sản">Nghỉ thai sản</option>
-                <option value="Đã nghỉ việc">Đã nghỉ việc</option>
-              </select>
             </div>
           </div>
 
           {/* Modal Footer */}
-          <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
+          <div className="pt-2.5 border-t border-slate-200 flex items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+              className="px-4 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
             >
-              Hủy bỏ
+              Hủy
             </button>
             <button
               type="submit"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>{editingEmployee ? 'Lưu cập nhật' : 'Thêm nhân sự'}</span>
+              <span>{editingEmployee ? 'Lưu thay đổi' : 'Thêm nhân sự'}</span>
             </button>
           </div>
         </form>
