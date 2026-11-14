@@ -25,6 +25,7 @@ import {
   GripVertical,
   ArrowUp,
   ArrowDown,
+  Palette,
 } from 'lucide-react';
 import {
   CompanyUnit,
@@ -47,6 +48,13 @@ import {
   VN_28_PROVINCES,
   VN_6_CENTRAL_CITIES,
 } from '../utils/vnAddressData';
+import {
+  applyThemeToDocument,
+  loadSavedThemeConfig,
+  saveThemeConfig,
+  THEME_PRESETS,
+  ThemePresetId,
+} from '../utils/themeManager';
 
 export type SettingsSubTab = 'units' | 'departments' | 'accounts' | 'backup';
 
@@ -145,6 +153,29 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [sqlCopied, setSqlCopied] = useState(false);
   const { isInstalled, promptInstall } = usePWAInstall();
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+
+  // Theme Customization State ("Màu giao diện")
+  const [themeConfig, setThemeConfig] = useState(() => loadSavedThemeConfig());
+
+  const handleSelectThemePreset = (presetId: ThemePresetId) => {
+    const nextConfig = {
+      ...themeConfig,
+      preset: presetId,
+    };
+    setThemeConfig(nextConfig);
+    saveThemeConfig(nextConfig);
+    applyThemeToDocument(nextConfig);
+  };
+
+  const handleToggleAutoDark = (checked: boolean) => {
+    const nextConfig = {
+      ...themeConfig,
+      autoDark: checked,
+    };
+    setThemeConfig(nextConfig);
+    saveThemeConfig(nextConfig);
+    applyThemeToDocument(nextConfig);
+  };
 
   const handleInstallAppClick = async () => {
     const outcome = await promptInstall();
@@ -589,8 +620,72 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Thẻ Cấu hình Ứng dụng Desktop / Mobile (PWA) & Công cụ Đồng bộ Cloud */}
+        {/* Thẻ Cấu hình Ứng dụng Desktop / Mobile (PWA), Màu giao diện & Công cụ Đồng bộ Cloud */}
         <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-3">
+          {/* MỤC QUẢN LÝ "MÀU GIAO DIỆN" (8 MÀU CHỦ ĐẠO + THEO MÁY DARK MODE) */}
+          <div
+            data-testid="theme-customization-card"
+            className="p-3.5 rounded-xl bg-slate-50/90 border border-slate-200/80 space-y-2.5"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4 text-[#0D9488] shrink-0" />
+                <span className="text-xs sm:text-sm font-bold text-slate-900">
+                  Màu giao diện
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  (Áp dụng ngay lập tức cho toàn bộ hệ thống)
+                </span>
+              </div>
+
+              {/* Checkbox: Theo máy: tự chuyển nền tối khi máy để chế độ tối */}
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={themeConfig.autoDark}
+                  onChange={(e) => handleToggleAutoDark(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-[#0D9488] cursor-pointer"
+                />
+                <span>Theo máy: tự chuyển nền tối khi máy để chế độ tối</span>
+              </label>
+            </div>
+
+            {/* Danh sách 8 màu chủ đạo (Theme Presets) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              {THEME_PRESETS.map((preset) => {
+                const isSelected = themeConfig.preset === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    data-testid={`theme-preset-${preset.id}`}
+                    onClick={() => handleSelectThemePreset(preset.id)}
+                    className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-white border-2 border-[#0D9488] text-slate-900 shadow-xs'
+                        : 'bg-white/80 border-slate-200/90 text-slate-700 hover:bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full shrink-0 border border-black/10"
+                        style={{ backgroundColor: preset.swatchColor }}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate">{preset.label}</span>
+                    </div>
+                    {isSelected && (
+                      <Check
+                        className="w-3.5 h-3.5 shrink-0"
+                        style={{ color: preset.primary }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Thẻ Cài đặt Ứng dụng về máy (Desktop / Mobile) */}
           <div className="p-3.5 rounded-xl bg-gradient-to-r from-[#0F232E] to-[#163546] text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-3">

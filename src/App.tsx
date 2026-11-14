@@ -77,6 +77,10 @@ import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
+import {
+  applyThemeToDocument,
+  loadSavedThemeConfig,
+} from './utils/themeManager';
 
 const DATA_VERSION = 'v2_cloud_strict';
 
@@ -390,6 +394,24 @@ export default function App() {
       setToastMsg((prev) => (prev === msg ? null : prev));
     }, 3500);
   };
+
+  // Initialize saved Theme Preset & OS Dark Mode listener on mount
+  useEffect(() => {
+    const applyCurrentTheme = () => {
+      applyThemeToDocument(loadSavedThemeConfig());
+    };
+    applyCurrentTheme();
+
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function'
+    ) {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleMediaChange = () => applyCurrentTheme();
+      mql.addEventListener('change', handleMediaChange);
+      return () => mql.removeEventListener('change', handleMediaChange);
+    }
+  }, []);
 
   // Sync all tables (`companies`, `departments`, `positions`, `app_users`, `employees`, `leave_logs`) from Supabase
   // Supabase is the Single Source of Truth: always overwrites state and localStorage, never auto-pushes stale local data on load
