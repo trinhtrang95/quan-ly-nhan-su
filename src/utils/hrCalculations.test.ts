@@ -282,3 +282,47 @@ test('Supabase row mapping preserves empty optional fields without fake defaults
   assert.equal(emp.position, '');
   assert.equal(emp.joinDate, '2025-01-15');
 });
+
+test('employeeColumns catalog defines all 6 groups and extracts accurate values for table and Excel export', async () => {
+  const {
+    EMPLOYEE_COLUMN_GROUPS,
+    DEFAULT_VISIBLE_EMPLOYEE_COLUMNS,
+    getEmployeeColumnTextValue,
+    parseFamilyInfoParts,
+  } = await import('./employeeColumns');
+
+  assert.equal(EMPLOYEE_COLUMN_GROUPS.length, 6);
+  assert.deepEqual(DEFAULT_VISIBLE_EMPLOYEE_COLUMNS, [
+    'department',
+    'position',
+    'address',
+    'joinDate',
+    'status',
+  ]);
+
+  const parsedFam = parseFamilyInfoParts('Vợ: Nguyễn Thị Lan - 0987654321');
+  assert.equal(parsedFam.relation, 'Vợ');
+  assert.equal(parsedFam.name, 'Nguyễn Thị Lan');
+  assert.equal(parsedFam.phone, '0987654321');
+
+  const sampleEmp: Employee = {
+    ...INITIAL_EMPLOYEES[0],
+    dob: '1996-05-10',
+    joinDate: '2023-11-01',
+    familyInfo: 'Vợ: Nguyễn Thị Lan - 0987654321',
+  };
+  assert.equal(getEmployeeColumnTextValue(sampleEmp, 'age'), '30 tuổi');
+  assert.equal(
+    getEmployeeColumnTextValue(sampleEmp, 'emergencyContactName'),
+    'Nguyễn Thị Lan'
+  );
+  assert.equal(
+    getEmployeeColumnTextValue(sampleEmp, 'emergencyContactRelation'),
+    'Vợ'
+  );
+  assert.equal(
+    getEmployeeColumnTextValue(sampleEmp, 'emergencyContactPhone'),
+    '0987654321'
+  );
+});
+

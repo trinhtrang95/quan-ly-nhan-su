@@ -5,7 +5,12 @@ import {
   EmployeeAnnualMatrixRow,
   MatrixViewMode,
 } from '../types/hr';
-import { formatDateVN } from '../utils/hrCalculations';
+import {
+  ALL_EMPLOYEE_COLUMNS,
+  EmployeeColumnDef,
+  EmployeeColumnId,
+  getEmployeeColumnTextValue,
+} from '../utils/employeeColumns';
 
 export type ReportPrintType = 'employees' | 'employees_sign' | 'annual_matrix';
 
@@ -13,6 +18,7 @@ interface PrintReportModalProps {
   isOpen: boolean;
   reportType: ReportPrintType;
   employees: Employee[];
+  visibleColumns?: EmployeeColumnId[];
   matrixRows: EmployeeAnnualMatrixRow[];
   year: number;
   viewMode: MatrixViewMode;
@@ -23,6 +29,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
   isOpen,
   reportType,
   employees,
+  visibleColumns,
   matrixRows,
   year,
   viewMode,
@@ -33,6 +40,28 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
   const isSignList = reportType === 'employees_sign';
   const isFullEmployeeList = reportType === 'employees';
   const isCompactSignList = isSignList && employees.length < 50;
+
+  const colDefMap = new Map<EmployeeColumnId, EmployeeColumnDef>(
+    ALL_EMPLOYEE_COLUMNS.map((c) => [c.id, c])
+  );
+
+  const activePdfCols: EmployeeColumnDef[] = visibleColumns
+    ? visibleColumns
+        .map((id) => colDefMap.get(id))
+        .filter((c): c is EmployeeColumnDef => Boolean(c))
+    : [
+        'dob',
+        'gender',
+        'address',
+        'cccd',
+        'cccdDate',
+        'department',
+        'position',
+        'joinDate',
+        'status',
+      ]
+        .map((id) => colDefMap.get(id as EmployeeColumnId))
+        .filter((c): c is EmployeeColumnDef => Boolean(c));
 
   const handleTriggerPrint = () => {
     window.print();
@@ -321,7 +350,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
             </div>
           )}
 
-          {/* CASE 2: XUẤT PDF BẢNG ĐẦY ĐỦ THÔNG TIN (12 CỘT ĐẦY ĐỦ 100%) */}
+          {/* CASE 2: XUẤT PDF BẢNG DANH SÁCH NHÂN SỰ (THEO CỘT ĐANG HIỂN THỊ) */}
           {isFullEmployeeList && (
             <div className="overflow-x-auto">
               <table
@@ -337,102 +366,52 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                       Mã nhân viên
                     </th>
                     <th className="p-2 border border-slate-600">Họ tên</th>
-                    <th className="p-2 border border-slate-600 text-center">
-                      Ngày sinh
-                    </th>
-                    <th className="p-2 border border-slate-600 text-center">
-                      Giới tính
-                    </th>
-                    <th className="p-2 border border-slate-600">Địa chỉ</th>
-                    <th className="p-2 border border-slate-600 text-center">
-                      Số CCCD
-                    </th>
-                    <th className="p-2 border border-slate-600 text-center">
-                      Ngày cấp CCCD
-                    </th>
-                    <th className="p-2 border border-slate-600">
-                      Nhóm / Bộ phận
-                    </th>
-                    <th className="p-2 border border-slate-600">
-                      Chức danh
-                    </th>
-                    <th className="p-2 border border-slate-600 text-center">
-                      Ngày vào
-                    </th>
-                    <th className="p-2 border border-slate-600 text-center">
-                      Trạng thái
-                    </th>
+                    {activePdfCols.map((col) => (
+                      <th
+                        key={col.id}
+                        className={`p-2 border border-slate-600 ${
+                          col.align === 'center' ? 'text-center' : ''
+                        }`}
+                      >
+                        {col.tableHeaderLabel}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map((emp, idx) => {
-                    const dobStr = emp.dob ? formatDateVN(emp.dob) : '-';
-                    const genderStr = (emp.gender || '').trim() || '-';
-                    const addrStr = (emp.address || '').trim() || '-';
-                    const cccdStr = (emp.cccd || '').trim() || '-';
-                    const cccdDateStr = emp.cccdDate
-                      ? formatDateVN(emp.cccdDate)
-                      : '-';
-                    const deptStr = (emp.department || '').trim() || '-';
-                    const posStr = (emp.position || '').trim() || '-';
-                    const joinDateStr = emp.joinDate
-                      ? formatDateVN(emp.joinDate)
-                      : '-';
-                    const statusStr = (emp.status || '').trim() || '-';
-
-                    return (
-                      <tr key={emp.id} className="border-b border-slate-200">
-                        <td className="p-2 border border-slate-300 text-center font-mono">
-                          {idx + 1}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-mono font-bold">
-                          {emp.employeeCode || '-'}
-                        </td>
-                        <td className="p-2 border border-slate-300 font-semibold">
-                          {emp.fullName || '-'}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-mono">
-                          {dobStr}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center">
-                          {genderStr}
-                        </td>
-                        <td
-                          className={`p-2 border border-slate-300 ${
-                            addrStr === '-' ? 'text-center text-slate-400' : ''
-                          }`}
-                        >
-                          {addrStr}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-mono">
-                          {cccdStr}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-mono">
-                          {cccdDateStr}
-                        </td>
-                        <td
-                          className={`p-2 border border-slate-300 ${
-                            deptStr === '-' ? 'text-center text-slate-400' : ''
-                          }`}
-                        >
-                          {deptStr}
-                        </td>
-                        <td
-                          className={`p-2 border border-slate-300 ${
-                            posStr === '-' ? 'text-center text-slate-400' : ''
-                          }`}
-                        >
-                          {posStr}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-mono">
-                          {joinDateStr}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center">
-                          {statusStr}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {employees.map((emp, idx) => (
+                    <tr key={emp.id} className="border-b border-slate-200">
+                      <td className="p-2 border border-slate-300 text-center font-mono">
+                        {idx + 1}
+                      </td>
+                      <td className="p-2 border border-slate-300 text-center font-mono font-bold">
+                        {emp.employeeCode || '-'}
+                      </td>
+                      <td className="p-2 border border-slate-300 font-semibold">
+                        {emp.fullName || '-'}
+                      </td>
+                      {activePdfCols.map((col) => {
+                        const val = getEmployeeColumnTextValue(emp, col.id, {
+                          fullAddressForExport: true,
+                        });
+                        const isDash = val === '-';
+                        return (
+                          <td
+                            key={col.id}
+                            className={`p-2 border border-slate-300 ${
+                              isDash
+                                ? 'text-center text-slate-400'
+                                : col.align === 'center'
+                                ? 'text-center'
+                                : ''
+                            }`}
+                          >
+                            {val}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

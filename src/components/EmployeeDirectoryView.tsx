@@ -13,27 +13,38 @@ import {
   AlertTriangle,
   X,
   ChevronDown,
+  Eye,
 } from 'lucide-react';
 import { DepartmentGroup, Employee, LeaveRecord } from '../types/hr';
 import {
   EmployeeSortField,
   filterEmployees,
-  formatDateVN,
   getDepartmentPriorityRank,
   SortDirection,
   sortEmployees,
 } from '../utils/hrCalculations';
-import { formatCommuneProvinceAddress } from '../utils/vnAddressData';
+import {
+  ALL_EMPLOYEE_COLUMNS,
+  calculateSeniorityLabel,
+  EmployeeColumnDef,
+  EmployeeColumnId,
+  evaluateDossierCompleteness,
+  getEmployeeColumnTextValue,
+  loadVisibleEmployeeColumns,
+  saveVisibleEmployeeColumns,
+} from '../utils/employeeColumns';
 import {
   EmployeeProfileDrawer,
   renderStatusBadge,
 } from './EmployeeProfileDrawer';
+import { EmployeeColumnVisibilityModal } from './EmployeeColumnVisibilityModal';
 
 interface EmployeeDirectoryViewProps {
   employees: Employee[];
   records?: LeaveRecord[];
   groups: DepartmentGroup[];
   isAdmin?: boolean;
+  currentUsername?: string;
   selectedIds: string[];
   importErrorMsg?: string | null;
   onClearImportError?: () => void;
@@ -43,9 +54,15 @@ interface EmployeeDirectoryViewProps {
   onDeleteSingle: (emp: Employee) => void;
   onOpenAddEmployee: () => void;
   onOpenEditEmployee: (emp: Employee) => void;
-  onExportPDF: (filteredEmployees: Employee[]) => void;
+  onExportPDF: (
+    filteredEmployees: Employee[],
+    visibleColumns?: EmployeeColumnId[]
+  ) => void;
   onExportPDFSignList: (filteredEmployees: Employee[]) => void;
-  onExportExcel: (filteredEmployees: Employee[]) => void;
+  onExportExcel: (
+    filteredEmployees: Employee[],
+    visibleColumns?: EmployeeColumnId[]
+  ) => void;
   onDownloadTemplate: () => void;
   onImportExcelFile: (file: File) => void;
   onInspectAttachment?: (url: string, title: string) => void;
@@ -56,6 +73,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   records = [],
   groups,
   isAdmin = true,
+  currentUsername,
   selectedIds,
   importErrorMsg,
   onClearImportError,
@@ -79,8 +97,39 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [drawerEmployeeId, setDrawerEmployeeId] = useState<string | null>(null);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<EmployeeColumnId[]>(() =>
+    loadVisibleEmployeeColumns(currentUsername)
+  );
+
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Reload visible columns when currentUsername changes
+  useEffect(() => {
+    setVisibleColumns(loadVisibleEmployeeColumns(currentUsername));
+  }, [currentUsername]);
+
+  const handleApplyVisibleColumns = (nextCols: EmployeeColumnId[]) => {
+    setVisibleColumns(nextCols);
+    saveVisibleEmployeeColumns(nextCols, currentUsername);
+  };
+
+  // Resolve full column definitions in canonical order
+  const visibleColumnDefs = useMemo<EmployeeColumnDef[]>(() => {
+    const colMap = new Map<EmployeeColumnId, EmployeeColumnDef>(
+      ALL_EMPLOYEE_COLUMNS.map((c) => [c.id, c])
+    );
+    return visibleColumns
+      .map((id) => colMap.get(id))
+      .filter((c): c is EmployeeColumnDef => Boolean(c));
+  }, [visibleColumns]);
+
+  // Check if any selected dynamic column is naturally expandable for Auto-fill layout
+  const hasExpandableDynamicColumn = useMemo(
+    () => visibleColumnDefs.some((c) => c.isExpandable),
+    [visibleColumnDefs]
+  );
 
   // Close export dropdown when clicking outside
   useEffect(() => {
@@ -166,6 +215,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
     sortedEmployees.every((emp) => selectedIds.includes(emp.id));
 
   const handleSortClick = (field: EmployeeSortField) => {
+    if (!field) return;
     if (sortField !== field) {
       setSortField(field);
       setSortDirection('asc');
@@ -178,6 +228,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   };
 
   const renderSortIndicator = (field: EmployeeSortField) => {
+    if (!field) return null;
     const isActive = sortField === field && sortDirection !== null;
     if (!isActive) {
       return (
@@ -206,6 +257,127 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
       e.target.value = '';
     }
   };
+
+  const renderDynamicCell = (
+    emp: Employee,
+    col: EmployeeColumnDef,
+    isLastDynamicCol: boolean
+  ) => {
+    const shouldExpand =
+      col.isExpandable || (!hasExpandableDynamicColumn && isLastDynamicCol);
+    const val = getEmployeeColumnTextValue(emp, col.id);
+    const isDash = val === '-';
+    const alignClass =
+      col.align === 'center' || isDash
+        ? 'text-center'
+        : col.align === 'right'
+        ? 'text-right'
+        : 'text-left';
+
+    if (col.id === 'status') {
+      return (
+        <td
+          key={col.id}
+          className={`py-1.5 px-3 text-center whitespace-nowrap ${
+            shouldExpand ? 'w-auto' : ''
+          }`}
+        >
+          {renderStatusBadge(emp.status)}
+        </td>
+      );
+    }
+
+    if (col.id === 'department') {
+      return (
+        <td
+          key={col.id}
+          className={`py-1.5 px-3 whitespace-nowrap ${col.minWidthClass || ''} ${
+            isDash
+              ? 'text-center text-slate-400 font-medium'
+              : 'font-semibold text-slate-800'
+          }`}
+        >
+          {val}
+        </td>
+      );
+    }
+
+    if (col.id === 'position' || col.id === 'jobTitle') {
+      const lower = val.toLowerCase();
+      const posColor = isDash
+        ? 'text-center text-slate-400'
+        : lower.includes('trưởng bộ phận')
+        ? 'font-semibold text-[#0F766E]'
+        : lower.includes('trưởng nhóm')
+        ? 'font-semibold text-[#0D9488]'
+        : lower.includes('phó nhóm')
+        ? 'font-semibold text-teal-600'
+        : 'font-medium text-slate-700';
+
+      return (
+        <td
+          key={col.id}
+          className={`py-1.5 px-3 whitespace-nowrap ${col.minWidthClass || ''} ${posColor}`}
+        >
+          {val}
+        </td>
+      );
+    }
+
+    if (col.id === 'joinDate') {
+      const seniority = calculateSeniorityLabel(emp.joinDate);
+      return (
+        <td
+          key={col.id}
+          className="py-1.5 px-3 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap"
+          title={seniority ? `Thâm niên: ${seniority}` : undefined}
+        >
+          {val}
+        </td>
+      );
+    }
+
+    if (col.id === 'dossierStatus') {
+      const check = evaluateDossierCompleteness(emp);
+      return (
+        <td key={col.id} className="py-1.5 px-3 text-center whitespace-nowrap">
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ${
+              check.isComplete
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-amber-50 text-amber-700 border border-amber-200'
+            }`}
+          >
+            {check.label}
+          </span>
+        </td>
+      );
+    }
+
+    return (
+      <td
+        key={col.id}
+        className={`py-1.5 px-3 ${alignClass} ${col.minWidthClass || ''} ${
+          shouldExpand ? 'whitespace-normal break-words' : 'whitespace-nowrap'
+        } ${
+          isDash
+            ? 'text-slate-400'
+            : col.id === 'cccd' ||
+              col.id === 'cccdDate' ||
+              col.id === 'dob' ||
+              col.id === 'phone' ||
+              col.id === 'emergencyContactPhone' ||
+              col.id === 'attendanceCode'
+            ? 'font-mono tabular-nums text-slate-700'
+            : 'text-slate-700 font-medium'
+        }`}
+      >
+        {val}
+      </td>
+    );
+  };
+
+  const totalTableColumns = 5 + visibleColumnDefs.length;
 
   return (
     <div className="space-y-4">
@@ -243,19 +415,19 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       )}
 
-      {/* Action Header Card (Chuẩn hóa tiêu đề "Danh sách nhân sự" & gom nhóm công cụ toolbar) */}
+      {/* Action Header Card */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 md:p-5">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-          {/* Left: Title only ("Danh sách nhân sự", xóa bỏ hoàn toàn badge số lượng) */}
+          {/* Left: Title */}
           <div className="flex items-center gap-3">
             <h2 className="text-base md:text-lg font-bold text-slate-900">
               Danh sách nhân sự
             </h2>
           </div>
 
-          {/* Right: Exactly 2 fixed buttons (Xuất/Nhập dữ liệu ▾ and + Thêm nhân sự) + Conditional Delete Selected button */}
+          {/* Right Toolbar Buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Conditional "Xóa đã chọn" button: Only shown when selectedIds.length > 0 */}
+            {/* Conditional "Xóa đã chọn" button */}
             {isAdmin && selectedIds.length > 0 && (
               <button
                 type="button"
@@ -287,12 +459,12 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     type="button"
                     onClick={() => {
                       setIsExportDropdownOpen(false);
-                      onExportPDF(sortedEmployees);
+                      onExportPDF(sortedEmployees, visibleColumns);
                     }}
                     className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
                   >
                     <FileText className="w-4 h-4 text-rose-500 shrink-0" />
-                    <span>Xuất PDF (Đầy đủ)</span>
+                    <span>Xuất PDF (Theo cột hiển thị)</span>
                   </button>
 
                   <button
@@ -311,7 +483,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     type="button"
                     onClick={() => {
                       setIsExportDropdownOpen(false);
-                      onExportExcel(sortedEmployees);
+                      onExportExcel(sortedEmployees, visibleColumns);
                     }}
                     className="w-full text-left px-3.5 py-2 hover:bg-teal-50 hover:text-[#0D9488] flex items-center gap-2.5 cursor-pointer transition-colors"
                   >
@@ -350,6 +522,20 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Nút "👁️ Chọn hiển thị" nằm ngay bên cạnh nút "+ Thêm nhân sự" */}
+            <button
+              type="button"
+              data-testid="btn-open-column-visibility"
+              onClick={() => setIsColumnModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-teal-50/60 hover:border-teal-300 text-slate-700 hover:text-[#0F766E] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+            >
+              <Eye className="w-3.5 h-3.5 text-[#0D9488]" />
+              <span>Chọn hiển thị</span>
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-teal-50 text-[#0D9488] text-[10px] font-bold border border-teal-200">
+                {visibleColumnDefs.length}
+              </span>
+            </button>
 
             {isAdmin && (
               <button
@@ -438,7 +624,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             )}
           </div>
 
-          {/* Nút "↺ Khôi phục sắp xếp mặc định" hiển thị nổi bật ngay trên thanh công cụ lọc khi đang sort bất kỳ cột nào */}
+          {/* Nút "↺ Khôi phục sắp xếp mặc định" */}
           {sortField !== null && sortDirection !== null && (
             <button
               type="button"
@@ -455,17 +641,17 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       </div>
 
-      {/* Compact 10-Column Employee Data Table with Sticky Header & max-h-[calc(100vh-200px)] */}
+      {/* Auto-fill Employee Data Table with Sticky Header & Dynamic Columns */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-auto relative">
           <table
             data-testid="employees-table"
-            className="w-full text-left border-collapse"
+            className="w-full table-auto text-left border-collapse"
           >
             <thead>
               <tr className="sticky top-0 z-30 bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase select-none shadow-sm">
-                {/* 1. Checkbox chọn */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-10 text-center">
+                {/* 1. Checkbox chọn (Cố định) */}
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-10 text-center whitespace-nowrap">
                   <input
                     type="checkbox"
                     checked={allFilteredSelected}
@@ -476,89 +662,94 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     className="w-3.5 h-3.5 rounded accent-[#0D9488] cursor-pointer"
                   />
                 </th>
-                {/* 2. STT */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-2.5 w-12 text-center">
+                {/* 2. STT (Cố định) */}
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-2.5 w-12 text-center whitespace-nowrap">
                   STT
                 </th>
-                {/* 3. Mã nhân viên (Sortable) */}
+                {/* 3. Mã nhân viên (Cố định - Sortable) */}
                 <th
                   data-testid="th-sort-code"
                   onClick={() => handleSortClick('employeeCode')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-28 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Mã nhân viên</span>
                     {renderSortIndicator('employeeCode')}
                   </div>
                 </th>
-                {/* 4. Họ tên (Sortable) */}
+                {/* 4. Họ tên (Cố định - Sortable, tự giãn rộng khi không có cột động) */}
                 <th
                   data-testid="th-sort-name"
                   onClick={() => handleSortClick('fullName')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className={`sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap ${
+                    visibleColumnDefs.length === 0
+                      ? 'w-full min-w-[200px]'
+                      : 'min-w-[170px]'
+                  }`}
                 >
                   <div className="inline-flex items-center">
                     <span>Họ tên</span>
                     {renderSortIndicator('fullName')}
                   </div>
                 </th>
-                {/* 5. Nhóm / Bộ phận (Sortable - Cột độc lập 1 dòng) */}
-                <th
-                  data-testid="th-sort-department"
-                  onClick={() => handleSortClick('department')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
-                >
-                  <div className="inline-flex items-center">
-                    <span>Nhóm / Bộ phận</span>
-                    {renderSortIndicator('department')}
-                  </div>
-                </th>
-                {/* 6. Chức vụ (Sortable - Cột độc lập ngay bên phải Nhóm/Bộ phận) */}
-                <th
-                  data-testid="th-sort-position"
-                  onClick={() => handleSortClick('position')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
-                >
-                  <div className="inline-flex items-center">
-                    <span>Chức vụ</span>
-                    {renderSortIndicator('position')}
-                  </div>
-                </th>
-                {/* 7. Địa chỉ (Sortable - Chỉ hiển thị Xã/Phường, Tỉnh/TP) */}
-                <th
-                  data-testid="th-sort-address"
-                  onClick={() => handleSortClick('address')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
-                >
-                  <div className="inline-flex items-center">
-                    <span>Địa chỉ</span>
-                    {renderSortIndicator('address')}
-                  </div>
-                </th>
-                {/* 8. Ngày vào (Sortable) */}
-                <th
-                  data-testid="th-sort-join-date"
-                  onClick={() => handleSortClick('joinDate')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
-                >
-                  <div className="inline-flex items-center justify-center">
-                    <span>Ngày vào</span>
-                    {renderSortIndicator('joinDate')}
-                  </div>
-                </th>
-                {/* 9. Trạng thái (Sortable) */}
-                <th
-                  data-testid="th-sort-status"
-                  onClick={() => handleSortClick('status')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 text-center cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
-                >
-                  <div className="inline-flex items-center justify-center">
-                    <span>Trạng thái</span>
-                    {renderSortIndicator('status')}
-                  </div>
-                </th>
-                {/* 10. Thao tác */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 text-center whitespace-nowrap">
+
+                {/* Các cột động được chọn trong Modal "Chọn hiển thị" (Auto-fill) */}
+                {visibleColumnDefs.map((col, colIdx) => {
+                  const isLastDynamicCol =
+                    colIdx === visibleColumnDefs.length - 1;
+                  const shouldExpand =
+                    col.isExpandable ||
+                    (!hasExpandableDynamicColumn && isLastDynamicCol);
+                  const isSortable = Boolean(col.sortField);
+                  const alignClass =
+                    col.align === 'center'
+                      ? 'text-center'
+                      : col.align === 'right'
+                      ? 'text-right'
+                      : 'text-left';
+
+                  const testId =
+                    col.id === 'department'
+                      ? 'th-sort-department'
+                      : col.id === 'position'
+                      ? 'th-sort-position'
+                      : col.id === 'address'
+                      ? 'th-sort-address'
+                      : col.id === 'joinDate'
+                      ? 'th-sort-join-date'
+                      : col.id === 'status'
+                      ? 'th-sort-status'
+                      : `th-col-${col.id}`;
+
+                  return (
+                    <th
+                      key={col.id}
+                      data-testid={testId}
+                      onClick={() =>
+                        col.sortField && handleSortClick(col.sortField)
+                      }
+                      className={`sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 ${alignClass} ${
+                        col.minWidthClass || ''
+                      } ${shouldExpand ? 'w-auto' : 'w-px'} ${
+                        isSortable
+                          ? 'cursor-pointer hover:bg-slate-800/80 transition-colors group/th'
+                          : ''
+                      } whitespace-nowrap`}
+                    >
+                      <div
+                        className={`inline-flex items-center ${
+                          col.align === 'center' ? 'justify-center' : ''
+                        }`}
+                      >
+                        <span>{col.tableHeaderLabel}</span>
+                        {col.sortField && renderSortIndicator(col.sortField)}
+                      </div>
+                    </th>
+                  );
+                })}
+
+                {/* Cột cuối cố định: Thao tác */}
+                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-24 text-center whitespace-nowrap">
                   Thao tác
                 </th>
               </tr>
@@ -566,7 +757,10 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             <tbody className="divide-y divide-slate-200/70 text-xs">
               {sortedEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-500">
+                  <td
+                    colSpan={totalTableColumns}
+                    className="py-12 text-center text-slate-500"
+                  >
                     Không tìm thấy nhân sự nào khớp với bộ lọc hiện tại.
                   </td>
                 </tr>
@@ -574,13 +768,6 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 sortedEmployees.map((emp, idx) => {
                   const isSelected = selectedIds.includes(emp.id);
                   const isDrawerOpen = drawerEmployeeId === emp.id;
-                  const deptDisplay = (emp.department || '').trim() || '-';
-                  const posDisplay = (emp.position || '').trim() || '-';
-                  const shortAddressDisplay =
-                    formatCommuneProvinceAddress(emp.address) || '-';
-                  const joinDateDisplay = emp.joinDate
-                    ? formatDateVN(emp.joinDate)
-                    : '-';
 
                   return (
                     <tr
@@ -596,7 +783,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     >
                       {/* 1. Checkbox chọn */}
                       <td
-                        className="py-1.5 px-3 text-center"
+                        className="py-1.5 px-3 text-center whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <input
@@ -608,14 +795,14 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                         />
                       </td>
                       {/* 2. STT */}
-                      <td className="py-1.5 px-2.5 text-center font-mono tabular-nums text-slate-500">
+                      <td className="py-1.5 px-2.5 text-center font-mono tabular-nums text-slate-500 whitespace-nowrap">
                         {idx + 1}
                       </td>
                       {/* 3. Mã nhân viên */}
                       <td className="py-1.5 px-3 font-mono tabular-nums font-bold text-[#0D9488] whitespace-nowrap">
                         {emp.employeeCode || '-'}
                       </td>
-                      {/* 4. Họ tên (Avatar w-7 h-7 text-xs + Họ tên trên 1 dòng) */}
+                      {/* 4. Họ tên (Avatar w-7 h-7 + Họ tên trên 1 dòng) */}
                       <td className="py-1.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
@@ -638,51 +825,17 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                           </span>
                         </button>
                       </td>
-                      {/* 5. Nhóm / Bộ phận (Chỉ hiển thị tên Nhóm/Bộ phận trên 1 dòng duy nhất) */}
-                      <td
-                        className={`py-1.5 px-3 whitespace-nowrap ${
-                          deptDisplay === '-'
-                            ? 'text-center text-slate-400 font-medium'
-                            : 'font-semibold text-slate-800'
-                        }`}
-                      >
-                        {deptDisplay}
-                      </td>
-                      {/* 6. Chức vụ (Hiển thị Chức vụ trên 1 dòng duy nhất: Trưởng bộ phận > Trưởng nhóm > Phó nhóm > Nhân viên) */}
-                      <td
-                        className={`py-1.5 px-3 whitespace-nowrap ${
-                          posDisplay === '-'
-                            ? 'text-center text-slate-400'
-                            : posDisplay.toLowerCase().includes('trưởng bộ phận')
-                            ? 'font-semibold text-[#0F766E]'
-                            : posDisplay.toLowerCase().includes('trưởng nhóm')
-                            ? 'font-semibold text-[#0D9488]'
-                            : posDisplay.toLowerCase().includes('phó nhóm')
-                            ? 'font-semibold text-teal-600'
-                            : 'font-medium text-slate-700'
-                        }`}
-                      >
-                        {posDisplay}
-                      </td>
-                      {/* 7. Địa chỉ (Chỉ hiển thị Xã/Phường và Tỉnh/Thành phố gọn trên 1 dòng) */}
-                      <td
-                        className={`py-1.5 px-3 whitespace-nowrap ${
-                          shortAddressDisplay === '-'
-                            ? 'text-center text-slate-400'
-                            : 'text-slate-700 font-medium'
-                        }`}
-                      >
-                        {shortAddressDisplay}
-                      </td>
-                      {/* 8. Ngày vào */}
-                      <td className="py-1.5 px-3 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                        {joinDateDisplay}
-                      </td>
-                      {/* 9. Trạng thái */}
-                      <td className="py-1.5 px-3 text-center whitespace-nowrap">
-                        {renderStatusBadge(emp.status)}
-                      </td>
-                      {/* 10. Thao tác (Chỉ giữ lại 2 nút Sửa & Xóa, có e.stopPropagation()) */}
+
+                      {/* Các cột động theo cấu hình "Chọn hiển thị" */}
+                      {visibleColumnDefs.map((col, colIdx) =>
+                        renderDynamicCell(
+                          emp,
+                          col,
+                          colIdx === visibleColumnDefs.length - 1
+                        )
+                      )}
+
+                      {/* Cột cố định cuối: Thao tác */}
                       <td
                         className="py-1.5 px-3 text-center whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
@@ -726,6 +879,14 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Modal "Chọn hiển thị" */}
+      <EmployeeColumnVisibilityModal
+        isOpen={isColumnModalOpen}
+        visibleColumns={visibleColumns}
+        onClose={() => setIsColumnModalOpen(false)}
+        onApply={handleApplyVisibleColumns}
+      />
 
       {/* Ngăn kéo Hồ sơ Chi tiết (Slide-over Profile Drawer) */}
       <EmployeeProfileDrawer

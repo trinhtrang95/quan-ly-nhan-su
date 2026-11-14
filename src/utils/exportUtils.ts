@@ -8,7 +8,13 @@ import {
   WorkStatus,
 } from '../types/hr';
 import { createAvatarSvgDataUri } from '../data/mockData';
-import { formatDateVN, LEAVE_TYPE_META } from './hrCalculations';
+import {
+  ALL_EMPLOYEE_COLUMNS,
+  EmployeeColumnDef,
+  EmployeeColumnId,
+  getEmployeeColumnTextValue,
+} from './employeeColumns';
+import { formatDateVN, getDepartmentPriorityRank, LEAVE_TYPE_META } from './hrCalculations';
 
 /**
  * Triggers a browser file download from a Blob
@@ -70,46 +76,82 @@ export function normalizeDateInput(raw: string | undefined, fallback = ''): stri
 /**
  * Exports Employee Directory to an Excel-compatible file (.xls with UTF-8 BOM & styling)
  * Title: DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT
- * Full 12 Columns: STT, Mã nhân viên, Họ tên, Ngày sinh, Giới tính, Địa chỉ, Số CCCD, Ngày cấp CCCD, Nhóm / Bộ phận, Chức danh, Ngày vào, Trạng thái
+ * Supports dynamic `visibleColumns` configured in "Chọn hiển thị" modal (fixed columns STT, Mã nhân viên, Họ tên + selected columns).
  */
 export function exportEmployeesToExcel(
   employees: Employee[],
-  registeredGroups?: DepartmentGroup[]
+  registeredGroups?: DepartmentGroup[],
+  visibleColumns?: EmployeeColumnId[]
 ): void {
   const validGroupSet = registeredGroups
     ? new Set(registeredGroups.map((g) => g.name))
     : null;
 
+  const colDefMap = new Map<EmployeeColumnId, EmployeeColumnDef>(
+    ALL_EMPLOYEE_COLUMNS.map((c) => [c.id, c])
+  );
+
+  const activeColDefs: EmployeeColumnDef[] = visibleColumns
+    ? visibleColumns
+        .map((id) => colDefMap.get(id))
+        .filter((c): c is EmployeeColumnDef => Boolean(c))
+    : [
+        'dob',
+        'gender',
+        'address',
+        'cccd',
+        'cccdDate',
+        'department',
+        'position',
+        'joinDate',
+        'status',
+      ]
+        .map((id) => colDefMap.get(id as EmployeeColumnId))
+        .filter((c): c is EmployeeColumnDef => Boolean(c));
+
+  const totalColSpan = 3 + activeColDefs.length;
+
+  const dynamicHeadersHtml = activeColDefs
+    .map((col) => `<th>${escapeHtml(col.tableHeaderLabel)}</th>`)
+    .join('\n            ');
+
   const rowsHtml = employees
     .map((emp, idx) => {
-      const dobDisplay = emp.dob ? formatDateVN(emp.dob) : '-';
-      const genderDisplay = displayOrDash(emp.gender);
-      const addressDisplay = displayOrDash(emp.address);
-      const cccdDisplay = displayOrDash(emp.cccd);
-      const cccdDateDisplay = emp.cccdDate ? formatDateVN(emp.cccdDate) : '-';
       const rawDept =
-        validGroupSet && emp.department && !validGroupSet.has(emp.department)
+        validGroupSet &&
+        emp.department &&
+        !validGroupSet.has(emp.department) &&
+        getDepartmentPriorityRank(emp.department) >= 100
           ? ''
           : emp.department;
-      const deptDisplay = displayOrDash(rawDept);
-      const posDisplay = displayOrDash(emp.position);
-      const joinDateDisplay = emp.joinDate ? formatDateVN(emp.joinDate) : '-';
-      const statusDisplay = displayOrDash(emp.status || 'Đang làm việc');
+      const normalizedEmp: Employee = { ...emp, department: rawDept };
+
+      const dynamicCellsHtml = activeColDefs
+        .map((col) => {
+          const val = getEmployeeColumnTextValue(normalizedEmp, col.id, {
+            fullAddressForExport: true,
+          });
+          const isDash = val === '-';
+          const textAlign =
+            isDash || col.align === 'center' ? 'center' : 'left';
+          const textFormat =
+            col.id === 'cccd' ||
+            col.id === 'phone' ||
+            col.id === 'emergencyContactPhone' ||
+            col.id === 'bhxhNumber' ||
+            col.id === 'bankAccount'
+              ? "mso-number-format:'\\@';"
+              : '';
+          return `<td style="${textFormat}text-align:${textAlign};">${escapeHtml(val)}</td>`;
+        })
+        .join('\n        ');
 
       return `
       <tr>
         <td style="text-align:center;">${idx + 1}</td>
         <td style="text-align:center;font-weight:bold;color:#0D9488;">${escapeHtml(displayOrDash(emp.employeeCode))}</td>
         <td style="font-weight:bold;">${escapeHtml(displayOrDash(emp.fullName))}</td>
-        <td style="text-align:center;">${escapeHtml(dobDisplay)}</td>
-        <td style="text-align:center;">${escapeHtml(genderDisplay)}</td>
-        <td style="text-align:${addressDisplay === '-' ? 'center' : 'left'};">${escapeHtml(addressDisplay)}</td>
-        <td style="mso-number-format:'\\@';text-align:center;">${escapeHtml(cccdDisplay)}</td>
-        <td style="text-align:center;">${escapeHtml(cccdDateDisplay)}</td>
-        <td style="text-align:${deptDisplay === '-' ? 'center' : 'left'};">${escapeHtml(deptDisplay)}</td>
-        <td style="text-align:${posDisplay === '-' ? 'center' : 'left'};">${escapeHtml(posDisplay)}</td>
-        <td style="text-align:center;">${escapeHtml(joinDateDisplay)}</td>
-        <td style="text-align:center;">${escapeHtml(statusDisplay)}</td>
+        ${dynamicCellsHtml}
       </tr>`;
     })
     .join('');
@@ -128,7 +170,7 @@ export function exportEmployeesToExcel(
       <table>
         <thead>
           <tr>
-            <th colspan="12" style="background-color:#FFFFFF;color:#0F232E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
+            <th colspan="${totalColSpan}" style="background-color:#FFFFFF;color:#0F232E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
               DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT
             </th>
           </tr>
@@ -136,15 +178,7 @@ export function exportEmployeesToExcel(
             <th>STT</th>
             <th>Mã nhân viên</th>
             <th>Họ tên</th>
-            <th>Ngày sinh</th>
-            <th>Giới tính</th>
-            <th>Địa chỉ</th>
-            <th>Số CCCD</th>
-            <th>Ngày cấp CCCD</th>
-            <th>Nhóm / Bộ phận</th>
-            <th>Chức danh</th>
-            <th>Ngày vào</th>
-            <th>Trạng thái</th>
+            ${dynamicHeadersHtml}
           </tr>
         </thead>
         <tbody>

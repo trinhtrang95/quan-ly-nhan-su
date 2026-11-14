@@ -77,6 +77,7 @@ import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
+import { EmployeeColumnId } from './utils/employeeColumns';
 import {
   applyThemeToDocument,
   loadSavedThemeConfig,
@@ -373,6 +374,7 @@ export default function App() {
     isOpen: boolean;
     reportType: ReportPrintType;
     employees: Employee[];
+    visibleColumns?: EmployeeColumnId[];
     matrixRows: EmployeeAnnualMatrixRow[];
     year: number;
     viewMode: MatrixViewMode;
@@ -1559,6 +1561,7 @@ export default function App() {
                 groups={companyGroups}
                 selectedIds={selectedEmpIds}
                 isAdmin={isAdmin}
+                currentUsername={currentUser.username}
                 importErrorMsg={importErrorMsg}
                 onClearImportError={() => setImportErrorMsg(null)}
                 onToggleSelect={handleToggleSelectEmployee}
@@ -1575,11 +1578,12 @@ export default function App() {
                   setEditingEmployee(emp);
                   setIsEmpModalOpen(true);
                 }}
-                onExportPDF={(filteredList) =>
+                onExportPDF={(filteredList, visibleCols) =>
                   setPrintModalState({
                     isOpen: true,
                     reportType: 'employees',
                     employees: filteredList,
+                    visibleColumns: visibleCols,
                     matrixRows: [],
                     year: 2026,
                     viewMode: 'all',
@@ -1595,8 +1599,12 @@ export default function App() {
                     viewMode: 'all',
                   })
                 }
-                onExportExcel={(filteredList) => {
-                  exportEmployeesToExcel(filteredList, companyGroups);
+                onExportExcel={(filteredList, visibleCols) => {
+                  exportEmployeesToExcel(
+                    filteredList,
+                    companyGroups,
+                    visibleCols
+                  );
                   showToast(
                     `Đã xuất tệp Excel danh sách ${filteredList.length} nhân sự.`
                   );
@@ -1794,6 +1802,7 @@ export default function App() {
         isOpen={printModalState.isOpen}
         reportType={printModalState.reportType}
         employees={printModalState.employees}
+        visibleColumns={printModalState.visibleColumns}
         matrixRows={printModalState.matrixRows}
         year={printModalState.year}
         viewMode={printModalState.viewMode}
