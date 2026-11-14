@@ -39,7 +39,7 @@ export const LEAVE_TYPE_META: Record<
     textColor: '#0369A1',
   },
   late_early: {
-    label: 'Đi muộn / Về sớm',
+    label: 'Đi muộn',
     shortLabel: 'Đi muộn',
     unit: 'giờ',
     color: '#EF4444',

@@ -34,6 +34,7 @@ import {
 } from './utils/exportUtils';
 import {
   bulkCreateEmployeesInSupabase,
+  bulkCreateLeaveLogsInSupabase,
   clearAllDataInSupabase,
   createAppUserInSupabase,
   createCompanyInSupabase,
@@ -1072,6 +1073,36 @@ export default function App() {
     }
   };
 
+  const handleBulkSaveLeaveRecords = async (
+    recList: Omit<LeaveRecord, 'id'>[]
+  ) => {
+    if (recList.length === 0) return;
+    const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+    const nowTs = Date.now();
+    const optimisticList: LeaveRecord[] = recList.map((recData, idx) => ({
+      ...recData,
+      id: `rec-bulk-${nowTs}-${idx}`,
+    }));
+
+    const tempIds = new Set(optimisticList.map((r) => r.id));
+    setRecords((prev) => [...optimisticList, ...prev]);
+
+    try {
+      const createdList = await bulkCreateLeaveLogsInSupabase(recList, empMap);
+      setRecords((prev) => [
+        ...createdList,
+        ...prev.filter((r) => !tempIds.has(r.id)),
+      ]);
+      showToast(
+        `Đã lưu hàng loạt ${createdList.length} bản ghi chấm công lên Supabase Cloud.`
+      );
+    } catch {
+      showToast(
+        `Đã ghi nhận hàng loạt ${recList.length} bản ghi chấm công.`
+      );
+    }
+  };
+
   const handleDeleteLeaveRecord = async (rec: LeaveRecord) => {
     if (!isAdmin) return;
     localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
@@ -1582,6 +1613,7 @@ export default function App() {
         isOpen={isLeaveModalOpen}
         editingRecord={editingRecord}
         employees={companyEmployees}
+        groups={effectiveGroups}
         leaveRecords={companyRecords}
         currentUser={currentUser}
         defaultEmployeeId={leaveDefaultEmpId}
@@ -1589,6 +1621,7 @@ export default function App() {
         defaultYear={leaveDefaultYear}
         onClose={() => setIsLeaveModalOpen(false)}
         onSave={handleSaveLeaveRecord}
+        onSaveBulk={handleBulkSaveLeaveRecords}
       />
 
       <LightboxModal

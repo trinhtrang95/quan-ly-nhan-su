@@ -1744,6 +1744,140 @@ export async function createLeaveLogInSupabase(
 }
 
 /**
+ * Batch inserts multiple leave/late records into Supabase `leave_logs` in a single API call
+ * with 3-tier smart column fallback
+ */
+export async function bulkCreateLeaveLogsInSupabase(
+  recList: Omit<LeaveRecord, 'id'>[],
+  empMap?: Map<string, Employee>
+): Promise<LeaveRecord[]> {
+  if (recList.length === 0) return [];
+
+  // Attempt 1: Full schema (including `paper_status` column)
+  const fullPayloads = recList.map((recData) => {
+    const resolvedPaperStatus: 'Chưa có' | 'Đã có' =
+      recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có');
+    const encodedType = encodeLeaveTypeForDb(
+      recData.type,
+      recData.regimeSubtype,
+      resolvedPaperStatus
+    );
+    const safeEndDate = recData.endDate || recData.startDate;
+    return {
+      employee_id: recData.employeeId,
+      leave_type: encodedType,
+      start_date: recData.startDate,
+      end_date: safeEndDate,
+      duration: Number(recData.amount || 0),
+      reason: recData.reason || '',
+      proof_image_url: recData.attachmentUrl || null,
+      paper_status: resolvedPaperStatus,
+    };
+  });
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      'leave_logs?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(fullPayloads),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return rows.map((r) => mapSupabaseRowToLeaveRecord(r, empMap));
+    }
+  } catch (err1) {
+    console.warn(
+      'bulkCreateLeaveLogsInSupabase Attempt 1 (with paper_status) failed, retrying fallback without paper_status column:',
+      err1
+    );
+  }
+
+  // Attempt 2: Standard 7-column schema (without `paper_status` column)
+  const standardPayloads = recList.map((recData) => {
+    const resolvedPaperStatus: 'Chưa có' | 'Đã có' =
+      recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có');
+    const encodedType = encodeLeaveTypeForDb(
+      recData.type,
+      recData.regimeSubtype,
+      resolvedPaperStatus
+    );
+    const safeEndDate = recData.endDate || recData.startDate;
+    const packedReason = packReasonWithFallbackMeta(recData.reason || '', {
+      paperStatus: resolvedPaperStatus,
+    });
+    return {
+      employee_id: recData.employeeId,
+      leave_type: encodedType,
+      start_date: recData.startDate,
+      end_date: safeEndDate,
+      duration: Number(recData.amount || 0),
+      reason: packedReason,
+      proof_image_url: recData.attachmentUrl || null,
+    };
+  });
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      'leave_logs?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(standardPayloads),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return rows.map((r) => mapSupabaseRowToLeaveRecord(r, empMap));
+    }
+  } catch (err2) {
+    console.warn(
+      'bulkCreateLeaveLogsInSupabase Attempt 2 failed, retrying minimal schema with JSON metadata in reason:',
+      err2
+    );
+  }
+
+  // Attempt 3: Minimal core schema
+  const minimalPayloads = recList.map((recData) => {
+    const resolvedPaperStatus: 'Chưa có' | 'Đã có' =
+      recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có');
+    const encodedType = encodeLeaveTypeForDb(
+      recData.type,
+      recData.regimeSubtype,
+      resolvedPaperStatus
+    );
+    const safeEndDate = recData.endDate || recData.startDate;
+    const fullPackedReason = packReasonWithFallbackMeta(recData.reason || '', {
+      paperStatus: resolvedPaperStatus,
+      attachmentUrl: recData.attachmentUrl,
+      endDate: safeEndDate,
+    });
+    return {
+      employee_id: recData.employeeId,
+      leave_type: encodedType,
+      start_date: recData.startDate,
+      duration: Number(recData.amount || 0),
+      reason: fullPackedReason,
+    };
+  });
+
+  const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+    'leave_logs?select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(minimalPayloads),
+    }
+  );
+
+  if (!rows || rows.length === 0) {
+    throw new Error('Failed to bulk insert leave logs into Supabase');
+  }
+
+  return rows.map((r) => mapSupabaseRowToLeaveRecord(r, empMap));
+}
+
+/**
  * Updates an existing leave/late record in Supabase `leave_logs` with smart column fallback.
  * If the record ID is a local temporary ID (`rec-...`) or not yet in Supabase, inserts it as a new row.
  */
