@@ -177,6 +177,7 @@ async function supabaseRestFetch<T>(
   };
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    cache: 'no-store',
     ...options,
     headers,
   });
@@ -565,7 +566,9 @@ let initPromise: Promise<{
 /**
  * Helper to seed INITIAL_EMPLOYEES and INITIAL_LEAVE_RECORDS into Supabase
  */
-async function seedInitialDataToSupabase(companyId?: string | null): Promise<{
+export async function seedInitialDataToSupabase(
+  companyId?: string | null
+): Promise<{
   employees: Employee[];
   records: LeaveRecord[];
 }> {
@@ -652,11 +655,10 @@ async function seedInitialDataToSupabase(companyId?: string | null): Promise<{
 
 /**
  * Loads `companies`, `departments`, `positions`, `app_users`, `employees`, and `leave_logs` from Supabase.
- * Checks `companies.is_initialized`: if `is_initialized = true` (or localStorage flag is true),
- * NEVER auto-seeds mock data when `employees` or `leave_logs` is empty (0 records).
+ * Strictly treats Supabase as the Single Source of Truth.
  */
 export async function loadOrSeedSupabaseData(
-  localInitializedFlag: boolean = true
+  _localInitializedFlag: boolean = true
 ): Promise<{
   companies: CompanyUnit[];
   departments: DepartmentGroup[];
@@ -712,9 +714,6 @@ export async function loadOrSeedSupabaseData(
         companies = [createdComp];
       }
 
-      const dbIsInitialized =
-        companies.some((c) => c.isInitialized === true) || localInitializedFlag;
-
       // Ensure all companies have is_initialized = true on Supabase if not yet set
       if (!companies.some((c) => c.isInitialized === true)) {
         await supabaseRestFetch<void>('companies?id=not.is.null', {
@@ -730,18 +729,12 @@ export async function loadOrSeedSupabaseData(
           ? userRows.map(mapSupabaseRowToAppUser)
           : INITIAL_USER_ACCOUNTS;
 
-      // 3. Employees & Leave Logs (NEVER auto-seed if dbIsInitialized is true)
-      let employees = (empRows || []).map(mapSupabaseRowToEmployee);
+      // 3. Employees & Leave Logs — Strictly use Supabase as Single Source of Truth
+      const employees = (empRows || []).map(mapSupabaseRowToEmployee);
       const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
-      let records = (logRows || []).map((row) =>
+      const records = (logRows || []).map((row) =>
         mapSupabaseRowToLeaveRecord(row, empMap)
       );
-
-      if (!dbIsInitialized && employees.length === 0) {
-        const seeded = await seedInitialDataToSupabase(companies[0]?.id);
-        employees = seeded.employees;
-        records = seeded.records;
-      }
 
       // 4. Departments (`departments`)
       const departments = (deptRows || []).map((r, i) =>
@@ -1678,14 +1671,25 @@ export async function updateLeaveLogInSupabase(
 }
 
 /**
- * Deletes a leave/late record from Supabase `leave_logs`
- */
-export async function deleteLeaveLogFromSupabase(id: string): Promise<void> {
-  if (!id || id.startsWith('rec-')) return;
-  await supabaseRestFetch<void>(
-    `leave_logs?id=eq.${encodeURIComponent(id)}`,
-    { method: 'DELETE' }
-  );
+  * Deletes a leave/late record from Supabase `leave_logs`
+  */
+export async function deleteLeaveLogFromSupabase(
+  id: string,
+  rec?: Pick<LeaveRecord, 'employeeId' | 'startDate' | 'amount'>
+): Promise<void> {
+  if (id && !id.startsWith('rec-')) {
+    await supabaseRestFetch<void>(
+      `leave_logs?id=eq.${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    );
+    return;
+  }
+  if (rec && rec.employeeId && rec.startDate) {
+    await supabaseRestFetch<void>(
+      `leave_logs?employee_id=eq.${encodeURIComponent(rec.employeeId)}&start_date=eq.${encodeURIComponent(rec.startDate)}`,
+      { method: 'DELETE' }
+    );
+  }
 }
 
 /**

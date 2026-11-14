@@ -71,7 +71,10 @@ import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
 
+const DATA_VERSION = 'v2_cloud_strict';
+
 const STORAGE_KEYS = {
+  DATA_VERSION: 'hr_pro_data_version',
   INITIALIZED: 'hr_pro_initialized',
   EMPLOYEES: 'hr_pro_employees_v2',
   RECORDS: 'hr_pro_leave_records_v2',
@@ -84,7 +87,44 @@ const STORAGE_KEYS = {
   DEFAULT_QUOTA: 'hr_pro_default_quota_v2',
 };
 
+/**
+ * Purges stale localStorage data if the browser does not yet have `DATA_VERSION = 'v2_cloud_strict'`.
+ * Ensures old cached employees, groups, and leave records on other users' machines are wiped clean
+ * before loading 100% authoritative data from Supabase.
+ */
+function enforceCloudStrictCacheVersion(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const currentVer = localStorage.getItem(STORAGE_KEYS.DATA_VERSION);
+    if (currentVer !== DATA_VERSION) {
+      const keysToPurge = [
+        STORAGE_KEYS.EMPLOYEES,
+        STORAGE_KEYS.RECORDS,
+        STORAGE_KEYS.GROUPS,
+        STORAGE_KEYS.POSITIONS,
+        STORAGE_KEYS.COMPANIES,
+        STORAGE_KEYS.ACCOUNTS,
+        'hr_pro_employees',
+        'hr_pro_leave_records',
+        'hr_pro_groups',
+        'hr_pro_positions',
+        'hr_pro_companies',
+        'hr_pro_accounts',
+      ];
+      keysToPurge.forEach((k) => localStorage.removeItem(k));
+      localStorage.setItem(STORAGE_KEYS.DATA_VERSION, DATA_VERSION);
+      localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+enforceCloudStrictCacheVersion();
+
 export default function App() {
+  enforceCloudStrictCacheVersion();
+
   const [activeModule, setActiveModule] = useState<ActiveModule>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
@@ -94,12 +134,6 @@ export default function App() {
   // Check if already initialized locally
   const [localInitialized] = useState<boolean>(() => {
     try {
-      const existingFlag = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
-      const existingEmps = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-      if (existingFlag === 'true' || existingEmps !== null) {
-        localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-        return true;
-      }
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
       return true;
     } catch {
@@ -349,13 +383,21 @@ export default function App() {
     }, 3500);
   };
 
-  // Sync all 5 tables (`companies`, `departments`, `app_users`, `employees`, `leave_logs`) from Supabase
+  // Sync all tables (`companies`, `departments`, `positions`, `app_users`, `employees`, `leave_logs`) from Supabase
+  // Supabase is the Single Source of Truth: always overwrites state and localStorage, never auto-pushes stale local data on load
   const syncFromSupabase = async (silent = false) => {
     setIsSyncing(true);
     try {
       const result = await loadOrSeedSupabaseData(localInitialized);
       localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+      localStorage.setItem(STORAGE_KEYS.DATA_VERSION, DATA_VERSION);
+
       if (result.connected) {
+        const nextPositions =
+          result.positions && result.positions.length > 0
+            ? result.positions
+            : INITIAL_POSITIONS;
+
         setCompanyUnits(result.companies);
         setActiveCompanyId((prevId) => {
           const found = result.companies.find((c) => c.id === prevId);
@@ -366,36 +408,45 @@ export default function App() {
           return chosen ? chosen.id : prevId;
         });
         setGroups(result.departments);
-        if (result.positions && result.positions.length > 0) {
-          setPositions(result.positions);
-        }
+        setPositions(nextPositions);
         setAccounts(result.accounts);
         setEmployees(result.employees);
+        setRecords(result.records);
 
-        // Preserve & auto-push any local leave records that were not yet saved to Supabase
-        const hasUnsyncedLocal =
-          records.length > 0 &&
-          (result.records.length === 0 ||
-            records.some((r) => r.id.startsWith('rec-')));
-
-        if (hasUnsyncedLocal && result.employees.length > 0) {
-          try {
-            const synced = await syncLocalLeaveLogsToSupabase(
-              records,
-              result.employees
-            );
-            setRecords(synced.records.length > 0 ? synced.records : records);
-          } catch {
-            setRecords(result.records.length > 0 ? result.records : records);
-          }
-        } else {
-          setRecords(result.records);
+        // Strictly overwrite localStorage with authoritative Supabase data
+        try {
+          localStorage.setItem(
+            STORAGE_KEYS.COMPANIES,
+            JSON.stringify(result.companies)
+          );
+          localStorage.setItem(
+            STORAGE_KEYS.GROUPS,
+            JSON.stringify(result.departments)
+          );
+          localStorage.setItem(
+            STORAGE_KEYS.POSITIONS,
+            JSON.stringify(nextPositions)
+          );
+          localStorage.setItem(
+            STORAGE_KEYS.ACCOUNTS,
+            JSON.stringify(result.accounts)
+          );
+          localStorage.setItem(
+            STORAGE_KEYS.EMPLOYEES,
+            JSON.stringify(result.employees)
+          );
+          localStorage.setItem(
+            STORAGE_KEYS.RECORDS,
+            JSON.stringify(result.records)
+          );
+        } catch {
+          // Ignore storage quota errors
         }
 
         setIsCloudConnected(true);
         if (!silent) {
           showToast(
-            `Đã đồng bộ Supabase: ${result.companies.length} đơn vị, ${result.departments.length} phòng ban, ${result.employees.length} nhân sự & ${result.records.length} bản ghi phép.`
+            `Đã đồng bộ chuẩn từ Supabase: ${result.companies.length} đơn vị, ${result.departments.length} bộ phận, ${result.employees.length} nhân sự & ${result.records.length} bản ghi phép.`
           );
         }
       } else {
@@ -410,6 +461,19 @@ export default function App() {
 
   useEffect(() => {
     syncFromSupabase(true);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncFromSupabase(true);
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
   }, []);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -1011,9 +1075,17 @@ export default function App() {
   const handleDeleteLeaveRecord = async (rec: LeaveRecord) => {
     if (!isAdmin) return;
     localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-    setRecords((prev) => prev.filter((r) => r.id !== rec.id));
+    setRecords((prev) => {
+      const next = prev.filter((r) => r.id !== rec.id);
+      try {
+        localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
     try {
-      await deleteLeaveLogFromSupabase(rec.id);
+      await deleteLeaveLogFromSupabase(rec.id, rec);
       showToast('Đã xóa bản ghi nghỉ phép / đi muộn khỏi Supabase Cloud.');
     } catch {
       showToast('Đã xóa bản ghi nghỉ phép / đi muộn.');
