@@ -19,6 +19,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Users,
 } from 'lucide-react';
 import {
   DepartmentGroup,
@@ -42,6 +43,7 @@ interface LeaveLateLogViewProps {
   isAdmin?: boolean;
   initialTypeFilter?: string;
   onOpenAddRecord: () => void;
+  onOpenBulkRecord: () => void;
   onOpenEditRecord: (rec: LeaveRecord) => void;
   onQuickUpdateRecord?: (
     rec: LeaveRecord,
@@ -71,6 +73,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
   isAdmin = true,
   initialTypeFilter = 'ALL',
   onOpenAddRecord,
+  onOpenBulkRecord,
   onOpenEditRecord,
   onQuickUpdateRecord,
   onDeleteRecord,
@@ -402,64 +405,74 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
 
       {/* 1. KHỐI TIÊU ĐỀ & THANH BỘ LỌC CỐ ĐỊNH PHÍA TRÊN (shrink-0) */}
       <div className="shrink-0 bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5 pb-2.5 border-b border-slate-100">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="text-base md:text-lg font-extrabold text-slate-900">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2.5 pb-2.5 border-b border-slate-100">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <h2 className="text-base md:text-lg font-extrabold text-slate-900 whitespace-nowrap">
               Ghi chép Nghỉ phép &amp; Đi muộn
             </h2>
 
             {/* 4. Việt hóa các Badge tổng hợp ở Header */}
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
-              <span className="px-2 py-0.5 rounded bg-teal-50 text-[#0F766E] border border-teal-200 font-mono">
+              <span className="px-2 py-0.5 rounded bg-teal-50 text-[#0F766E] border border-teal-200 font-mono whitespace-nowrap">
                 {filteredRecords.length} bản ghi
               </span>
-              <span className="px-2 py-0.5 rounded bg-teal-50/70 text-[#0D9488] border border-teal-200/60 font-mono">
+              <span className="px-2 py-0.5 rounded bg-teal-50/70 text-[#0D9488] border border-teal-200/60 font-mono whitespace-nowrap">
                 Phép năm: {sumAnnual} ngày
               </span>
-              <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-mono">
+              <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-mono whitespace-nowrap">
                 Không lương: {sumUnpaid} ngày
               </span>
-              <span className="px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 font-mono">
+              <span className="px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 font-mono whitespace-nowrap">
                 Chế độ: {sumRegime} ngày
               </span>
-              <span className="px-2 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 font-mono">
+              <span className="px-2 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 font-mono whitespace-nowrap">
                 Đi muộn: {lateCount} lượt ({sumLateHours} giờ)
               </span>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>↺ Xóa lọc</span>
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>↺ Xóa lọc</span>
-              </button>
-            )}
-
-            {/* Nút + Ghi nhận mới */}
+          {/* 3 NÚT TRÊN HEADER TRÊN CÙNG 1 DÒNG NGANG DUY NHẤT */}
+          <div className="flex items-center gap-2.5 flex-nowrap shrink-0">
+            {/* 1. + Ghi nhận mới (Mở Modal nhập 1 người) */}
             <button
               type="button"
               onClick={onOpenAddRecord}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <CalendarPlus className="w-4 h-4" />
+              <CalendarPlus className="w-4 h-4 shrink-0" />
               <span>+ Ghi nhận mới</span>
             </button>
 
-            {/* Dropdown Xuất Excel / PDF */}
-            <div className="relative" ref={exportDropdownRef}>
+            {/* 2. 👥 + Ghi nhận hàng loạt (Mở Modal nhập nhiều người) */}
+            <button
+              type="button"
+              onClick={onOpenBulkRecord}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Users className="w-4 h-4 text-[#2DD4BF] shrink-0" />
+              <span>👥 + Ghi nhận hàng loạt</span>
+            </button>
+
+            {/* 3. 📄 Xuất Excel / PDF ⌄ */}
+            <div className="relative shrink-0" ref={exportDropdownRef}>
               <button
                 type="button"
                 onClick={() => setIsExportDropdownOpen((prev) => !prev)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-[#0D9488]" />
-                <span>Xuất Excel / PDF</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#0D9488] shrink-0" />
+                <span>📄 Xuất Excel / PDF</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               </button>
 
               {isExportDropdownOpen && (

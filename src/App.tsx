@@ -67,6 +67,7 @@ import { EmployeeModal } from './components/EmployeeModal';
 import { GroupManageModal } from './components/GroupManageModal';
 import { LeaveLateLogView } from './components/LeaveLateLogView';
 import { LeaveRecordModal } from './components/LeaveRecordModal';
+import { BulkLeaveRecordModal } from './components/BulkLeaveRecordModal';
 import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
@@ -338,6 +339,7 @@ export default function App() {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
 
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [isBulkLeaveModalOpen, setIsBulkLeaveModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<LeaveRecord | null>(null);
   const [leaveDefaultEmpId, setLeaveDefaultEmpId] = useState<string | undefined>(
     undefined
@@ -1494,6 +1496,9 @@ export default function App() {
                   setLeaveDefaultYear(undefined);
                   setIsLeaveModalOpen(true);
                 }}
+                onOpenBulkRecord={() => {
+                  setIsBulkLeaveModalOpen(true);
+                }}
                 onOpenEditRecord={(rec) => {
                   if (!isAdmin) return;
                   setEditingRecord(rec);
@@ -1634,6 +1639,16 @@ export default function App() {
         defaultYear={leaveDefaultYear}
         onClose={() => setIsLeaveModalOpen(false)}
         onSave={handleSaveLeaveRecord}
+      />
+
+      <BulkLeaveRecordModal
+        isOpen={isBulkLeaveModalOpen}
+        employees={companyEmployees}
+        groups={effectiveGroups}
+        leaveRecords={companyRecords}
+        currentUser={currentUser}
+        defaultYear={leaveDefaultYear}
+        onClose={() => setIsBulkLeaveModalOpen(false)}
         onSaveBulk={handleBulkSaveLeaveRecords}
       />
 
