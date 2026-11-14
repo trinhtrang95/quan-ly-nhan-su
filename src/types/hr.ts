@@ -41,6 +41,7 @@ export interface Employee {
   cccd: string;         // Số CCCD
   cccdDate?: string;    // Ngày cấp CCCD (YYYY-MM-DD)
   phone: string;        // Số điện thoại
+  familyInfo?: string;  // Thông tin người nhà / Liên hệ khẩn cấp
   address: string;      // Địa chỉ
   department: string;   // Nhóm/Bộ phận
   position?: string;    // Chức danh / Vị trí

@@ -50,6 +50,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [cccd, setCccd] = useState('');
   const [cccdDate, setCccdDate] = useState('');
   const [phone, setPhone] = useState('');
+  const [familyInfo, setFamilyInfo] = useState('');
 
   // Bộ chọn địa chỉ hành chính 2 cấp sau sáp nhập (Tỉnh/TP -> Xã/Phường -> Địa chỉ chi tiết)
   const [addressProvince, setAddressProvince] = useState('');
@@ -66,9 +67,6 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [department, setDepartment] = useState('');
   const [position, setPosition] = useState('');
   const [joinDate, setJoinDate] = useState('');
-  const [standardAnnualLeave, setStandardAnnualLeave] = useState<number>(
-    defaultAnnualLeaveQuota
-  );
   const [status, setStatus] = useState<WorkStatus>('Đang làm việc');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -116,13 +114,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setCccd(editingEmployee.cccd || '');
       setCccdDate(editingEmployee.cccdDate || '');
       setPhone(editingEmployee.phone || '');
+      setFamilyInfo(editingEmployee.familyInfo || '');
       setAddressProvince(parsedAddr.province);
       setAddressCommune(parsedAddr.commune);
       setAddressDetail(parsedAddr.detail);
       setDepartment(validDept);
       setPosition(editingEmployee.position || '');
       setJoinDate(editingEmployee.joinDate || '');
-      setStandardAnnualLeave(editingEmployee.standardAnnualLeave);
       setStatus(editingEmployee.status);
       setAvatarUrl(editingEmployee.avatarUrl || '');
     } else {
@@ -133,23 +131,17 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setCccd('');
       setCccdDate('');
       setPhone('');
+      setFamilyInfo('');
       setAddressProvince('');
       setAddressCommune('');
       setAddressDetail('');
       setDepartment('');
       setPosition('');
       setJoinDate('');
-      setStandardAnnualLeave(defaultAnnualLeaveQuota);
       setStatus('Đang làm việc');
       setAvatarUrl('');
     }
-  }, [
-    isOpen,
-    editingEmployee,
-    nextSuggestedCode,
-    groups,
-    defaultAnnualLeaveQuota,
-  ]);
+  }, [isOpen, editingEmployee, nextSuggestedCode, groups]);
 
   // Nạp danh sách Xã/Phường gợi ý khi chọn hoặc gõ Tỉnh/Thành phố
   useEffect(() => {
@@ -184,7 +176,6 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       item.toLowerCase().includes(q)
     );
     if (inProvince.length > 0) return inProvince.slice(0, 60);
-    // Nếu người dùng gõ tên xã/phường mà chưa chọn tỉnh (hoặc thuộc tỉnh khác), tìm trên toàn bộ dữ liệu xã/phường
     return ALL_COMMUNES_SUGGESTIONS.filter((item) =>
       item.toLowerCase().includes(q)
     ).slice(0, 60);
@@ -255,6 +246,11 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       addressProvince
     );
 
+    const preservedAnnualLeave =
+      editingEmployee?.standardAnnualLeave !== undefined
+        ? editingEmployee.standardAnnualLeave
+        : defaultAnnualLeaveQuota;
+
     onSave(
       {
         employeeCode: cleanCode,
@@ -264,12 +260,12 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         cccd: cccd.trim(),
         cccdDate: cccdDate.trim(),
         phone: phone.trim(),
+        familyInfo: familyInfo.trim(),
         address: finalAddress,
         department: validatedDepartment,
         position: position.trim(),
         joinDate: joinDate.trim(),
-        standardAnnualLeave:
-          Number(standardAnnualLeave) >= 0 ? Number(standardAnnualLeave) : 12,
+        standardAnnualLeave: preservedAnnualLeave,
         status,
         avatarUrl: getPreviewAvatar(),
       },
@@ -303,7 +299,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
           </button>
         </div>
 
-        {/* Form Body Compact 3-Column Layout (Vừa khít 1 màn hình, không cần cuộn) */}
+        {/* Form Body Compact 5-Row Layout (Vừa khít 1 màn hình, không cần cuộn) */}
         <form onSubmit={handleSubmit} className="p-4 space-y-3 overflow-y-auto">
           {errorMsg && (
             <div
@@ -315,7 +311,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             </div>
           )}
 
-          {/* HÀNG 1: Ảnh đại diện (gọn bên trái) + Mã nhân viên + Họ và tên + Giới tính */}
+          {/* HÀNG 1: Ảnh đại diện (gọn bên trái) + Mã nhân viên + Họ và tên (in đậm) */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center p-2.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
             <div className="md:col-span-3 flex items-center gap-2.5">
               <img
@@ -366,14 +362,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 value={employeeCode}
                 onChange={(e) => setEmployeeCode(e.target.value)}
                 placeholder="VD: NV001"
-                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs font-mono font-bold text-[#0D9488] rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
-            <div className="md:col-span-4">
+            <div className="md:col-span-6">
               <label
                 htmlFor="emp-name-input"
-                className="block text-[11px] font-semibold text-slate-700 mb-1"
+                className="block text-[11px] font-bold text-slate-900 mb-1"
               >
                 Họ và tên <span className="text-red-500">*</span>
               </label>
@@ -384,33 +380,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="VD: Nguyễn Văn An"
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
+                className="w-full px-2.5 py-1.5 text-xs font-bold text-slate-900 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#0D9488]"
               />
-            </div>
-
-            <div className="md:col-span-2">
-              <label
-                htmlFor="emp-gender-select"
-                className="block text-[11px] font-semibold text-slate-700 mb-1"
-              >
-                Giới tính
-              </label>
-              <select
-                id="emp-gender-select"
-                value={gender}
-                onChange={(e) => setGender(e.target.value as Gender)}
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                <option value="">-- Trống --</option>
-                <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
-                <option value="Khác">Khác</option>
-              </select>
             </div>
           </div>
 
-          {/* HÀNG 2: Ngày sinh + Số CCCD + Số điện thoại */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* HÀNG 2: Ngày sinh + Giới tính + Số CCCD + Ngày cấp CCCD */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label
                 htmlFor="emp-dob-input"
@@ -429,10 +405,30 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
             <div>
               <label
+                htmlFor="emp-gender-select"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Giới tính
+              </label>
+              <select
+                id="emp-gender-select"
+                value={gender}
+                onChange={(e) => setGender(e.target.value as Gender)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                <option value="">-- Để trống (-) --</option>
+                <option value="Nam">Nam</option>
+                <option value="Nữ">Nữ</option>
+                <option value="Khác">Khác</option>
+              </select>
+            </div>
+
+            <div>
+              <label
                 htmlFor="emp-cccd-input"
                 className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Số CCCD / Định danh
+                Số CCCD
               </label>
               <input
                 id="emp-cccd-input"
@@ -446,112 +442,23 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
             <div>
               <label
-                htmlFor="emp-phone-input"
+                htmlFor="emp-cccd-date-input"
                 className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Số điện thoại
+                Ngày cấp CCCD
               </label>
               <input
-                id="emp-phone-input"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Nhập số điện thoại..."
-                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
-              />
-            </div>
-          </div>
-
-          {/* HÀNG 3: Nhóm / Bộ phận + Chức vụ + Ngày vào công ty */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label
-                htmlFor="emp-dept-select"
-                className="block text-[11px] font-semibold text-slate-700 mb-1"
-              >
-                Nhóm / Bộ phận
-              </label>
-              <select
-                id="emp-dept-select"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                <option value="">-- Để trống (-) --</option>
-                {groups.map((grp) => (
-                  <option key={grp.id} value={grp.name}>
-                    {grp.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label
-                htmlFor="emp-pos-select"
-                className="block text-[11px] font-semibold text-slate-700 mb-1"
-              >
-                Chức vụ
-              </label>
-              <select
-                id="emp-pos-select"
-                value={position}
-                onChange={(e) => setPosition(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                <option value="">-- Để trống (-) --</option>
-                {position &&
-                  !effectivePositions.some((p) => p.name === position) && (
-                    <option value={position}>{position}</option>
-                  )}
-                {effectivePositions.map((pos) => (
-                  <option key={pos.id} value={pos.name}>
-                    {pos.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label
-                htmlFor="emp-join-date-input"
-                className="block text-[11px] font-semibold text-slate-700 mb-1"
-              >
-                Ngày vào công ty
-              </label>
-              <input
-                id="emp-join-date-input"
+                id="emp-cccd-date-input"
                 type="date"
-                value={joinDate}
-                onChange={(e) => setJoinDate(e.target.value)}
+                value={cccdDate}
+                onChange={(e) => setCccdDate(e.target.value)}
                 className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
           </div>
 
-          {/* HÀNG 4: Trạng thái làm việc + Tỉnh / Thành phố + Xã / Phường / Thị trấn */}
+          {/* HÀNG 3: Tỉnh / Thành phố + Xã / Phường / Thị trấn + Địa chỉ chi tiết (Thôn/Xóm/Số nhà) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label
-                htmlFor="emp-status-select"
-                className="block text-[11px] font-semibold text-slate-700 mb-1"
-              >
-                Trạng thái làm việc
-              </label>
-              <select
-                id="emp-status-select"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as WorkStatus)}
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-              >
-                <option value="Đang làm việc">Đang làm việc</option>
-                <option value="Tạm nghỉ">Tạm nghỉ</option>
-                <option value="Đang thử việc">Đang thử việc</option>
-                <option value="Nghỉ thai sản">Nghỉ thai sản</option>
-                <option value="Đã nghỉ việc">Đã nghỉ việc</option>
-              </select>
-            </div>
-
             {/* Tỉnh / Thành phố (Combobox + Datalist: vừa chọn nhanh vừa gõ tự do) */}
             <div className="relative" ref={provinceWrapperRef}>
               <label
@@ -681,10 +588,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   </div>
                 )}
             </div>
-          </div>
 
-          {/* HÀNG 5: Địa chỉ chi tiết (Thôn/Xóm/Số nhà) + Ngày cấp CCCD + Phép năm tiêu chuẩn */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Địa chỉ chi tiết (Thôn/Xóm/Số nhà) */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label
@@ -696,7 +601,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 {composedAddressPreview && (
                   <span
                     data-testid="address-composed-preview"
-                    className="text-[10px] font-medium text-[#0D9488] truncate max-w-[140px]"
+                    className="text-[10px] font-medium text-[#0D9488] truncate max-w-[120px]"
                     title={composedAddressPreview}
                   >
                     {composedAddressPreview}
@@ -712,40 +617,130 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
+          </div>
+
+          {/* HÀNG 4: Số điện thoại + Thông tin người nhà */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label
+                htmlFor="emp-phone-input"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Số điện thoại
+              </label>
+              <input
+                id="emp-phone-input"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Nhập số điện thoại..."
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label
+                htmlFor="emp-family-info-input"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Thông tin người nhà
+              </label>
+              <input
+                id="emp-family-info-input"
+                type="text"
+                value={familyInfo}
+                onChange={(e) => setFamilyInfo(e.target.value)}
+                placeholder="VD: Nguyễn Thị B (Vợ) - SĐT: 0912345678..."
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
+              />
+            </div>
+          </div>
+
+          {/* HÀNG 5: Nhóm / Bộ phận + Chức vụ + Ngày vào công ty + Trạng thái làm việc */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label
+                htmlFor="emp-dept-select"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Nhóm / Bộ phận
+              </label>
+              <select
+                id="emp-dept-select"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                <option value="">-- Để trống (-) --</option>
+                {groups.map((grp) => (
+                  <option key={grp.id} value={grp.name}>
+                    {grp.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div>
               <label
-                htmlFor="emp-cccd-date-input"
+                htmlFor="emp-pos-select"
                 className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Ngày cấp CCCD
+                Chức vụ
+              </label>
+              <select
+                id="emp-pos-select"
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                <option value="">-- Để trống (-) --</option>
+                {position &&
+                  !effectivePositions.some((p) => p.name === position) && (
+                    <option value={position}>{position}</option>
+                  )}
+                {effectivePositions.map((pos) => (
+                  <option key={pos.id} value={pos.name}>
+                    {pos.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="emp-join-date-input"
+                className="block text-[11px] font-semibold text-slate-700 mb-1"
+              >
+                Ngày vào công ty
               </label>
               <input
-                id="emp-cccd-date-input"
+                id="emp-join-date-input"
                 type="date"
-                value={cccdDate}
-                onChange={(e) => setCccdDate(e.target.value)}
+                value={joinDate}
+                onChange={(e) => setJoinDate(e.target.value)}
                 className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
               />
             </div>
 
             <div>
               <label
-                htmlFor="emp-leave-input"
+                htmlFor="emp-status-select"
                 className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Tổng phép năm tiêu chuẩn (Ngày)
+                Trạng thái làm việc
               </label>
-              <input
-                id="emp-leave-input"
-                type="number"
-                min={0}
-                max={30}
-                step={0.5}
-                value={standardAnnualLeave}
-                onChange={(e) => setStandardAnnualLeave(Number(e.target.value))}
-                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
-              />
+              <select
+                id="emp-status-select"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as WorkStatus)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+              >
+                <option value="Đang làm việc">Đang làm việc</option>
+                <option value="Tạm nghỉ">Tạm nghỉ</option>
+                <option value="Đang thử việc">Đang thử việc</option>
+                <option value="Nghỉ thai sản">Nghỉ thai sản</option>
+                <option value="Đã nghỉ việc">Đã nghỉ việc</option>
+              </select>
             </div>
           </div>
 

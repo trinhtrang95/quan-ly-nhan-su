@@ -292,6 +292,41 @@ export function mapSupabaseRowToAppUser(row: SupabaseAppUserRow): UserAccount {
   };
 }
 
+const FAMILY_META_PREFIX = ' <!--FAMILY:';
+const FAMILY_META_SUFFIX = '-->';
+
+export function packPhoneWithFamilyInfo(
+  phone?: string | null,
+  familyInfo?: string | null
+): string | null {
+  const cleanPhone = (phone || '').trim();
+  const cleanFamily = (familyInfo || '').trim();
+  if (!cleanPhone && !cleanFamily) return null;
+  if (!cleanFamily) return cleanPhone;
+  return `${cleanPhone}${FAMILY_META_PREFIX}${cleanFamily}${FAMILY_META_SUFFIX}`;
+}
+
+export function unpackPhoneWithFamilyInfo(rawPhone?: string | null): {
+  phone: string;
+  familyInfo: string;
+} {
+  if (!rawPhone) return { phone: '', familyInfo: '' };
+  const idx = rawPhone.indexOf(FAMILY_META_PREFIX);
+  if (idx === -1) {
+    return { phone: rawPhone.trim(), familyInfo: '' };
+  }
+  const phone = rawPhone.slice(0, idx).trim();
+  const familyInfo = rawPhone
+    .slice(
+      idx + FAMILY_META_PREFIX.length,
+      rawPhone.endsWith(FAMILY_META_SUFFIX)
+        ? rawPhone.length - FAMILY_META_SUFFIX.length
+        : undefined
+    )
+    .trim();
+  return { phone, familyInfo };
+}
+
 /**
  * Maps a Supabase `employees` row to our frontend `Employee` model
  */
@@ -303,6 +338,8 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
       ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
       : fullName.slice(0, 2).toUpperCase();
 
+  const { phone, familyInfo } = unpackPhoneWithFamilyInfo(row.phone);
+
   return {
     id: String(row.id),
     companyId: row.company_id || null,
@@ -312,7 +349,8 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
     gender: (row.gender as Gender) || '',
     cccd: row.cccd || '',
     cccdDate: row.cccd_date || '',
-    phone: row.phone || '',
+    phone,
+    familyInfo,
     address: row.address || '',
     department: row.department || '',
     position: row.position || '',
@@ -1350,7 +1388,7 @@ export async function restoreFromBackupInSupabase(
         gender: emp.gender || null,
         cccd: emp.cccd || null,
         cccd_date: emp.cccdDate || null,
-        phone: emp.phone || null,
+        phone: packPhoneWithFamilyInfo(emp.phone, emp.familyInfo),
         address: emp.address || null,
         department: emp.department || null,
         position: emp.position || null,
@@ -1471,7 +1509,7 @@ export async function createEmployeeInSupabase(
     gender: empData.gender || null,
     cccd: empData.cccd || null,
     cccd_date: empData.cccdDate || null,
-    phone: empData.phone || null,
+    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo),
     address: empData.address || null,
     department: empData.department || null,
     position: empData.position || null,
@@ -1511,7 +1549,7 @@ export async function bulkCreateEmployeesInSupabase(
     gender: empData.gender || null,
     cccd: empData.cccd || null,
     cccd_date: empData.cccdDate || null,
-    phone: empData.phone || null,
+    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo),
     address: empData.address || null,
     department: empData.department || null,
     position: empData.position || null,
@@ -1548,7 +1586,7 @@ export async function updateEmployeeInSupabase(
     gender: empData.gender || null,
     cccd: empData.cccd || null,
     cccd_date: empData.cccdDate || null,
-    phone: empData.phone || null,
+    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo),
     address: empData.address || null,
     department: empData.department || null,
     position: empData.position || null,

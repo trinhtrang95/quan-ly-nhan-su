@@ -108,6 +108,7 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
     ? formatDateVN(employee.joinDate)
     : '-';
   const phoneDisplay = (employee.phone || '').trim() || '-';
+  const familyInfoDisplay = (employee.familyInfo || '').trim() || '-';
   const dobDisplay = employee.dob ? formatDateVN(employee.dob) : '-';
   const genderDisplay = (employee.gender || '').trim() || '-';
   const cccdDisplay = (employee.cccd || '').trim() || '-';
@@ -265,6 +266,19 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
                   className="font-mono tabular-nums font-semibold text-slate-800 mt-1"
                 >
                   {cccdDateDisplay}
+                </div>
+              </div>
+
+              <div className="col-span-2 pt-2 border-t border-slate-200/70">
+                <div className="text-slate-400 font-medium flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-[#0D9488]" />
+                  <span>Thông tin người nhà</span>
+                </div>
+                <div
+                  data-testid="drawer-field-family-info"
+                  className="font-semibold text-slate-800 mt-1 leading-relaxed"
+                >
+                  {familyInfoDisplay}
                 </div>
               </div>
 
