@@ -45,6 +45,53 @@ const DEPT_PALETTE = [
   '#16A34A',
 ];
 
+export const SUPABASE_LEAVE_LOGS_SQL = `-- 1. Tạo bảng leave_logs (nếu chưa tồn tại)
+CREATE TABLE IF NOT EXISTS public.leave_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  employee_id UUID NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
+  leave_type TEXT NOT NULL DEFAULT 'annual_leave',
+  start_date TEXT NOT NULL,
+  end_date TEXT,
+  duration NUMERIC NOT NULL DEFAULT 1,
+  reason TEXT DEFAULT '',
+  proof_image_url TEXT,
+  paper_status TEXT DEFAULT 'Chưa có',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 2. Bổ sung đầy đủ các cột còn thiếu vào bảng leave_logs hiện có
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS employee_id UUID REFERENCES public.employees(id) ON DELETE CASCADE;
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS leave_type TEXT DEFAULT 'annual_leave';
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS start_date TEXT;
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS end_date TEXT;
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS duration NUMERIC DEFAULT 1;
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS reason TEXT DEFAULT '';
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS proof_image_url TEXT;
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS paper_status TEXT DEFAULT 'Chưa có';
+ALTER TABLE public.leave_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
+-- 3. Mở quyền truy cập (Row Level Security Policy) cho phép đọc/ghi dữ liệu
+ALTER TABLE public.leave_logs ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'leave_logs' AND policyname = 'Allow public full access on leave_logs'
+  ) THEN
+    CREATE POLICY "Allow public full access on leave_logs"
+      ON public.leave_logs
+      FOR ALL
+      TO public
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END
+$$;
+
+-- 4. Làm mới bộ nhớ đệm Schema của Supabase API (PostgREST)
+NOTIFY pgrst, 'reload schema';`;
+
 export interface SupabaseCompanyRow {
   id: string;
   code: string;
@@ -279,53 +326,115 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
   };
 }
 
+const FALLBACK_META_PREFIX = ' <!--HR_META:';
+const FALLBACK_META_SUFFIX = '-->';
+
+interface FallbackLeaveMeta {
+  paperStatus?: 'Chưa có' | 'Đã có';
+  attachmentUrl?: string;
+  endDate?: string;
+}
+
+function packReasonWithFallbackMeta(
+  cleanReason: string,
+  meta: FallbackLeaveMeta
+): string {
+  const payload: FallbackLeaveMeta = {};
+  if (meta.paperStatus) payload.paperStatus = meta.paperStatus;
+  if (meta.attachmentUrl) payload.attachmentUrl = meta.attachmentUrl;
+  if (meta.endDate) payload.endDate = meta.endDate;
+  if (Object.keys(payload).length === 0) return cleanReason;
+  return `${cleanReason}${FALLBACK_META_PREFIX}${JSON.stringify(payload)}${FALLBACK_META_SUFFIX}`;
+}
+
+function unpackReasonWithFallbackMeta(rawReason?: string | null): {
+  cleanReason: string;
+  meta: FallbackLeaveMeta;
+} {
+  if (!rawReason) return { cleanReason: '', meta: {} };
+  const idx = rawReason.indexOf(FALLBACK_META_PREFIX);
+  if (idx === -1) {
+    return { cleanReason: rawReason, meta: {} };
+  }
+  const cleanReason = rawReason.slice(0, idx);
+  const jsonPart = rawReason.slice(
+    idx + FALLBACK_META_PREFIX.length,
+    rawReason.endsWith(FALLBACK_META_SUFFIX)
+      ? rawReason.length - FALLBACK_META_SUFFIX.length
+      : undefined
+  );
+  try {
+    const parsed = JSON.parse(jsonPart) as FallbackLeaveMeta;
+    return { cleanReason, meta: parsed || {} };
+  } catch {
+    return { cleanReason: rawReason, meta: {} };
+  }
+}
+
 /**
- * Encodes `type` and optional `regimeSubtype` into `leave_type` column
+ * Encodes `type`, optional `regimeSubtype`, and optional `paperStatus` into `leave_type` column
  */
 export function encodeLeaveTypeForDb(
   type: LeaveRecordType,
-  regimeSubtype?: RegimeSubtype
+  regimeSubtype?: RegimeSubtype,
+  paperStatus?: 'Chưa có' | 'Đã có'
 ): string {
-  if (type === 'regime_leave' && regimeSubtype) {
-    return `regime_leave|${regimeSubtype}`;
+  const sub = type === 'regime_leave' && regimeSubtype ? regimeSubtype : '';
+  if (paperStatus) {
+    return `${type}|${sub}|${paperStatus}`;
+  }
+  if (sub) {
+    return `${type}|${sub}`;
   }
   return type;
 }
 
 /**
- * Decodes `leave_type` column from Supabase into `{ type, regimeSubtype }`
+ * Decodes `leave_type` column from Supabase into `{ type, regimeSubtype, encodedPaperStatus }`
  */
 export function decodeLeaveTypeFromDb(rawType: string): {
   type: LeaveRecordType;
   regimeSubtype?: RegimeSubtype;
+  encodedPaperStatus?: 'Chưa có' | 'Đã có';
 } {
   if (!rawType) return { type: 'annual_leave' };
-  if (rawType.startsWith('regime_leave|')) {
-    const sub = rawType.split('|')[1] as RegimeSubtype;
-    return { type: 'regime_leave', regimeSubtype: sub || 'Ốm đau / Viện phí' };
-  }
+  const parts = rawType.split('|');
+  const baseType = parts[0];
+  const subPart = parts[1] as RegimeSubtype | undefined;
+  const statusPart = parts[2] as 'Chưa có' | 'Đã có' | undefined;
+  const encodedPaperStatus =
+    statusPart === 'Đã có' || statusPart === 'Chưa có' ? statusPart : undefined;
+
   if (
-    rawType === 'annual_leave' ||
-    rawType === 'unpaid_leave' ||
-    rawType === 'regime_leave' ||
-    rawType === 'late_early'
+    baseType === 'annual_leave' ||
+    baseType === 'unpaid_leave' ||
+    baseType === 'regime_leave' ||
+    baseType === 'late_early'
   ) {
     return {
-      type: rawType,
-      regimeSubtype: rawType === 'regime_leave' ? 'Ốm đau / Viện phí' : undefined,
+      type: baseType,
+      regimeSubtype:
+        baseType === 'regime_leave'
+          ? subPart || 'Ốm đau / Viện phí'
+          : undefined,
+      encodedPaperStatus,
     };
   }
   const lower = rawType.toLowerCase();
   if (lower.includes('muộn') || lower.includes('sớm') || lower.includes('late')) {
-    return { type: 'late_early' };
+    return { type: 'late_early', encodedPaperStatus };
   }
   if (lower.includes('không lương') || lower.includes('unpaid')) {
-    return { type: 'unpaid_leave' };
+    return { type: 'unpaid_leave', encodedPaperStatus };
   }
   if (lower.includes('chế độ') || lower.includes('ốm') || lower.includes('thai sản')) {
-    return { type: 'regime_leave', regimeSubtype: 'Ốm đau / Viện phí' };
+    return {
+      type: 'regime_leave',
+      regimeSubtype: 'Ốm đau / Viện phí',
+      encodedPaperStatus,
+    };
   }
-  return { type: 'annual_leave' };
+  return { type: 'annual_leave', encodedPaperStatus };
 }
 
 /**
@@ -335,27 +444,40 @@ export function mapSupabaseRowToLeaveRecord(
   row: SupabaseLeaveLogRow,
   empMap?: Map<string, Employee>
 ): LeaveRecord {
-  const { type, regimeSubtype } = decodeLeaveTypeFromDb(row.leave_type);
+  const { type, regimeSubtype, encodedPaperStatus } = decodeLeaveTypeFromDb(
+    row.leave_type
+  );
+  const { cleanReason, meta: reasonMeta } = unpackReasonWithFallbackMeta(
+    row.reason
+  );
   const emp = empMap?.get(String(row.employee_id));
   const meta = LEAVE_TYPE_META[type];
+  const resolvedAttachmentUrl =
+    row.proof_image_url || reasonMeta.attachmentUrl || undefined;
+  const resolvedStartDate = row.start_date;
+  const resolvedEndDate =
+    row.end_date || reasonMeta.endDate || row.start_date;
+  const resolvedPaperStatus: 'Chưa có' | 'Đã có' =
+    (row.paper_status as 'Chưa có' | 'Đã có') ||
+    encodedPaperStatus ||
+    reasonMeta.paperStatus ||
+    (resolvedAttachmentUrl ? 'Đã có' : 'Chưa có');
 
   return {
     id: String(row.id),
     employeeId: String(row.employee_id),
     type,
     regimeSubtype,
-    startDate: row.start_date,
-    endDate: row.end_date || row.start_date,
+    startDate: resolvedStartDate,
+    endDate: resolvedEndDate,
     amount: Number(row.duration || 0),
-    reason: row.reason || '',
-    attachmentUrl: row.proof_image_url || undefined,
-    attachmentTitle: row.proof_image_url
-      ? `${meta.shortLabel} - ${emp ? emp.fullName : ''} (${formatDateVN(row.start_date)})`
+    reason: cleanReason,
+    attachmentUrl: resolvedAttachmentUrl,
+    attachmentTitle: resolvedAttachmentUrl
+      ? `${meta.shortLabel} - ${emp ? emp.fullName : ''} (${formatDateVN(resolvedStartDate)})`
       : undefined,
-    paperStatus:
-      (row.paper_status as 'Chưa có' | 'Đã có') ||
-      (row.proof_image_url ? 'Đã có' : 'Chưa có'),
-    createdAt: row.created_at ? row.created_at.slice(0, 10) : row.start_date,
+    paperStatus: resolvedPaperStatus,
+    createdAt: row.created_at ? row.created_at.slice(0, 10) : resolvedStartDate,
     approvedBy: 'Quản trị viên',
   };
 }
@@ -568,6 +690,10 @@ export async function loadOrSeedSupabaseData(
           ),
           supabaseRestFetch<SupabaseLeaveLogRow[]>(
             'leave_logs?select=*&order=start_date.desc'
+          ).catch(() =>
+            supabaseRestFetch<SupabaseLeaveLogRow[]>('leave_logs?select=*').catch(
+              () => [] as SupabaseLeaveLogRow[]
+            )
           ),
         ]);
 
@@ -1118,35 +1244,27 @@ export async function restoreFromBackupInSupabase(
   let finalRecords: LeaveRecord[] = backupRecords;
   try {
     if (backupRecords.length > 0 && finalEmployees.length > 0) {
-      const logPayloads = backupRecords.map((rec) => {
+      const insertedList: LeaveRecord[] = [];
+      for (const rec of backupRecords) {
         const code = oldEmpIdToCode.get(rec.employeeId);
         const mappedEmpId =
           (code && codeToNewEmpId.get(code)) ||
           (empMap.has(rec.employeeId) ? rec.employeeId : finalEmployees[0].id);
-        return {
-          employee_id: mappedEmpId,
-          leave_type: encodeLeaveTypeForDb(rec.type, rec.regimeSubtype),
-          start_date: rec.startDate,
-          end_date: rec.endDate,
-          duration: rec.amount,
-          reason: rec.reason,
-          proof_image_url: rec.attachmentUrl || null,
-        };
-      });
-
-      const insertedLogs = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
-        'leave_logs?select=*',
-        {
-          method: 'POST',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify(logPayloads),
+        try {
+          const created = await createLeaveLogInSupabase(
+            {
+              ...rec,
+              employeeId: mappedEmpId,
+            },
+            empMap
+          );
+          insertedList.push(created);
+        } catch {
+          // Keep original record if single insert fails
+          insertedList.push({ ...rec, employeeId: mappedEmpId });
         }
-      );
-      if (insertedLogs) {
-        finalRecords = insertedLogs.map((r) =>
-          mapSupabaseRowToLeaveRecord(r, empMap)
-        );
       }
+      finalRecords = insertedList;
     } else {
       finalRecords = [];
     }
@@ -1331,21 +1449,97 @@ export async function deleteEmployeesFromSupabase(ids: string[]): Promise<void> 
 }
 
 /**
- * Inserts a new leave/late record into Supabase `leave_logs`
+ * Inserts a new leave/late record into Supabase `leave_logs` with smart column fallback
  */
 export async function createLeaveLogInSupabase(
   recData: Omit<LeaveRecord, 'id'>,
   empMap?: Map<string, Employee>
 ): Promise<LeaveRecord> {
-  const payload = {
+  const resolvedPaperStatus: 'Chưa có' | 'Đã có' =
+    recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có');
+  const encodedType = encodeLeaveTypeForDb(
+    recData.type,
+    recData.regimeSubtype,
+    resolvedPaperStatus
+  );
+  const safeEndDate = recData.endDate || recData.startDate;
+
+  // Attempt 1: Full schema (including `paper_status` column)
+  const fullPayload = {
     employee_id: recData.employeeId,
-    leave_type: encodeLeaveTypeForDb(recData.type, recData.regimeSubtype),
+    leave_type: encodedType,
     start_date: recData.startDate,
-    end_date: recData.endDate,
-    duration: recData.amount,
-    reason: recData.reason,
+    end_date: safeEndDate,
+    duration: Number(recData.amount || 0),
+    reason: recData.reason || '',
     proof_image_url: recData.attachmentUrl || null,
-    paper_status: recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có'),
+    paper_status: resolvedPaperStatus,
+  };
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      'leave_logs?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([fullPayload]),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return mapSupabaseRowToLeaveRecord(rows[0], empMap);
+    }
+  } catch (err1) {
+    console.warn(
+      'createLeaveLogInSupabase Attempt 1 (with paper_status) failed, retrying fallback without paper_status column:',
+      err1
+    );
+  }
+
+  // Attempt 2: Standard 7-column schema (without `paper_status` column; paperStatus is preserved in `leave_type` & `reason`)
+  const packedReason = packReasonWithFallbackMeta(recData.reason || '', {
+    paperStatus: resolvedPaperStatus,
+  });
+  const standardPayload = {
+    employee_id: recData.employeeId,
+    leave_type: encodedType,
+    start_date: recData.startDate,
+    end_date: safeEndDate,
+    duration: Number(recData.amount || 0),
+    reason: packedReason,
+    proof_image_url: recData.attachmentUrl || null,
+  };
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      'leave_logs?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([standardPayload]),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return mapSupabaseRowToLeaveRecord(rows[0], empMap);
+    }
+  } catch (err2) {
+    console.warn(
+      'createLeaveLogInSupabase Attempt 2 failed, retrying minimal schema with JSON metadata in reason:',
+      err2
+    );
+  }
+
+  // Attempt 3: Minimal core schema (packs end_date, proof_image_url, paperStatus into `reason`)
+  const fullPackedReason = packReasonWithFallbackMeta(recData.reason || '', {
+    paperStatus: resolvedPaperStatus,
+    attachmentUrl: recData.attachmentUrl,
+    endDate: safeEndDate,
+  });
+  const minimalPayload = {
+    employee_id: recData.employeeId,
+    leave_type: encodedType,
+    start_date: recData.startDate,
+    duration: Number(recData.amount || 0),
+    reason: fullPackedReason,
   };
 
   const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
@@ -1353,7 +1547,7 @@ export async function createLeaveLogInSupabase(
     {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([payload]),
+      body: JSON.stringify([minimalPayload]),
     }
   );
 
@@ -1365,47 +1559,214 @@ export async function createLeaveLogInSupabase(
 }
 
 /**
- * Updates an existing leave/late record in Supabase `leave_logs`
+ * Updates an existing leave/late record in Supabase `leave_logs` with smart column fallback.
+ * If the record ID is a local temporary ID (`rec-...`) or not yet in Supabase, inserts it as a new row.
  */
 export async function updateLeaveLogInSupabase(
   id: string,
   recData: Omit<LeaveRecord, 'id'>,
   empMap?: Map<string, Employee>
 ): Promise<LeaveRecord> {
-  const payload = {
-    employee_id: recData.employeeId,
-    leave_type: encodeLeaveTypeForDb(recData.type, recData.regimeSubtype),
-    start_date: recData.startDate,
-    end_date: recData.endDate,
-    duration: recData.amount,
-    reason: recData.reason,
-    proof_image_url: recData.attachmentUrl || null,
-    paper_status: recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có'),
-  };
-
-  const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
-    `leave_logs?id=eq.${encodeURIComponent(id)}&select=*`,
-    {
-      method: 'PATCH',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  if (!rows || rows.length === 0) {
-    throw new Error('Failed to update leave log in Supabase');
+  if (!id || id.startsWith('rec-')) {
+    return createLeaveLogInSupabase(recData, empMap);
   }
 
-  return mapSupabaseRowToLeaveRecord(rows[0], empMap);
+  const resolvedPaperStatus: 'Chưa có' | 'Đã có' =
+    recData.paperStatus || (recData.attachmentUrl ? 'Đã có' : 'Chưa có');
+  const encodedType = encodeLeaveTypeForDb(
+    recData.type,
+    recData.regimeSubtype,
+    resolvedPaperStatus
+  );
+  const safeEndDate = recData.endDate || recData.startDate;
+
+  // Attempt 1: Full schema (including `paper_status`)
+  const fullPayload = {
+    employee_id: recData.employeeId,
+    leave_type: encodedType,
+    start_date: recData.startDate,
+    end_date: safeEndDate,
+    duration: Number(recData.amount || 0),
+    reason: recData.reason || '',
+    proof_image_url: recData.attachmentUrl || null,
+    paper_status: resolvedPaperStatus,
+  };
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      `leave_logs?id=eq.${encodeURIComponent(id)}&select=*`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(fullPayload),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return mapSupabaseRowToLeaveRecord(rows[0], empMap);
+    }
+  } catch (err1) {
+    console.warn(
+      'updateLeaveLogInSupabase Attempt 1 (with paper_status) failed, retrying fallback without paper_status column:',
+      err1
+    );
+  }
+
+  // Attempt 2: Standard 7-column schema (without `paper_status`)
+  const packedReason = packReasonWithFallbackMeta(recData.reason || '', {
+    paperStatus: resolvedPaperStatus,
+  });
+  const standardPayload = {
+    employee_id: recData.employeeId,
+    leave_type: encodedType,
+    start_date: recData.startDate,
+    end_date: safeEndDate,
+    duration: Number(recData.amount || 0),
+    reason: packedReason,
+    proof_image_url: recData.attachmentUrl || null,
+  };
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      `leave_logs?id=eq.${encodeURIComponent(id)}&select=*`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(standardPayload),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return mapSupabaseRowToLeaveRecord(rows[0], empMap);
+    }
+  } catch (err2) {
+    console.warn(
+      'updateLeaveLogInSupabase Attempt 2 failed, retrying minimal schema:',
+      err2
+    );
+  }
+
+  // Attempt 3: Minimal core schema or fallback to insert if row was missing on cloud
+  const fullPackedReason = packReasonWithFallbackMeta(recData.reason || '', {
+    paperStatus: resolvedPaperStatus,
+    attachmentUrl: recData.attachmentUrl,
+    endDate: safeEndDate,
+  });
+  const minimalPayload = {
+    employee_id: recData.employeeId,
+    leave_type: encodedType,
+    start_date: recData.startDate,
+    duration: Number(recData.amount || 0),
+    reason: fullPackedReason,
+  };
+
+  try {
+    const rows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+      `leave_logs?id=eq.${encodeURIComponent(id)}&select=*`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(minimalPayload),
+      }
+    );
+    if (rows && rows.length > 0) {
+      return mapSupabaseRowToLeaveRecord(rows[0], empMap);
+    }
+  } catch {
+    // Fall through to createLeaveLogInSupabase
+  }
+
+  return createLeaveLogInSupabase(recData, empMap);
 }
 
 /**
  * Deletes a leave/late record from Supabase `leave_logs`
  */
 export async function deleteLeaveLogFromSupabase(id: string): Promise<void> {
+  if (!id || id.startsWith('rec-')) return;
   await supabaseRestFetch<void>(
     `leave_logs?id=eq.${encodeURIComponent(id)}`,
     { method: 'DELETE' }
   );
+}
+
+/**
+ * Pushes all local leave/late records (from localStorage / memory) to Supabase `leave_logs`,
+ * avoiding duplicates and returning the complete, synchronized list of records from Supabase.
+ */
+export async function syncLocalLeaveLogsToSupabase(
+  localRecords: LeaveRecord[],
+  employees: Employee[]
+): Promise<{
+  syncedCount: number;
+  records: LeaveRecord[];
+}> {
+  const empMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+  const existingRows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+    'leave_logs?select=*&order=start_date.desc'
+  ).catch(() =>
+    supabaseRestFetch<SupabaseLeaveLogRow[]>('leave_logs?select=*').catch(
+      () => [] as SupabaseLeaveLogRow[]
+    )
+  );
+
+  const existingIds = new Set((existingRows || []).map((r) => String(r.id)));
+  const existingSignatures = new Set(
+    (existingRows || []).map((r) => {
+      const { type } = decodeLeaveTypeFromDb(r.leave_type);
+      return `${r.employee_id}|${type}|${r.start_date}|${Number(r.duration || 0)}`;
+    })
+  );
+
+  let syncedCount = 0;
+
+  for (const rec of localRecords) {
+    // Ensure employeeId exists in current employees list
+    const validEmpId = empMap.has(rec.employeeId)
+      ? rec.employeeId
+      : employees[0]?.id;
+    if (!validEmpId) continue;
+
+    const sig = `${validEmpId}|${rec.type}|${rec.startDate}|${Number(rec.amount || 0)}`;
+    const isAlreadyOnCloud =
+      (!rec.id.startsWith('rec-') && existingIds.has(rec.id)) ||
+      existingSignatures.has(sig);
+
+    if (!isAlreadyOnCloud) {
+      await createLeaveLogInSupabase(
+        {
+          ...rec,
+          employeeId: validEmpId,
+        },
+        empMap
+      );
+      existingSignatures.add(sig);
+      syncedCount += 1;
+    } else if (!rec.id.startsWith('rec-') && existingIds.has(rec.id)) {
+      await updateLeaveLogInSupabase(
+        rec.id,
+        {
+          ...rec,
+          employeeId: validEmpId,
+        },
+        empMap
+      ).catch(() => {});
+    }
+  }
+
+  const finalRows = await supabaseRestFetch<SupabaseLeaveLogRow[]>(
+    'leave_logs?select=*&order=start_date.desc'
+  ).catch(() =>
+    supabaseRestFetch<SupabaseLeaveLogRow[]>('leave_logs?select=*').catch(
+      () => [] as SupabaseLeaveLogRow[]
+    )
+  );
+
+  const finalRecords = (finalRows || []).map((row) =>
+    mapSupabaseRowToLeaveRecord(row, empMap)
+  );
+
+  return {
+    syncedCount,
+    records: finalRecords,
+  };
 }
 

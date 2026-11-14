@@ -49,6 +49,7 @@ import {
   deletePositionFromSupabase,
   loadOrSeedSupabaseData,
   restoreFromBackupInSupabase,
+  syncLocalLeaveLogsToSupabase,
   updateAppUserRoleInSupabase,
   updateCompanyInSupabase,
   updateDepartmentInSupabase,
@@ -370,7 +371,27 @@ export default function App() {
         }
         setAccounts(result.accounts);
         setEmployees(result.employees);
-        setRecords(result.records);
+
+        // Preserve & auto-push any local leave records that were not yet saved to Supabase
+        const hasUnsyncedLocal =
+          records.length > 0 &&
+          (result.records.length === 0 ||
+            records.some((r) => r.id.startsWith('rec-')));
+
+        if (hasUnsyncedLocal && result.employees.length > 0) {
+          try {
+            const synced = await syncLocalLeaveLogsToSupabase(
+              records,
+              result.employees
+            );
+            setRecords(synced.records.length > 0 ? synced.records : records);
+          } catch {
+            setRecords(result.records.length > 0 ? result.records : records);
+          }
+        } else {
+          setRecords(result.records);
+        }
+
         setIsCloudConnected(true);
         if (!silent) {
           showToast(
@@ -1031,6 +1052,24 @@ export default function App() {
     showToast(`Đã tải xuống tệp sao lưu HR_Backup_${todayStr}.json thành công.`);
   };
 
+  const handleSyncLocalToCloud = async () => {
+    setIsProcessingData(true);
+    try {
+      const synced = await syncLocalLeaveLogsToSupabase(records, employees);
+      setRecords(synced.records);
+      setIsCloudConnected(true);
+      showToast(
+        `Đã đồng bộ thành công lên Supabase Cloud! (Đẩy mới ${synced.syncedCount} bản ghi, tổng ${synced.records.length} bản ghi trên Cloud).`
+      );
+    } catch (err) {
+      showToast(
+        `Không thể đồng bộ lên Supabase. Vui lòng kiểm tra bảng leave_logs hoặc chạy mã SQL chuẩn hóa. (${err instanceof Error ? err.message : 'Lỗi kết nối'})`
+      );
+    } finally {
+      setIsProcessingData(false);
+    }
+  };
+
   const handleClearAllData = async (autoBackupFirst: boolean) => {
     if (!isAdmin) return;
     if (autoBackupFirst) {
@@ -1434,6 +1473,7 @@ export default function App() {
                 onDownloadBackup={handleDownloadBackup}
                 onClearAllData={handleClearAllData}
                 onRestoreFromBackupFile={handleRestoreFromBackupFile}
+                onSyncLocalToCloud={handleSyncLocalToCloud}
               />
             )}
           </main>
