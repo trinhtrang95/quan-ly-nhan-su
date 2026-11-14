@@ -8,6 +8,7 @@ import {
   LeaveRecordType,
   MonthCellData,
 } from '../types/hr';
+import { formatCommuneProvinceAddress } from './vnAddressData';
 
 export const LEAVE_TYPE_META: Record<
   LeaveRecordType,
@@ -95,22 +96,93 @@ export type EmployeeSortField =
   | 'gender'
   | 'cccdDate'
   | 'department'
+  | 'address'
   | 'joinDate'
   | 'status'
   | null;
 
 export type SortDirection = 'asc' | 'desc' | null;
 
+const DEPARTMENT_PRIORITY_ORDER: string[] = [
+  'quản lý chung',
+  'jig/auto 2',
+  'me',
+  'auto 1',
+  'pe',
+  'st',
+  'document',
+  'iot',
+];
+
+function getDepartmentPriorityRank(department?: string | null): number {
+  const clean = (department || '').trim().toLowerCase();
+  if (!clean || clean === '-' || clean === '—') {
+    return 999; // Chưa phân nhóm xếp ở cuối cùng
+  }
+  const idx = DEPARTMENT_PRIORITY_ORDER.indexOf(clean);
+  if (idx !== -1) {
+    return idx;
+  }
+  return 100; // Các nhóm mới phát sinh xếp tiếp ngay sau 8 nhóm chuẩn
+}
+
+function getPositionPriorityRank(position?: string | null): number {
+  const clean = (position || '').trim().toLowerCase();
+  if (!clean || clean === '-' || clean === '—') return 99;
+  if (clean.includes('trưởng bộ phận')) return 1;
+  if (clean.includes('trưởng nhóm') || clean.includes('phó bộ phận')) return 2;
+  if (clean.includes('nhân viên')) return 3;
+  return 4;
+}
+
+export function compareEmployeesByDefaultPriority(
+  a: Employee,
+  b: Employee
+): number {
+  // Tầng 1: Thứ tự ưu tiên Nhóm / Bộ phận
+  const deptRankA = getDepartmentPriorityRank(a.department);
+  const deptRankB = getDepartmentPriorityRank(b.department);
+  if (deptRankA !== deptRankB) {
+    return deptRankA - deptRankB;
+  }
+
+  // Nếu cả 2 cùng thuộc nhóm mới phát sinh (rank 100), xếp theo tên nhóm A-Z
+  if (deptRankA === 100) {
+    const deptCmp = (a.department || '').localeCompare(
+      b.department || '',
+      'vi',
+      { sensitivity: 'base', numeric: true }
+    );
+    if (deptCmp !== 0) return deptCmp;
+  }
+
+  // Tầng 2: Thứ tự ưu tiên Chức vụ trong cùng 1 Nhóm (Trưởng bộ phận > Trưởng nhóm > Nhân viên)
+  const posRankA = getPositionPriorityRank(a.position);
+  const posRankB = getPositionPriorityRank(b.position);
+  if (posRankA !== posRankB) {
+    return posRankA - posRankB;
+  }
+
+  // Tầng 3: Cùng chức vụ thì xếp theo Mã nhân viên tăng dần
+  return (a.employeeCode || '').localeCompare(b.employeeCode || '', 'vi', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
 /**
  * Sorts employees by the specified column and direction.
- * Empty values ("", null, undefined, "-") are ALWAYS pushed to the bottom of the list.
+ * When field or direction is null, sorts by the 2-tier default priority (Department > Position > EmployeeCode).
+ * Empty values ("", null, undefined, "-") are ALWAYS pushed to the bottom of the list when sorting a specific column.
  */
 export function sortEmployees(
   employees: Employee[],
   field: EmployeeSortField,
   direction: SortDirection
 ): Employee[] {
-  if (!field || !direction) return employees;
+  if (!field || !direction) {
+    return [...employees].sort(compareEmployeesByDefaultPriority);
+  }
 
   const factor = direction === 'asc' ? 1 : -1;
 
@@ -119,21 +191,27 @@ export function sortEmployees(
       const tA = parseComparableDate(a[field]);
       const tB = parseComparableDate(b[field]);
       if (tA === null && tB === null) {
-        return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+        return compareEmployeesByDefaultPriority(a, b);
       }
       if (tA === null) return 1; // Push empty to bottom
       if (tB === null) return -1; // Push empty to bottom
       if (tA !== tB) return (tA - tB) * factor;
-      return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      return compareEmployeesByDefaultPriority(a, b);
     }
 
-    const rawA = (a[field] || '').toString().trim();
-    const rawB = (b[field] || '').toString().trim();
+    const rawA =
+      field === 'address'
+        ? formatCommuneProvinceAddress(a.address)
+        : (a[field] || '').toString().trim();
+    const rawB =
+      field === 'address'
+        ? formatCommuneProvinceAddress(b.address)
+        : (b[field] || '').toString().trim();
     const emptyA = !rawA || rawA === '-' || rawA === '—';
     const emptyB = !rawB || rawB === '-' || rawB === '—';
 
     if (emptyA && emptyB) {
-      return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      return compareEmployeesByDefaultPriority(a, b);
     }
     if (emptyA) return 1; // Always push empty to bottom
     if (emptyB) return -1; // Always push empty to bottom
@@ -144,7 +222,7 @@ export function sortEmployees(
     });
     if (cmp !== 0) return cmp * factor;
 
-    return a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+    return compareEmployeesByDefaultPriority(a, b);
   });
 }
 

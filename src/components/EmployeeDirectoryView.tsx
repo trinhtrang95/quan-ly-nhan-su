@@ -23,6 +23,7 @@ import {
   SortDirection,
   sortEmployees,
 } from '../utils/hrCalculations';
+import { formatCommuneProvinceAddress } from '../utils/vnAddressData';
 import {
   EmployeeProfileDrawer,
   renderStatusBadge,
@@ -220,22 +221,14 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
       )}
 
-      {/* Action Header Card (Thu gọn tiêu đề & gom nhóm công cụ toolbar) */}
+      {/* Action Header Card (Chuẩn hóa tiêu đề "Danh sách nhân sự" & gom nhóm công cụ toolbar) */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 md:p-5">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-          {/* Left: Title + Counter (Bỏ dòng mô tả phụ) */}
+          {/* Left: Title only ("Danh sách nhân sự", xóa bỏ hoàn toàn badge số lượng) */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-base md:text-lg font-bold text-slate-900">
-                Quản lý Nhân sự
-              </h2>
-              <span
-                data-testid="employee-total-counter"
-                className="text-xs font-mono tabular-nums font-bold text-[#0D9488] bg-teal-50 px-2.5 py-0.5 rounded-md"
-              >
-                {sortedEmployees.length} / {employees.length} nhân sự
-              </span>
-            </div>
+            <h2 className="text-base md:text-lg font-bold text-slate-900">
+              Danh sách nhân sự
+            </h2>
           </div>
 
           {/* Right: Exactly 2 fixed buttons (Xuất/Nhập dữ liệu ▾ and + Thêm nhân sự) + Conditional Delete Selected button */}
@@ -351,8 +344,8 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         </div>
 
         {/* Search & Filter Bar */}
-        <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-3">
-          <div className="md:col-span-6 relative">
+        <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col lg:flex-row lg:items-center gap-3">
+          <div className="flex-1 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -364,7 +357,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             />
           </div>
 
-          <div className="md:col-span-3">
+          <div className="w-full lg:w-56 shrink-0">
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
@@ -381,7 +374,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             </select>
           </div>
 
-          <div className="md:col-span-3 flex items-center gap-2">
+          <div className="w-full lg:w-60 shrink-0 flex items-center gap-2">
             <select
               value={genderStatusFilter}
               onChange={(e) => setGenderStatusFilter(e.target.value)}
@@ -404,29 +397,41 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
 
             {(searchQuery ||
               departmentFilter !== 'ALL' ||
-              genderStatusFilter !== 'ALL' ||
-              sortField !== null) && (
+              genderStatusFilter !== 'ALL') && (
               <button
                 type="button"
                 onClick={() => {
                   setSearchQuery('');
                   setDepartmentFilter('ALL');
                   setGenderStatusFilter('ALL');
-                  setSortField(null);
-                  setSortDirection(null);
                 }}
-                aria-label="Đặt lại bộ lọc và sắp xếp"
-                title="Đặt lại bộ lọc và sắp xếp"
+                aria-label="Đặt lại bộ lọc"
+                title="Đặt lại bộ lọc"
                 className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
+
+          {/* Nút "↺ Khôi phục sắp xếp mặc định" hiển thị nổi bật ngay trên thanh công cụ lọc khi đang sort bất kỳ cột nào */}
+          {sortField !== null && sortDirection !== null && (
+            <button
+              type="button"
+              data-testid="btn-reset-default-sort"
+              onClick={() => {
+                setSortField(null);
+                setSortDirection(null);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-teal-300 bg-teal-50 hover:bg-teal-100 text-[#0F766E] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+            >
+              <span>↺ Khôi phục sắp xếp mặc định</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Compact 8-Column Employee Data Table with Sticky Header & max-h-[calc(100vh-200px)] */}
+      {/* Compact 9-Column Employee Data Table with Sticky Header & max-h-[calc(100vh-200px)] */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-auto relative">
           <table
@@ -484,7 +489,18 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     {renderSortIndicator('department')}
                   </div>
                 </th>
-                {/* 6. Ngày vào (Sortable) */}
+                {/* 6. Địa chỉ (Sortable - Chỉ hiển thị Xã/Phường, Tỉnh/TP) */}
+                <th
+                  data-testid="th-sort-address"
+                  onClick={() => handleSortClick('address')}
+                  className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                >
+                  <div className="inline-flex items-center">
+                    <span>Địa chỉ</span>
+                    {renderSortIndicator('address')}
+                  </div>
+                </th>
+                {/* 7. Ngày vào (Sortable) */}
                 <th
                   data-testid="th-sort-join-date"
                   onClick={() => handleSortClick('joinDate')}
@@ -495,7 +511,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     {renderSortIndicator('joinDate')}
                   </div>
                 </th>
-                {/* 7. Trạng thái (Sortable) */}
+                {/* 8. Trạng thái (Sortable) */}
                 <th
                   data-testid="th-sort-status"
                   onClick={() => handleSortClick('status')}
@@ -506,7 +522,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     {renderSortIndicator('status')}
                   </div>
                 </th>
-                {/* 8. Thao tác */}
+                {/* 9. Thao tác */}
                 <th className="sticky top-0 z-30 bg-[#0F232E] py-3 px-3.5 text-center whitespace-nowrap">
                   Thao tác
                 </th>
@@ -515,7 +531,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             <tbody className="divide-y divide-slate-200/70 text-xs">
               {sortedEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
+                  <td colSpan={9} className="py-12 text-center text-slate-500">
                     Không tìm thấy nhân sự nào khớp với bộ lọc hiện tại.
                   </td>
                 </tr>
@@ -525,6 +541,8 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                   const isDrawerOpen = drawerEmployeeId === emp.id;
                   const deptDisplay = (emp.department || '').trim() || '-';
                   const posDisplay = (emp.position || '').trim();
+                  const shortAddressDisplay =
+                    formatCommuneProvinceAddress(emp.address) || '-';
                   const joinDateDisplay = emp.joinDate
                     ? formatDateVN(emp.joinDate)
                     : '-';
@@ -606,11 +624,21 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                           </div>
                         )}
                       </td>
-                      {/* 6. Ngày vào */}
+                      {/* 6. Địa chỉ (Chỉ hiển thị Xã/Phường và Tỉnh/Thành phố gọn trên 1 dòng) */}
+                      <td
+                        className={`py-2.5 px-3.5 whitespace-nowrap ${
+                          shortAddressDisplay === '-'
+                            ? 'text-center text-slate-400'
+                            : 'text-slate-700 font-medium'
+                        }`}
+                      >
+                        {shortAddressDisplay}
+                      </td>
+                      {/* 7. Ngày vào */}
                       <td className="py-2.5 px-3 text-center font-mono tabular-nums text-slate-600 whitespace-nowrap">
                         {joinDateDisplay}
                       </td>
-                      {/* 7. Trạng thái (Tách thành cột riêng biệt: Badge màu xanh/cam/đỏ) */}
+                      {/* 8. Trạng thái (Tách thành cột riêng biệt: Badge màu xanh/cam/đỏ) */}
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         {renderStatusBadge(emp.status)}
                       </td>

@@ -32,6 +32,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
 
   const isSignList = reportType === 'employees_sign';
   const isFullEmployeeList = reportType === 'employees';
+  const isCompactSignList = isSignList && employees.length < 50;
 
   const handleTriggerPrint = () => {
     window.print();
@@ -42,14 +43,23 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
     if (!contentEl) return;
 
     const pageCss = isSignList
-      ? `@page { size: A4 portrait; margin: 20mm 15mm 20mm 30mm; }
-         body { font-family: "Times New Roman", Times, serif; font-size: 13pt; color: #000000; margin: 0; }
-         h2 { font-family: "Times New Roman", Times, serif; font-size: 14pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 16px 0; }
-         table { width: 100%; border-collapse: collapse; font-family: "Times New Roman", Times, serif; font-size: 13pt; }
-         th { font-weight: bold; padding: 10px 8px; border: 1px solid #000000; text-align: center; }
-         td { padding: 12px 8px; border: 1px solid #000000; }
-         .text-center { text-align: center; }
-         .text-left { text-align: left; }`
+      ? isCompactSignList
+        ? `@page { size: A4 portrait; margin: 8mm 10mm; }
+           body { font-family: "Times New Roman", Times, serif; font-size: 10pt; line-height: 1.15; color: #000000; margin: 0; }
+           h2 { font-family: "Times New Roman", Times, serif; font-size: 12pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 6px 0; }
+           table { width: 100%; border-collapse: collapse; font-family: "Times New Roman", Times, serif; font-size: 10pt; line-height: 1.15; }
+           th { font-weight: bold; padding: 4px 6px; border: 1px solid #000000; text-align: center; }
+           td { padding: 3px 6px; border: 1px solid #000000; }
+           .text-center { text-align: center; }
+           .text-left { text-align: left; }`
+        : `@page { size: A4 portrait; margin: 12mm 12mm 12mm 20mm; }
+           body { font-family: "Times New Roman", Times, serif; font-size: 11pt; line-height: 1.25; color: #000000; margin: 0; }
+           h2 { font-family: "Times New Roman", Times, serif; font-size: 13pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 10px 0; }
+           table { width: 100%; border-collapse: collapse; font-family: "Times New Roman", Times, serif; font-size: 11pt; }
+           th { font-weight: bold; padding: 6px; border: 1px solid #000000; text-align: center; }
+           td { padding: 5px 6px; border: 1px solid #000000; }
+           .text-center { text-align: center; }
+           .text-left { text-align: left; }`
       : `@page { size: A4 landscape; margin: 12mm; }
          body { font-family: "Times New Roman", Arial, sans-serif; color: #0F232E; margin: 12px; }
          h2 { font-size: 15pt; font-weight: bold; text-align: center; text-transform: uppercase; margin: 0 0 14px 0; }
@@ -102,10 +112,17 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
       {/* Dynamic @page rule for direct browser print */}
       <style>
         {isSignList
-          ? `@media print {
-               @page { size: A4 portrait; margin: 20mm 15mm 20mm 30mm; }
-               body { font-family: "Times New Roman", Times, serif !important; }
-             }`
+          ? isCompactSignList
+            ? `@media print {
+                 @page { size: A4 portrait; margin: 8mm 10mm; }
+                 body { font-family: "Times New Roman", Times, serif !important; margin: 0 !important; }
+                 #printable-a4-sheet { padding: 0 !important; max-height: none !important; overflow: visible !important; }
+               }`
+            : `@media print {
+                 @page { size: A4 portrait; margin: 12mm 12mm 12mm 20mm; }
+                 body { font-family: "Times New Roman", Times, serif !important; }
+                 #printable-a4-sheet { padding: 0 !important; max-height: none !important; overflow: visible !important; }
+               }`
           : `@media print {
                @page { size: A4 landscape; margin: 12mm; }
              }`}
@@ -121,14 +138,16 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
           <div>
             <h3 id="print-modal-title" className="text-sm font-bold">
               {isSignList
-                ? 'Xem trước Bản in PDF — Danh sách Ký nhận Nhân viên (Khổ dọc A4 - NĐ 30/2020/NĐ-CP)'
+                ? 'Xem trước Bản in PDF — Danh sách Ký nhận Nhân viên (Khổ dọc A4)'
                 : isFullEmployeeList
                 ? 'Xem trước Bản in PDF — DANH SÁCH NHÂN VIÊN PHÒNG KỸ THUẬT'
                 : `Xem trước Bản in PDF — Ma trận Tồn phép Năm ${year} (Khổ ngang A4)`}
             </h3>
             <p className="text-xs text-slate-300">
               {isSignList
-                ? 'Chuẩn A4 dọc (Lề trái 30mm, phải 15mm, trên/dưới 20mm), font Times New Roman 13pt-14pt'
+                ? isCompactSignList
+                  ? `Đã tối ưu tự động vừa khít 100% trong 1 trang A4 duy nhất (${employees.length} nhân sự)`
+                  : 'Chuẩn A4 dọc, sẵn sàng in hoặc lưu tệp PDF'
                 : 'Sẵn sàng in trực tiếp hoặc lưu thành tệp PDF'}
             </p>
           </div>
@@ -168,7 +187,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
           id="printable-a4-sheet"
           className={`max-h-[80vh] overflow-y-auto bg-white text-slate-900 ${
             isSignList
-              ? 'py-[20mm] pr-[15mm] pl-[30mm] font-serif text-[13pt]'
+              ? isCompactSignList
+                ? 'py-[8mm] px-[10mm] font-serif text-[10pt] leading-[1.15]'
+                : 'py-[12mm] pr-[12mm] pl-[20mm] font-serif text-[11pt] leading-[1.25]'
               : 'p-6 md:p-8'
           }`}
           style={
@@ -178,12 +199,14 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
           }
         >
           {/* Single Centered Title — No National Motto, No Company Header, No Signatures */}
-          <div className="text-center mb-5">
+          <div className={`text-center ${isCompactSignList ? 'mb-1.5' : 'mb-5'}`}>
             <h2
               data-testid="pdf-report-main-title"
               className={
                 isSignList
-                  ? 'text-[14pt] font-bold text-black uppercase tracking-wide'
+                  ? isCompactSignList
+                    ? 'text-[12pt] font-bold text-black uppercase tracking-wide m-0'
+                    : 'text-[13pt] font-bold text-black uppercase tracking-wide'
                   : 'text-lg font-extrabold text-[#0F232E] uppercase tracking-wide'
               }
             >
@@ -206,37 +229,51 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
             )}
           </div>
 
-          {/* CASE 1: XUẤT PDF DANH SÁCH (KÝ NHẬN - 4 CỘT CHUẨN NGHỊ ĐỊNH 30/2020/NĐ-CP) */}
+          {/* CASE 1: XUẤT PDF DANH SÁCH (KÝ NHẬN - TỐI ƯU GỌN TRÊN 1 TRANG A4 KHI < 50 NHÂN SỰ) */}
           {isSignList && (
             <div className="overflow-x-auto">
               <table
                 data-testid="pdf-sign-list-table"
-                className="w-full border-collapse border border-black text-[13pt] text-black"
+                className={`w-full border-collapse border border-black text-black ${
+                  isCompactSignList ? 'text-[10pt] leading-[1.15]' : 'text-[11pt] leading-[1.25]'
+                }`}
                 style={{ fontFamily: '"Times New Roman", Times, serif' }}
               >
                 <thead>
                   <tr className="font-bold">
                     <th
-                      style={{ width: '12%' }}
-                      className="py-2.5 px-2 border border-black text-center"
+                      style={{
+                        width: '10%',
+                        padding: isCompactSignList ? '4px 6px' : '6px',
+                      }}
+                      className="border border-black text-center"
                     >
                       STT
                     </th>
                     <th
-                      style={{ width: '22%' }}
-                      className="py-2.5 px-2 border border-black text-center"
+                      style={{
+                        width: '22%',
+                        padding: isCompactSignList ? '4px 6px' : '6px',
+                      }}
+                      className="border border-black text-center"
                     >
                       Mã nhân viên
                     </th>
                     <th
-                      style={{ width: '41%' }}
-                      className="py-2.5 px-3 border border-black text-left"
+                      style={{
+                        width: '43%',
+                        padding: isCompactSignList ? '4px 8px' : '6px 8px',
+                      }}
+                      className="border border-black text-left"
                     >
                       Họ tên
                     </th>
                     <th
-                      style={{ width: '25%' }}
-                      className="py-2.5 px-2 border border-black text-center"
+                      style={{
+                        width: '25%',
+                        padding: isCompactSignList ? '4px 6px' : '6px',
+                      }}
+                      className="border border-black text-center"
                     >
                       Ký/Nhận
                     </th>
@@ -246,25 +283,33 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   {employees.map((emp, idx) => (
                     <tr key={emp.id}>
                       <td
-                        style={{ padding: '12px 8px' }}
+                        style={{
+                          padding: isCompactSignList ? '3px 6px' : '5px 6px',
+                        }}
                         className="border border-black text-center"
                       >
                         {idx + 1}
                       </td>
                       <td
-                        style={{ padding: '12px 8px' }}
+                        style={{
+                          padding: isCompactSignList ? '3px 6px' : '5px 6px',
+                        }}
                         className="border border-black text-center font-semibold"
                       >
                         {emp.employeeCode}
                       </td>
                       <td
-                        style={{ padding: '12px 10px' }}
+                        style={{
+                          padding: isCompactSignList ? '3px 8px' : '5px 8px',
+                        }}
                         className="border border-black text-left"
                       >
                         {emp.fullName}
                       </td>
                       <td
-                        style={{ padding: '12px 8px' }}
+                        style={{
+                          padding: isCompactSignList ? '3px 6px' : '5px 6px',
+                        }}
                         className="border border-black text-center"
                       >
                         {/* Cột Ký/Nhận để trống hoàn toàn cho nhân viên ký tay */}

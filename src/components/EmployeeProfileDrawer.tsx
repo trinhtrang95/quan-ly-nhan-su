@@ -184,61 +184,7 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
 
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* 2. Khối Thống kê nhanh Chấm công & Phép năm (3 ô KPI nhỏ) */}
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2.5">
-              Thống kê Chấm công &amp; Phép năm ({currentYear})
-            </h4>
-            <div className="grid grid-cols-3 gap-2.5">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-                <div className="text-[11px] font-medium text-slate-500">
-                  Tổng phép năm
-                </div>
-                <div
-                  data-testid="drawer-kpi-total-leave"
-                  className="text-base font-mono tabular-nums font-bold text-slate-900 mt-1"
-                >
-                  {kpiStats.standardQuota}{' '}
-                  <span className="text-xs font-normal text-slate-500">
-                    ngày
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-teal-50/60 border border-teal-200/80">
-                <div className="text-[11px] font-medium text-teal-800">
-                  Đã nghỉ / Còn tồn
-                </div>
-                <div
-                  data-testid="drawer-kpi-used-remaining"
-                  className="text-base font-mono tabular-nums font-bold text-[#0D9488] mt-1"
-                >
-                  {kpiStats.usedDays} / {kpiStats.remainingDays}{' '}
-                  <span className="text-xs font-normal text-teal-700">
-                    ngày
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200/80">
-                <div className="text-[11px] font-medium text-rose-800">
-                  Lượt đi muộn
-                </div>
-                <div
-                  data-testid="drawer-kpi-late"
-                  className="text-base font-mono tabular-nums font-bold text-rose-600 mt-1"
-                >
-                  {kpiStats.lateCount}{' '}
-                  <span className="text-xs font-normal text-rose-700">lần</span>{' '}
-                  <span className="text-xs font-mono text-rose-500">
-                    ({kpiStats.lateHours}h)
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Khối Thông tin Cá nhân & Pháp lý (Lưới 2 cột rõ ràng) */}
+          {/* 2. Khối Thông tin Cá nhân & Pháp lý (Đưa lên trên khối Thống kê Chấm công) */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2.5">
               Thông tin Cá nhân &amp; Pháp lý
@@ -332,6 +278,60 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
                   className="font-semibold text-slate-800 mt-1 leading-relaxed"
                 >
                   {addressDisplay}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Khối Thống kê nhanh Chấm công & Phép năm (3 ô KPI nhỏ) */}
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2.5">
+              Thống kê Chấm công &amp; Phép năm ({currentYear})
+            </h4>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <div className="text-[11px] font-medium text-slate-500">
+                  Tổng phép năm
+                </div>
+                <div
+                  data-testid="drawer-kpi-total-leave"
+                  className="text-base font-mono tabular-nums font-bold text-slate-900 mt-1"
+                >
+                  {kpiStats.standardQuota}{' '}
+                  <span className="text-xs font-normal text-slate-500">
+                    ngày
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-teal-50/60 border border-teal-200/80">
+                <div className="text-[11px] font-medium text-teal-800">
+                  Đã nghỉ / Còn tồn
+                </div>
+                <div
+                  data-testid="drawer-kpi-used-remaining"
+                  className="text-base font-mono tabular-nums font-bold text-[#0D9488] mt-1"
+                >
+                  {kpiStats.usedDays} / {kpiStats.remainingDays}{' '}
+                  <span className="text-xs font-normal text-teal-700">
+                    ngày
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200/80">
+                <div className="text-[11px] font-medium text-rose-800">
+                  Lượt đi muộn
+                </div>
+                <div
+                  data-testid="drawer-kpi-late"
+                  className="text-base font-mono tabular-nums font-bold text-rose-600 mt-1"
+                >
+                  {kpiStats.lateCount}{' '}
+                  <span className="text-xs font-normal text-rose-700">lần</span>{' '}
+                  <span className="text-xs font-mono text-rose-500">
+                    ({kpiStats.lateHours}h)
+                  </span>
                 </div>
               </div>
             </div>

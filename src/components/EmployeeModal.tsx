@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { X, Upload, Check, Loader2, MapPin } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Upload, Check, Loader2, MapPin, ChevronDown } from 'lucide-react';
 import {
   DepartmentGroup,
   Employee,
@@ -56,6 +56,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [addressCommune, setAddressCommune] = useState('');
   const [addressDetail, setAddressDetail] = useState('');
   const [communeSuggestions, setCommuneSuggestions] = useState<string[]>([]);
+  const [isCommuneDropdownOpen, setIsCommuneDropdownOpen] = useState(false);
+  const communeWrapperRef = useRef<HTMLDivElement>(null);
 
   const [department, setDepartment] = useState('');
   const [position, setPosition] = useState('');
@@ -69,9 +71,23 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        communeWrapperRef.current &&
+        !communeWrapperRef.current.contains(e.target as Node)
+      ) {
+        setIsCommuneDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) return;
     setErrorMsg('');
     setIsUploadingAvatar(false);
+    setIsCommuneDropdownOpen(false);
 
     if (editingEmployee) {
       const validDept =
@@ -143,6 +159,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   }, [isOpen, addressProvince]);
 
   if (!isOpen) return null;
+
+  const filteredCommuneSuggestions = communeSuggestions.filter((item) => {
+    const q = addressCommune.trim().toLowerCase();
+    if (!q) return true;
+    // Nếu giá trị đang trùng khớp hoàn toàn với 1 mục đã chọn thì vẫn hiển thị toàn bộ danh sách để dễ đổi
+    if (communeSuggestions.some((c) => c.toLowerCase() === q)) return true;
+    return item.toLowerCase().includes(q);
+  });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -458,7 +482,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   <select
                     id="emp-addr-province"
                     value={addressProvince}
-                    onChange={(e) => setAddressProvince(e.target.value)}
+                    onChange={(e) => {
+                      setAddressProvince(e.target.value);
+                      setIsCommuneDropdownOpen(true);
+                    }}
                     className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
                   >
                     <option value="">-- Chọn Tỉnh / Thành phố (34) --</option>
@@ -479,32 +506,77 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   </select>
                 </div>
 
-                {/* 2. Xã / Phường / Đặc khu (Input kết hợp datalist gợi ý thông minh) */}
-                <div>
+                {/* 2. Xã / Phường / Thị trấn (Combobox chọn nhanh + cho phép gõ tự do) */}
+                <div className="relative" ref={communeWrapperRef}>
                   <label
                     htmlFor="emp-addr-commune"
                     className="block text-[11px] font-semibold text-slate-600 mb-1"
                   >
-                    2. Xã / Phường / Đặc khu
+                    2. Xã / Phường / Thị trấn
                   </label>
-                  <input
-                    id="emp-addr-commune"
-                    type="text"
-                    list="vn-commune-datalist"
-                    value={addressCommune}
-                    onChange={(e) => setAddressCommune(e.target.value)}
-                    placeholder={
-                      addressProvince
-                        ? `Chọn hoặc gõ Xã/Phường (${addressProvince})...`
-                        : 'Chọn hoặc gõ Xã/Phường...'
-                    }
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
-                  />
+                  <div className="relative">
+                    <input
+                      id="emp-addr-commune"
+                      type="text"
+                      list="vn-commune-datalist"
+                      value={addressCommune}
+                      onFocus={() => {
+                        if (communeSuggestions.length > 0) {
+                          setIsCommuneDropdownOpen(true);
+                        }
+                      }}
+                      onChange={(e) => {
+                        setAddressCommune(e.target.value);
+                        setIsCommuneDropdownOpen(true);
+                      }}
+                      placeholder={
+                        addressProvince
+                          ? `Chọn hoặc gõ Xã/Phường (${addressProvince})...`
+                          : 'Chọn hoặc gõ Xã/Phường...'
+                      }
+                      className="w-full pl-2.5 pr-7 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488] bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label="Mở danh sách Xã Phường"
+                      onClick={() =>
+                        setIsCommuneDropdownOpen((prev) => !prev)
+                      }
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
                   <datalist id="vn-commune-datalist">
                     {communeSuggestions.map((comm) => (
                       <option key={comm} value={comm} />
                     ))}
                   </datalist>
+
+                  {isCommuneDropdownOpen &&
+                    filteredCommuneSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 mt-1 max-h-44 overflow-y-auto bg-white rounded-lg border border-slate-200 shadow-lg z-40 py-1 text-xs">
+                        {filteredCommuneSuggestions.map((comm) => (
+                          <button
+                            key={comm}
+                            type="button"
+                            onClick={() => {
+                              setAddressCommune(comm);
+                              setIsCommuneDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 hover:bg-teal-50 hover:text-[#0D9488] transition-colors cursor-pointer ${
+                              addressCommune === comm
+                                ? 'bg-teal-50/70 font-semibold text-[#0D9488]'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {comm}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                 </div>
 
                 {/* 3. Địa chỉ chi tiết (Thôn/Xóm/Số nhà/Đường) */}
