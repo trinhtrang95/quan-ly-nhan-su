@@ -527,21 +527,21 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                 </div>
               ) : (
                 <div className="max-h-64 overflow-y-auto">
-                  <table className="w-full text-left border-collapse text-xs">
+                  <table className="w-full table-auto text-left border-collapse text-xs">
                     <thead className="sticky top-0 bg-[#0F232E] text-white text-[10px] font-bold uppercase tracking-wider z-10">
                       <tr>
                         <th className="py-2 px-3 whitespace-nowrap">
                           NHÂN SỰ &amp; TỒN PHÉP
                         </th>
                         {activeTab === 'leave' && (
-                          <th className="py-2 px-2.5 whitespace-nowrap w-40">
+                          <th className="py-2 px-2.5 whitespace-nowrap w-36">
                             LOẠI NGHỈ
                           </th>
                         )}
-                        <th className="py-2 px-2.5 whitespace-nowrap w-56">
+                        <th className="py-2 px-2.5 whitespace-nowrap w-44">
                           {activeTab === 'leave' ? 'SỐ LƯỢNG (NGÀY)' : 'SỐ LƯỢNG (GIỜ)'}
                         </th>
-                        <th className="py-2 px-2.5 whitespace-nowrap">
+                        <th className="py-2 px-2.5 w-full min-w-[200px] whitespace-nowrap">
                           <div className="flex items-center justify-between gap-2">
                             <span>LÝ DO / GHI CHÚ</span>
                             {selectedEmpIds.length > 1 && (

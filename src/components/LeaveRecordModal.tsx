@@ -173,11 +173,10 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       );
     } else {
       setActiveTab('leave');
-      const initialEmpId =
-        defaultEmployeeId || sortedEmployees[0]?.id || employees[0]?.id || '';
+      const initialEmpId = defaultEmployeeId || '';
       setEmployeeId(initialEmpId);
 
-      const rem = remainingLeaveMap.get(initialEmpId) ?? 12;
+      const rem = initialEmpId ? remainingLeaveMap.get(initialEmpId) ?? 12 : 12;
       setLeaveSubType(rem > 0 ? 'annual_leave' : 'unpaid_leave');
       setRegimeSubtype('Ốm đau / Viện phí');
 
@@ -487,6 +486,21 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                     aria-label="Tìm và chọn nhân sự"
                     className="w-full text-xs font-semibold text-slate-800 bg-transparent outline-none"
                   />
+                  {(selectedEmployee || comboQuery) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmployeeId('');
+                        setComboQuery('');
+                        setIsComboOpen(true);
+                      }}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                      aria-label="Xóa nhân sự đã chọn"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
                 </div>
 
