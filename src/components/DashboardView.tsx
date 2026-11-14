@@ -11,8 +11,6 @@ import {
   FileSpreadsheet,
   BarChart3,
   AlertTriangle,
-  Clock,
-  CheckCircle2,
 } from 'lucide-react';
 import {
   ActiveModule,
@@ -104,8 +102,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   });
 
-  // Max value for bar chart scaling
-  const maxLeaveCount = Math.max(...leaveTypeDist.map((d) => d.count), 5);
+  // Max value for bar chart scaling & clean Y-axis ticks
+  const rawMaxLeave = Math.max(...leaveTypeDist.map((d) => d.count), 0);
+  const yAxisMax = Math.max(Math.ceil(rawMaxLeave / 4) * 4, 8);
+  const yTicks = [
+    yAxisMax,
+    Math.round(yAxisMax * 0.75),
+    Math.round(yAxisMax * 0.5),
+    Math.round(yAxisMax * 0.25),
+    0,
+  ];
 
   return (
     <div className="space-y-5">
@@ -291,221 +297,263 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      {/* 3. BỐ CỤC CHÍNH CHIA 3 CỘT (2 CỘT TRÁI - 1 CỘT PHẢI) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* Left Column (2/3 width - lg:col-span-2 flex flex-col gap-4) */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          {/* Top Row: 2 Charts side-by-side */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Chart 1: Thống kê loại hình nghỉ trong tháng (Bar Chart) */}
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex flex-col justify-between h-[280px]">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h2 className="text-xs font-bold text-slate-900">
-                    Thống kê loại hình nghỉ trong tháng
-                  </h2>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Tháng 11/2026 (Phép năm, Không lương, Chế độ, Đi muộn)
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={onOpenAddLeave}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer"
-                >
-                  <CalendarPlus className="w-3.5 h-3.5" />
-                  <span>Ghi nhận</span>
-                </button>
-              </div>
-
-              {/* Bar Chart with Grid Lines */}
-              <div className="pt-2 pb-1 flex-1 flex flex-col justify-end">
-                <div className="relative h-36 flex items-end justify-around gap-3 px-2 border-b border-slate-200">
-                  {/* Background horizontal dashed grid lines */}
-                  <div className="absolute inset-0 flex flex-col justify-between pointer-events-none py-1">
-                    <div className="w-full border-b border-slate-100 border-dashed" />
-                    <div className="w-full border-b border-slate-100 border-dashed" />
-                    <div className="w-full border-b border-slate-100 border-dashed" />
-                  </div>
-
-                  {leaveTypeDist.map((item) => {
-                    const heightPct = Math.round((item.count / maxLeaveCount) * 100);
-                    return (
-                      <div
-                        key={item.label}
-                        className="flex-1 flex flex-col items-center h-full justify-end group z-10"
-                      >
-                        <span className="text-[10px] font-mono font-bold text-slate-700 mb-1">
-                          {item.count}
-                        </span>
-                        <div
-                          className="w-full max-w-[42px] rounded-t-lg transition-all duration-500 group-hover:opacity-90 shadow-xs"
-                          style={{
-                            height: `${Math.max(heightPct, 8)}%`,
-                            backgroundColor: item.color,
-                          }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Bar Chart Labels */}
-                <div className="flex justify-around gap-2 pt-2 px-1 text-center">
-                  {leaveTypeDist.map((item) => (
-                    <div key={item.label} className="flex-1 min-w-0">
-                      <div className="text-[10px] font-bold text-slate-800 truncate" title={item.label}>
-                        {item.label}
-                      </div>
-                      <div className="text-[9px] text-slate-500 font-mono mt-0.5">
-                        {item.subLabel}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+      {/* 3. BỐ CỤC 3 KHỐI (3 CỘT ĐỀU NHAU KÉO DÀI CHẠM ĐÁY TRANG) */}
+      <section
+        aria-label="Biểu đồ thống kê và Ghi chép gần đây"
+        className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch min-h-[420px]"
+      >
+        {/* KHỐI 1 (CỘT 1): Biểu đồ Thống kê loại hình nghỉ trong tháng */}
+        <div className="h-full bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">
+                Thống kê loại hình nghỉ trong tháng
+              </h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Tháng 11/2026 (Phép năm, Không lương, Chế độ, Đi muộn)
+              </p>
             </div>
-
-            {/* Chart 2: Phân bổ nhân sự theo Nhóm / Bộ phận (Donut Chart + Legend) */}
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex flex-col justify-between h-[280px]">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h2 className="text-xs font-bold text-slate-900">
-                    Phân bổ nhân sự theo Bộ phận
-                  </h2>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Tỷ trọng tại {departmentDist.length} phòng ban
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigate('employees')}
-                  className="text-[11px] font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer"
-                >
-                  Chi tiết
-                </button>
-              </div>
-
-              <div className="flex items-center gap-4 py-1 flex-1">
-                {/* SVG Donut Chart */}
-                <div className="relative w-32 h-32 shrink-0">
-                  <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
-                    {donutSlices.map((slice, idx) => (
-                      <circle
-                        key={idx}
-                        cx="18"
-                        cy="18"
-                        r="15.9155"
-                        fill="transparent"
-                        stroke={slice.color}
-                        strokeWidth="4.5"
-                        strokeDasharray={slice.dashArray}
-                        strokeDashoffset={slice.dashOffset}
-                        className="transition-all duration-500 hover:opacity-90"
-                      />
-                    ))}
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-                    <span className="text-xl font-extrabold text-slate-900 font-mono">
-                      {kpis.totalEmployees}
-                    </span>
-                    <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">
-                      Nhân sự
-                    </span>
-                  </div>
-                </div>
-
-                {/* Legend */}
-                <div className="flex-1 w-full flex flex-col justify-center gap-1.5 max-h-36 overflow-y-auto pr-1">
-                  {departmentDist.map((item) => (
-                    <div key={item.label} className="flex items-center justify-between text-[11px]">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        <span className="font-medium text-slate-700 truncate">
-                          {item.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0 font-mono tabular-nums">
-                        <span className="font-bold text-slate-900">{item.count}</span>
-                        <span className="text-slate-400">({item.percentage}%)</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={onOpenAddLeave}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer shrink-0"
+            >
+              <CalendarPlus className="w-3.5 h-3.5" />
+              <span>Ghi nhận</span>
+            </button>
           </div>
 
-          {/* Bottom Row: Recent Leave Records Table */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
-            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Ghi chép Nghỉ phép &amp; Đi muộn Gần đây
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Các bản ghi mới nhất trong hệ thống
-                </p>
+          {/* Bar Chart with Y-Axis ticks and horizontal grid lines */}
+          <div className="flex-1 flex flex-col justify-end pt-4 pb-1">
+            <div className="flex items-stretch gap-2 h-60">
+              {/* Y-Axis Labels */}
+              <div className="flex flex-col justify-between text-[10px] font-mono text-slate-400 text-right pr-1 select-none">
+                {yTicks.map((tick, idx) => (
+                  <span key={idx} className="leading-none">
+                    {tick}
+                  </span>
+                ))}
               </div>
-              <button
-                type="button"
-                onClick={() => onNavigate('leave_logs')}
-                className="text-xs font-semibold text-[#0D9488] hover:underline cursor-pointer inline-flex items-center gap-1"
-              >
-                <span>Xem toàn bộ ({recentRecords.length})</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </button>
+
+              {/* Plot Area */}
+              <div className="relative flex-1 flex items-end justify-around gap-3 px-2 border-b border-l border-slate-200">
+                {/* Horizontal Dashed Grid Lines */}
+                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                  <div className="w-full border-b border-slate-100 border-dashed" />
+                  <div className="w-full border-b border-slate-100 border-dashed" />
+                  <div className="w-full border-b border-slate-100 border-dashed" />
+                  <div className="w-full border-b border-slate-100 border-dashed" />
+                  <div className="w-full" />
+                </div>
+
+                {leaveTypeDist.map((item) => {
+                  const heightPct = Math.round((item.count / yAxisMax) * 100);
+                  return (
+                    <div
+                      key={item.label}
+                      className="flex-1 flex flex-col items-center h-full justify-end group z-10"
+                    >
+                      <span className="text-[11px] font-mono font-bold text-slate-700 mb-1">
+                        {item.count}
+                      </span>
+                      <div
+                        className="w-full max-w-[44px] rounded-t-lg transition-all duration-500 group-hover:opacity-90 shadow-xs"
+                        style={{
+                          height: `${Math.max(heightPct, item.count > 0 ? 10 : 4)}%`,
+                          backgroundColor: item.color,
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+            {/* X-Axis Labels */}
+            <div className="flex justify-around gap-2 pt-3 pl-7 pr-1 text-center">
+              {leaveTypeDist.map((item) => (
+                <div key={item.label} className="flex-1 min-w-0">
+                  <div className="text-[11px] font-bold text-slate-800 truncate" title={item.label}>
+                    {item.label}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                    {item.subLabel}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* KHỐI 2 (CỘT 2): Biểu đồ Phân bổ nhân sự theo Bộ phận */}
+        <div className="h-full bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">
+                Phân bổ nhân sự theo Bộ phận
+              </h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Tỷ trọng nhân sự tại {departmentDist.length} bộ phận
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('employees')}
+              className="text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer shrink-0"
+            >
+              Chi tiết
+            </button>
+          </div>
+
+          <div className="flex-1 flex flex-col sm:flex-row items-center gap-4 py-2">
+            {/* SVG Donut Chart */}
+            <div className="relative w-36 h-36 shrink-0">
+              <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
+                {donutSlices.map((slice, idx) => (
+                  <circle
+                    key={idx}
+                    cx="18"
+                    cy="18"
+                    r="15.9155"
+                    fill="transparent"
+                    stroke={slice.color}
+                    strokeWidth="4.5"
+                    strokeDasharray={slice.dashArray}
+                    strokeDashoffset={slice.dashOffset}
+                    className="transition-all duration-500 hover:opacity-90"
+                  />
+                ))}
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                <span className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {kpis.totalEmployees}
+                </span>
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Nhân sự
+                </span>
+              </div>
+            </div>
+
+            {/* Full 8 Departments Legend */}
+            <div className="flex-1 w-full flex flex-col justify-center gap-2">
+              {departmentDist.map((item) => (
+                <div key={item.label} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span className="font-medium text-slate-700 truncate" title={item.label}>
+                      {item.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 font-mono tabular-nums pl-2">
+                    <span className="font-bold text-slate-900">{item.count}</span>
+                    <span className="text-slate-400 text-[11px]">({item.percentage}%)</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* KHỐI 3 (CỘT 3): Bảng Nghỉ phép & Đi muộn Gần đây */}
+        <div className="h-full bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex flex-col">
+          {/* Header của Khối 3 */}
+          <div className="flex items-center justify-between mb-3 shrink-0">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">
+                Nghỉ phép &amp; Đi muộn Gần đây
+              </h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Tổng số {recentRecords.length} bản ghi phát sinh
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('leave_logs')}
+              className="text-xs font-semibold text-[#0D9488] hover:underline cursor-pointer inline-flex items-center gap-0.5 shrink-0"
+            >
+              <span>Xem toàn bộ ({recentRecords.length})</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Bảng dữ liệu 4 cột bên trong Khối 3 */}
+          <div className="flex-1 overflow-y-auto overflow-x-auto max-h-[340px] rounded-lg border border-slate-200/80">
+            {recentRecords.length === 0 ? (
+              <div className="h-full min-h-[240px] flex flex-col items-center justify-center text-center p-4 text-xs text-slate-400">
+                Chưa có bản ghi nghỉ phép hoặc đi muộn nào.
+              </div>
+            ) : (
               <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-[#0F232E] text-white text-xs font-semibold tracking-wider uppercase z-10">
+                <thead className="sticky top-0 bg-[#0F232E] text-white text-[10px] font-semibold tracking-wider uppercase z-10">
                   <tr>
-                    <th className="py-2.5 px-4 bg-[#0F232E]">Nhân sự</th>
-                    <th className="py-2.5 px-3 bg-[#0F232E]">Loại giấy phép</th>
-                    <th className="py-2.5 px-3 bg-[#0F232E]">Thời gian</th>
-                    <th className="py-2.5 px-3 text-right bg-[#0F232E]">Số lượng</th>
-                    <th className="py-2.5 px-4 text-center bg-[#0F232E]">Giấy phép</th>
+                    <th className="py-2 px-2.5 bg-[#0F232E]">Thời gian</th>
+                    <th className="py-2 px-2.5 bg-[#0F232E]">Nhân sự</th>
+                    <th className="py-2 px-2 bg-[#0F232E]">Loại giấy phép</th>
+                    <th className="py-2 px-2.5 text-center bg-[#0F232E]">Giấy phép</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {recentRecords.slice(0, 8).map((rec) => {
+                  {recentRecords.slice(0, 12).map((rec) => {
                     const emp = empMap.get(rec.employeeId);
                     const meta = LEAVE_TYPE_META[rec.type];
+                    const hasPaper =
+                      rec.paperStatus === 'Đã có' ||
+                      (!rec.paperStatus && Boolean(rec.attachmentUrl));
+                    const shortDate = formatDateVN(rec.startDate).slice(0, 5);
+
                     return (
                       <tr
                         key={rec.id}
                         className="hover:bg-slate-50/90 transition-colors"
                       >
-                        <td className="py-2.5 px-4 font-semibold text-slate-900 whitespace-nowrap">
-                          {emp?.fullName || 'N/A'}
-                          <span className="ml-1.5 text-[11px] font-mono text-slate-400 font-normal">
-                            {emp?.employeeCode}
-                          </span>
+                        {/* 1. THỜI GIAN */}
+                        <td className="py-2 px-2.5 whitespace-nowrap align-middle">
+                          <div className="font-mono font-bold text-slate-800 text-[11px]">
+                            {shortDate}
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-500">
+                            {rec.amount} {meta.unit}
+                          </div>
                         </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span
-                            className="font-semibold"
-                            style={{ color: meta.textColor }}
+
+                        {/* 2. NHÂN SỰ */}
+                        <td className="py-2 px-2.5 align-middle max-w-[130px]">
+                          <div
+                            className="font-semibold text-slate-900 truncate text-[11px]"
+                            title={emp?.fullName || 'N/A'}
                           >
-                            {rec.type === 'late_early' ? 'Đi muộn' : meta.shortLabel}
+                            {emp?.fullName || 'N/A'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate font-mono">
+                            {emp?.employeeCode}
+                            {emp?.department ? ` · ${emp.department}` : ''}
+                          </div>
+                        </td>
+
+                        {/* 3. LOẠI GIẤY PHÉP */}
+                        <td className="py-2 px-2 whitespace-nowrap align-middle">
+                          <span
+                            className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold"
+                            style={{
+                              backgroundColor: meta.bgLight,
+                              color: meta.textColor,
+                            }}
+                          >
+                            {rec.type === 'annual_leave'
+                              ? 'Nghỉ phép năm'
+                              : rec.type === 'unpaid_leave'
+                                ? 'Nghỉ không lương'
+                                : rec.type === 'regime_leave'
+                                  ? 'Nghỉ chế độ'
+                                  : 'Đi muộn'}
                           </span>
-                          {rec.regimeSubtype && (
-                            <span className="text-slate-400 ml-1">
-                              · {rec.regimeSubtype}
-                            </span>
-                          )}
                         </td>
-                        <td className="py-2.5 px-3 font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                          {formatDateVN(rec.startDate)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-800 whitespace-nowrap">
-                          {rec.amount} {meta.unit}
-                        </td>
-                        <td className="py-2.5 px-4 text-center">
+
+                        {/* 4. GIẤY PHÉP */}
+                        <td className="py-2 px-2.5 text-center whitespace-nowrap align-middle">
                           {rec.attachmentUrl ? (
                             <button
                               type="button"
@@ -516,13 +564,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 )
                               }
                               aria-label={`Xem giấy phép của ${emp?.fullName}`}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-[#0D9488] bg-teal-50 hover:bg-teal-100 transition-colors cursor-pointer"
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
+                                hasPaper
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
+                              }`}
                             >
-                              <FileImage className="w-3.5 h-3.5" />
-                              <span>Xem ảnh</span>
+                              <FileImage className="w-3 h-3" />
+                              <span>{hasPaper ? 'Đã có' : 'Chưa có'}</span>
                             </button>
                           ) : (
-                            <span className="text-slate-400">-</span>
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                hasPaper
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-red-50 text-red-600 border border-red-200'
+                              }`}
+                            >
+                              {hasPaper ? 'Đã có' : 'Chưa có'}
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -530,110 +590,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   })}
                 </tbody>
               </table>
-            </div>
+            )}
           </div>
         </div>
-
-        {/* Right Column (1/3 width - lg:col-span-1) */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
-          {/* Card: Hôm nay & Cần xử lý */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex flex-col gap-4">
-            <div className="border-b border-slate-100 pb-3">
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-[#0D9488]" />
-                <span>Hôm nay của đơn vị</span>
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Danh sách nhân sự nghỉ phép trong ngày
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              {kpis.onLeaveToday > 0 ? (
-                <div className="p-3 rounded-lg bg-sky-50/70 border border-sky-100 text-xs text-sky-900 space-y-1.5">
-                  <div className="font-semibold flex items-center gap-1.5 text-sky-800">
-                    <CalendarOff className="w-3.5 h-3.5" />
-                    <span>{kpis.onLeaveToday} nhân sự đang nghỉ phép hôm nay:</span>
-                  </div>
-                  <div className="text-[11px] text-sky-700 font-medium pl-5">
-                    {kpis.onLeaveTodayNames.join(', ')}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-100 text-xs text-emerald-800 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Hôm nay 100% nhân sự đi làm đầy đủ, không có lịch nghỉ phép.</span>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-slate-100 pt-4">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4 text-amber-500" />
-                    <span>Cần bổ sung giấy phép</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Bản ghi đang ở trạng thái &quot;Chưa có&quot;
-                  </p>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-100 text-amber-800">
-                  {missingPaperCount}
-                </span>
-              </div>
-
-              {missingPaperCount > 0 ? (
-                <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
-                  {missingPaperRecords.slice(0, 6).map((rec) => {
-                    const emp = empMap.get(rec.employeeId);
-                    const meta = LEAVE_TYPE_META[rec.type];
-                    return (
-                      <div
-                        key={rec.id}
-                        onClick={() => onNavigate('leave_logs')}
-                        className="p-2.5 rounded-lg border border-amber-200/80 bg-amber-50/40 hover:bg-amber-50 transition-colors cursor-pointer flex items-center justify-between gap-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-900 truncate">
-                            {emp?.fullName || 'N/A'}
-                            <span className="font-normal font-mono text-slate-500 ml-1">
-                              ({emp?.employeeCode})
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1.5">
-                            <span className="font-medium" style={{ color: meta.textColor }}>
-                              {meta.shortLabel}
-                            </span>
-                            <span>·</span>
-                            <span className="font-mono">{formatDateVN(rec.startDate)}</span>
-                          </div>
-                        </div>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 text-amber-900 shrink-0">
-                          Chưa có
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {missingPaperCount > 6 && (
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('leave_logs')}
-                      className="w-full text-center text-xs font-semibold text-[#0D9488] hover:underline pt-1 cursor-pointer"
-                    >
-                      Xem thêm {missingPaperCount - 6} bản ghi khác...
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-500 text-center">
-                  Tuyệt vời! Tất cả bản ghi đã đầy đủ giấy phép đính kèm.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 };

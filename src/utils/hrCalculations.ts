@@ -321,7 +321,18 @@ export function calculateDepartmentDistribution(
   }
 
   const result: DistributionItem[] = [];
-  const palette = ['#0D9488', '#0284C7', '#7C3AED', '#D97706', '#E11D48', '#10B981'];
+  const palette = [
+    '#0D9488',
+    '#0284C7',
+    '#7C3AED',
+    '#D97706',
+    '#E11D48',
+    '#10B981',
+    '#F59E0B',
+    '#6366F1',
+    '#EC4899',
+    '#14B8A6',
+  ];
 
   // Include all defined groups first
   groups.forEach((grp, idx) => {
