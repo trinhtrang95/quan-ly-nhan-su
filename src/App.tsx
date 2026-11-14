@@ -1221,6 +1221,7 @@ export default function App() {
           <main aria-label="Nội dung phân hệ chính">
             {activeModule === 'dashboard' && (
               <DashboardView
+                currentUser={currentUser}
                 kpis={kpis}
                 departmentDist={departmentDist}
                 leaveTypeDist={leaveTypeDist}
@@ -1447,6 +1448,7 @@ export default function App() {
         editingRecord={editingRecord}
         employees={companyEmployees}
         leaveRecords={companyRecords}
+        currentUser={currentUser}
         defaultEmployeeId={leaveDefaultEmpId}
         defaultMonth={leaveDefaultMonth}
         defaultYear={leaveDefaultYear}

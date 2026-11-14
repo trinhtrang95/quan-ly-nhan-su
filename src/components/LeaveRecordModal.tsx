@@ -14,6 +14,7 @@ import {
   LeaveRecord,
   LeaveRecordType,
   RegimeSubtype,
+  UserAccount,
 } from '../types/hr';
 import { calculateAnnualMatrixReport } from '../utils/hrCalculations';
 import { uploadImageToHrBucket } from '../utils/supabaseService';
@@ -23,6 +24,7 @@ interface LeaveRecordModalProps {
   editingRecord: LeaveRecord | null;
   employees: Employee[];
   leaveRecords: LeaveRecord[];
+  currentUser?: UserAccount | null;
   defaultEmployeeId?: string;
   defaultMonth?: number;
   defaultYear?: number;
@@ -35,6 +37,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   editingRecord,
   employees,
   leaveRecords,
+  currentUser,
   defaultEmployeeId,
   defaultMonth,
   defaultYear,
@@ -196,7 +199,11 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
         attachmentTitle: attachmentTitle.trim() || undefined,
         paperStatus,
         createdAt: new Date().toISOString().slice(0, 10),
-        approvedBy: 'Trần Thu Trang',
+        approvedBy:
+          editingRecord?.approvedBy ||
+          currentUser?.fullName?.trim() ||
+          currentUser?.username?.trim() ||
+          'Quản trị viên',
       },
       editingRecord?.id
     );

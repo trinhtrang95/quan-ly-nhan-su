@@ -21,10 +21,12 @@ import {
   Employee,
   EmployeeAnnualMatrixRow,
   LeaveRecord,
+  UserAccount,
 } from '../types/hr';
 import { formatDateVN, LEAVE_TYPE_META } from '../utils/hrCalculations';
 
 interface DashboardViewProps {
+  currentUser: UserAccount | null;
   kpis: DashboardKPIs;
   departmentDist: DistributionItem[];
   leaveTypeDist: DistributionItem[];
@@ -39,6 +41,7 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
+  currentUser,
   kpis,
   departmentDist,
   leaveTypeDist,
@@ -78,6 +81,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const hour = currentTime.getHours();
   const greeting = hour < 12 ? 'Chào buổi sáng' : hour < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
+  const displayUserName =
+    currentUser?.fullName?.trim() || currentUser?.username?.trim() || 'Quản trị viên';
 
   // Missing paper count & records
   const missingPaperRecords = records.filter(
@@ -118,7 +123,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {formatDateHeader(currentTime)}
               </div>
               <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">
-                {greeting}, Trần Thu Trang! 👋
+                {greeting}, {displayUserName}! 👋
               </h1>
               <p className="text-xs text-slate-300">
                 Hệ thống Quản lý Nhân sự &amp; Chấm công — Vận hành đồng bộ, kiểm soát toàn diện
