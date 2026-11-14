@@ -510,15 +510,165 @@ export async function authenticateAppUserInSupabase(
 }
 
 /**
+ * Compresses an image File on the client browser using HTML5 Canvas:
+ * - Resizes width to at most `maxWidth` (default 1000px) while preserving aspect ratio
+ * - Encodes as `image/jpeg` at `quality` (default 0.7), reducing 3-5MB photos to ~70KB-120KB
+ */
+export async function compressImageClientSide(
+  file: File,
+  maxWidth: number = 1000,
+  quality: number = 0.7
+): Promise<{
+  compressedFile: File;
+  dataUrl: string;
+  compressedSizeKB: number;
+  originalSizeKB: number;
+}> {
+  const originalSizeKB = Math.max(1, Math.round(file.size / 1024));
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = (err) => reject(err);
+    reader.onload = () => {
+      const srcDataUrl = String(reader.result || '');
+      const img = new Image();
+      img.onerror = (err) => reject(err);
+      img.onload = () => {
+        try {
+          let targetWidth = img.naturalWidth || img.width || maxWidth;
+          let targetHeight = img.naturalHeight || img.height || maxWidth;
+
+          if (targetWidth > maxWidth) {
+            targetHeight = Math.max(
+              1,
+              Math.round((targetHeight * maxWidth) / targetWidth)
+            );
+            targetWidth = maxWidth;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            throw new Error('Canvas 2D context not available');
+          }
+
+          // Fill white background so transparent PNGs render cleanly in JPEG
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                const approxBytes = Math.round(
+                  ((compressedDataUrl.length -
+                    'data:image/jpeg;base64,'.length) *
+                    3) /
+                    4
+                );
+                const fallbackSizeKB = Math.max(
+                  1,
+                  Math.round(approxBytes / 1024)
+                );
+                resolve({
+                  compressedFile: file,
+                  dataUrl: compressedDataUrl,
+                  compressedSizeKB: fallbackSizeKB,
+                  originalSizeKB,
+                });
+                return;
+              }
+
+              const baseName =
+                file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_') ||
+                'giay_phep';
+              const compressedFile = new File([blob], `${baseName}.jpg`, {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              });
+              const compressedSizeKB = Math.max(1, Math.round(blob.size / 1024));
+
+              resolve({
+                compressedFile,
+                dataUrl: compressedDataUrl,
+                compressedSizeKB,
+                originalSizeKB,
+              });
+            },
+            'image/jpeg',
+            quality
+          );
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.src = srcDataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Deletes an uploaded image from Supabase Storage bucket `hr-images` if the URL points to the bucket
+ */
+export async function deleteImageFromHrBucket(publicUrl?: string): Promise<void> {
+  if (!publicUrl) return;
+  const marker = `/storage/v1/object/public/${HR_IMAGES_BUCKET}/`;
+  const idx = publicUrl.indexOf(marker);
+  if (idx === -1) return;
+  const objectPath = publicUrl.slice(idx + marker.length);
+  if (!objectPath) return;
+
+  try {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${HR_IMAGES_BUCKET}/${objectPath}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+  } catch {
+    // Ignore storage delete errors
+  }
+}
+
+/**
  * Uploads an image File (avatar, leave proof photo, or company logo) to Supabase Storage bucket `hr-images`
- * using pure fetch and returns its Public URL. Falls back to Data URI if storage upload fails.
+ * using pure fetch and returns its Public URL. Automatically compresses the image via HTML5 Canvas first.
+ * Falls back to the compressed Data URI if storage upload fails.
  */
 export async function uploadImageToHrBucket(
   file: File,
-  folder: 'avatars' | 'proofs' | 'logos'
+  folder: 'avatars' | 'proofs' | 'logos',
+  alreadyCompressed: boolean = false,
+  precomputedDataUrl: string = ''
 ): Promise<string> {
+  const maxWidth = folder === 'proofs' ? 1000 : 600;
+  const quality = 0.7;
+
+  let targetFile = file;
+  let fallbackDataUrl = precomputedDataUrl;
+
+  if (!alreadyCompressed) {
+    try {
+      const compressed = await compressImageClientSide(file, maxWidth, quality);
+      targetFile = compressed.compressedFile;
+      fallbackDataUrl = compressed.dataUrl;
+    } catch {
+      // If compression fails on an unusual format, proceed with original file
+    }
+  }
+
   try {
-    const ext = (file.name.split('.').pop() || 'png').replace(/[^a-zA-Z0-9]/g, '');
+    const ext = (targetFile.name.split('.').pop() || 'jpg').replace(
+      /[^a-zA-Z0-9]/g,
+      ''
+    );
     const safeName = `${folder}/${Date.now()}-${Math.random()
       .toString(36)
       .slice(2, 8)}.${ext}`;
@@ -529,10 +679,10 @@ export async function uploadImageToHrBucket(
       headers: {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': file.type || 'image/png',
+        'Content-Type': targetFile.type || 'image/jpeg',
         'x-upsert': 'true',
       },
-      body: file,
+      body: targetFile,
     });
 
     if (!res.ok) {
@@ -541,14 +691,18 @@ export async function uploadImageToHrBucket(
 
     return `${SUPABASE_URL}/storage/v1/object/public/${HR_IMAGES_BUCKET}/${safeName}`;
   } catch (err) {
-    console.warn('Fallback to Data URI for image upload:', err);
+    console.warn('Fallback to compressed Data URI for image upload:', err);
+  }
+
+  if (fallbackDataUrl) {
+    return fallbackDataUrl;
   }
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
     reader.onerror = (e) => reject(e);
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(targetFile);
   });
 }
 

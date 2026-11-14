@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   Camera,
@@ -7,7 +7,8 @@ import {
   Trash2,
   CalendarClock,
   Loader2,
-  Sparkles,
+  RefreshCw,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   Employee,
@@ -17,7 +18,11 @@ import {
   UserAccount,
 } from '../types/hr';
 import { calculateAnnualMatrixReport } from '../utils/hrCalculations';
-import { uploadImageToHrBucket } from '../utils/supabaseService';
+import {
+  compressImageClientSide,
+  deleteImageFromHrBucket,
+  uploadImageToHrBucket,
+} from '../utils/supabaseService';
 
 interface LeaveRecordModalProps {
   isOpen: boolean;
@@ -30,6 +35,17 @@ interface LeaveRecordModalProps {
   defaultYear?: number;
   onClose: () => void;
   onSave: (recordData: Omit<LeaveRecord, 'id'>, existingId?: string) => void;
+}
+
+function estimateDataUrlSizeKB(url?: string): number | null {
+  if (!url) return null;
+  if (url.startsWith('data:')) {
+    const commaIdx = url.indexOf(',');
+    const base64Length = commaIdx !== -1 ? url.length - (commaIdx + 1) : url.length;
+    const bytes = Math.round((base64Length * 3) / 4);
+    return Math.max(1, Math.round(bytes / 1024));
+  }
+  return null;
 }
 
 export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
@@ -54,9 +70,11 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   const [reason, setReason] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState<string>('');
   const [attachmentTitle, setAttachmentTitle] = useState<string>('');
+  const [compressedSizeKB, setCompressedSizeKB] = useState<number | null>(null);
   const [paperStatus, setPaperStatus] = useState<'Chưa có' | 'Đã có'>('Đã có');
   const [isUploadingProof, setIsUploadingProof] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -74,6 +92,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       setReason(editingRecord.reason);
       setAttachmentUrl(editingRecord.attachmentUrl || '');
       setAttachmentTitle(editingRecord.attachmentTitle || '');
+      setCompressedSizeKB(estimateDataUrlSizeKB(editingRecord.attachmentUrl));
       setPaperStatus(
         editingRecord.paperStatus ||
           (editingRecord.attachmentUrl ? 'Đã có' : 'Chưa có')
@@ -105,6 +124,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       setReason('');
       setAttachmentUrl('');
       setAttachmentTitle('');
+      setCompressedSizeKB(null);
       setPaperStatus('Chưa có');
     }
   }, [isOpen, editingRecord, defaultEmployeeId, defaultMonth, defaultYear, employees, leaveRecords]);
@@ -151,17 +171,50 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setErrorMsg('');
     setIsUploadingProof(true);
     try {
-      const publicUrl = await uploadImageToHrBucket(file, 'proofs');
-      setAttachmentUrl(publicUrl);
-      setAttachmentTitle(
-        `Ảnh chụp giấy phép (${file.name}) - ${selectedEmployee?.fullName || ''}`
+      // 1. Client-side HTML5 Canvas compression (max width 1000px, JPEG quality 0.7)
+      const compressed = await compressImageClientSide(file, 1000, 0.7);
+
+      // 2. If replacing an existing bucket image, clean up the old object on Supabase
+      if (attachmentUrl) {
+        deleteImageFromHrBucket(attachmentUrl).catch(() => {});
+      }
+
+      // 3. Upload only the lightweight compressed image
+      const publicUrl = await uploadImageToHrBucket(
+        compressed.compressedFile,
+        'proofs',
+        true,
+        compressed.dataUrl
       );
+
+      setAttachmentUrl(publicUrl);
+      setCompressedSizeKB(compressed.compressedSizeKB);
+      setAttachmentTitle(
+        `Ảnh giấy phép (${compressed.compressedSizeKB} KB) - ${selectedEmployee?.fullName || ''}`
+      );
+      setPaperStatus('Đã có');
     } catch {
-      setErrorMsg('Không thể tải ảnh giấy phép lên Cloud. Vui lòng thử lại.');
+      setErrorMsg('Không thể xử lý và tải ảnh giấy phép. Vui lòng chọn ảnh khác.');
     } finally {
       setIsUploadingProof(false);
+      if (e.target) {
+        e.target.value = '';
+      }
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    if (attachmentUrl) {
+      deleteImageFromHrBucket(attachmentUrl).catch(() => {});
+    }
+    setAttachmentUrl('');
+    setAttachmentTitle('');
+    setCompressedSizeKB(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -490,27 +543,36 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             />
           </div>
 
-          {/* Step 5: Camera / Photo Upload for Leave Slip */}
-          <div className="p-2 rounded-xl bg-teal-50/40 border border-teal-200/80 space-y-1.5">
+          {/* Step 5: Camera / Photo Upload for Leave Slip (Client-side Canvas Compressed) */}
+          <div className="p-2.5 rounded-xl bg-teal-50/40 border border-teal-200/80 space-y-2">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
-              <div className="text-xs font-bold text-slate-800">
-                Đính kèm Ảnh chụp Giấy xin phép / Viện phí
+              <div>
+                <div className="text-xs font-bold text-slate-800">
+                  Đính kèm Ảnh chụp Giấy xin phép / Viện phí
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Tự động thu nhỏ chiều rộng tối đa 1000px &amp; nén JPEG (0.7) siêu nhẹ (~70–120 KB)
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold cursor-pointer transition-colors shadow-xs">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold cursor-pointer transition-colors shadow-xs">
                   {isUploadingProof ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Camera className="w-3.5 h-3.5" />
                   )}
                   <span>
-                    {isUploadingProof ? 'Đang tải...' : 'Chụp / Tải ảnh giấy phép'}
+                    {isUploadingProof
+                      ? 'Đang nén & tải ảnh...'
+                      : attachmentUrl
+                        ? 'Chụp / Chọn ảnh mới'
+                        : 'Chụp / Tải ảnh giấy phép'}
                   </span>
                   <input
+                    ref={fileInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     disabled={isUploadingProof}
                     onChange={handlePhotoUpload}
                     className="hidden"
@@ -521,7 +583,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             </div>
 
             {/* Hiện trạng giấy phép selector */}
-            <div className="pt-1 border-t border-teal-200/60 flex items-center justify-between gap-2">
+            <div className="pt-1.5 border-t border-teal-200/60 flex items-center justify-between gap-2">
               <label
                 htmlFor="paper-status-select"
                 className="text-xs font-bold text-slate-800"
@@ -544,31 +606,49 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             </div>
 
             {attachmentUrl && (
-              <div className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white border border-slate-200">
-                <div className="flex items-center gap-2 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2 rounded-lg bg-white border border-slate-200 shadow-2xs">
+                <div className="flex items-center gap-2.5 min-w-0">
                   <img
                     src={attachmentUrl}
                     alt="Xem trước ảnh giấy phép"
                     referrerPolicy="no-referrer"
-                    className="w-8 h-10 object-cover rounded border border-slate-300 shrink-0"
+                    className="w-11 h-12 object-cover rounded-lg border border-slate-300 shrink-0"
                   />
-                  <div className="min-w-0 text-xs truncate">
-                    <span className="font-semibold text-slate-800">
-                      {attachmentTitle || 'Đã đính kèm ảnh'}
-                    </span>
+                  <div className="min-w-0 space-y-1">
+                    <div className="text-xs font-semibold text-slate-800 truncate">
+                      {attachmentTitle || 'Ảnh chụp giấy xin phép / viện phí'}
+                    </div>
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-700">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                      <span>
+                        {compressedSizeKB !== null
+                          ? `Đã tối ưu ảnh: ${compressedSizeKB} KB`
+                          : 'Đã tối ưu ảnh chuẩn nhẹ'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAttachmentUrl('');
-                    setAttachmentTitle('');
-                  }}
-                  aria-label="Xóa ảnh đính kèm"
-                  className="p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+
+                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                  <button
+                    type="button"
+                    disabled={isUploadingProof}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-teal-200 bg-teal-50/70 hover:bg-teal-100 text-[#0F766E] text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Thay ảnh khác</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemovePhoto}
+                    aria-label="Xóa ảnh đính kèm"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 bg-red-50/70 hover:bg-red-100 text-red-600 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa ảnh</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
