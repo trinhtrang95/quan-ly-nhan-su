@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -11,8 +11,11 @@ import {
   LogOut,
   ShieldCheck,
   UserCheck,
+  MonitorDown,
+  X,
 } from 'lucide-react';
 import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
+import { usePWAInstall } from '../utils/pwaInstall';
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -89,6 +92,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectCompany,
   onLogoutClick,
 }) => {
+  const { isInstalled, promptInstall } = usePWAInstall();
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+
   const isAdmin = currentUser.role === 'admin';
   const visibleNavItems = NAV_ITEMS.filter(
     (item) => !item.adminOnly || isAdmin
@@ -103,6 +109,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       : currentUser.fullName.slice(0, 2).toUpperCase();
   })();
 
+  const handleInstallClick = async () => {
+    const outcome = await promptInstall();
+    if (outcome === 'unavailable') {
+      setShowInstallGuide(true);
+    }
+  };
+
   return (
     <>
       {/* PC Left Fixed Sidebar (>= 768px) */}
@@ -115,18 +128,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Header + Collapse Toggle */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-slate-700/50">
           <div className="flex items-center gap-3 overflow-hidden">
-            {activeCompany?.logoUrl ? (
-              <img
-                src={activeCompany.logoUrl}
-                alt={activeCompany.name}
-                referrerPolicy="no-referrer"
-                className="w-9 h-9 rounded-lg object-cover border border-teal-500/40 bg-white shrink-0 shadow-sm"
-              />
-            ) : (
-              <div className="w-9 h-9 rounded-lg bg-[#0D9488] flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm">
-                TS
-              </div>
-            )}
+            <img
+              src={activeCompany?.logoUrl || '/app-icon.svg'}
+              alt={activeCompany?.name || 'QL Nhân sự'}
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 rounded-xl object-cover border border-teal-500/40 shrink-0 shadow-sm"
+            />
             {!collapsed && (
               <div className="min-w-0">
                 <div className="text-white font-bold text-xs tracking-tight leading-snug line-clamp-2">
@@ -206,8 +213,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Bottom Workspace Dropdown, Cloud Status & Logged-in Account Box */}
+        {/* Bottom Workspace Dropdown, PWA Install Button, Cloud Status & Logged-in Account Box */}
         <div className="p-3 border-t border-slate-700/60 bg-[#0B1B24] space-y-2.5">
+          {/* Desktop / Mobile PWA Install Button */}
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={handleInstallClick}
+              data-testid="pwa-install-btn"
+              title="Cài đặt ứng dụng Quản lý Nhân sự ra màn hình Desktop / Điện thoại"
+              className={`w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#0D9488] to-[#10B981] hover:from-[#0F766E] hover:to-[#059669] text-white font-bold text-xs shadow-sm transition-all cursor-pointer ${
+                collapsed ? 'p-2' : 'px-3 py-2'
+              }`}
+            >
+              <MonitorDown className="w-4 h-4 shrink-0" />
+              {!collapsed && <span className="truncate">💻 Cài đặt App về máy</span>}
+            </button>
+          )}
+
           {/* Cloud Status Indicator */}
           {!collapsed && (
             <div className="px-2.5 py-1.5 rounded-lg bg-[#0F232E] border border-slate-800 flex items-center justify-between text-[11px]">
@@ -349,6 +372,75 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      {/* PWA Installation Guide Modal (when browser native prompt is not immediately available) */}
+      {showInstallGuide && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+          onClick={() => setShowInstallGuide(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl p-5 text-slate-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <img
+                  src="/app-icon.svg"
+                  alt="QL Nhân sự"
+                  className="w-10 h-10 rounded-xl shadow-xs"
+                />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Cài đặt Ứng dụng về Máy tính / Điện thoại
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Chạy độc lập ngoài màn hình Desktop &amp; Taskbar
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallGuide(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-3.5 space-y-3 text-xs text-slate-600 leading-relaxed">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <p className="font-bold text-slate-800 mb-1">
+                  💻 Trên máy tính (Chrome / Microsoft Edge / Cốc Cốc):
+                </p>
+                <p>
+                  Nhấn vào biểu tượng <strong>Cài đặt (hình màn hình có mũi tên xuống)</strong> nằm ở góc bên phải của thanh địa chỉ trình duyệt (URL), sau đó chọn <strong>Cài đặt (Install)</strong>.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <p className="font-bold text-slate-800 mb-1">
+                  📱 Trên iPhone / iPad / Mac (Safari):
+                </p>
+                <p>
+                  Nhấn nút <strong>Chia sẻ (Share)</strong> trên thanh công cụ trình duyệt, sau đó chọn <strong>Thêm vào Màn hình chính (Add to Home Screen)</strong> hoặc <strong>Thêm vào Dock (Add to Dock)</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowInstallGuide(false)}
+                className="px-4 py-2 rounded-lg bg-[#0F232E] hover:bg-[#163546] text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Đã hiểu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
+
