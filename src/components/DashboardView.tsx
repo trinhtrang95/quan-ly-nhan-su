@@ -69,6 +69,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  // Column 3: Top Leave & Late state
+  const [topMonthFilter, setTopMonthFilter] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [topTab, setTopTab] = useState<'leave' | 'late'>('leave');
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -264,6 +271,69 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     Math.round(yAxisMax * 0.25),
     0,
   ];
+
+  // Available Month/Year options for Column 3 Top Ranking filter
+  const currentYear = currentTime.getFullYear();
+  const monthOptions = Array.from({ length: 12 }, (_, idx) => {
+    const m = idx + 1;
+    const value = `${currentYear}-${String(m).padStart(2, '0')}`;
+    return {
+      value,
+      label: `Tháng ${String(m).padStart(2, '0')}/${currentYear}`,
+    };
+  });
+
+  // Compute Top Leave / Late Ranking for Column 3
+  const topRankingList = React.useMemo(() => {
+    const filtered = records.filter((r) => {
+      const matchMonth =
+        topMonthFilter === 'ALL_YEAR'
+          ? r.startDate.startsWith(String(currentYear))
+          : r.startDate.slice(0, 7) === topMonthFilter ||
+            Boolean(r.endDate && r.endDate.slice(0, 7) === topMonthFilter);
+      if (!matchMonth) return false;
+      return topTab === 'leave' ? r.type !== 'late_early' : r.type === 'late_early';
+    });
+
+    const grouped = new Map<
+      string,
+      {
+        employeeId: string;
+        fullName: string;
+        employeeCode: string;
+        department: string;
+        totalAmount: number;
+        recordCount: number;
+      }
+    >();
+
+    for (const r of filtered) {
+      const emp = empMap.get(r.employeeId);
+      const existing = grouped.get(r.employeeId);
+      if (existing) {
+        existing.totalAmount = Number((existing.totalAmount + r.amount).toFixed(2));
+        existing.recordCount += 1;
+      } else {
+        grouped.set(r.employeeId, {
+          employeeId: r.employeeId,
+          fullName: emp?.fullName || 'Nhân sự',
+          employeeCode: emp?.employeeCode || '---',
+          department: emp?.department || 'Chưa phân bộ phận',
+          totalAmount: Number(r.amount.toFixed(2)),
+          recordCount: 1,
+        });
+      }
+    }
+
+    const list = Array.from(grouped.values());
+    list.sort((a, b) => {
+      if (topTab === 'leave') {
+        return b.totalAmount - a.totalAmount || b.recordCount - a.recordCount;
+      }
+      return b.recordCount - a.recordCount || b.totalAmount - a.totalAmount;
+    });
+    return list;
+  }, [records, topMonthFilter, topTab, currentYear, empMap]);
 
   return (
     <div className="lg:h-screen lg:max-h-screen lg:overflow-hidden flex flex-col justify-between p-3 gap-3">
@@ -463,172 +533,183 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      {/* 3. BỐ CỤC 3 KHỐI BÊN DƯỚI (flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch) */}
+      {/* 3. BỐ CỤC 3 CỘT ĐỀU NHAU BÊN DƯỚI (flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch) */}
       <section
-        aria-label="Biểu đồ thống kê và Ghi chép gần đây"
+        aria-label="Biểu đồ thống kê, Ghi chép gần đây và Top Nghỉ phép Đi muộn"
         className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch"
       >
-        {/* KHỐI 1 (CỘT 1): Biểu đồ Thống kê loại hình nghỉ trong tháng */}
-        <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-2 shrink-0">
-            <div>
-              <h2 className="text-xs sm:text-sm font-bold text-slate-900">
-                Thống kê loại hình nghỉ trong tháng
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                Phép năm, Không lương, Chế độ &amp; Đi muộn
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenAddLeave}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer shrink-0"
-            >
-              <CalendarPlus className="w-3.5 h-3.5" />
-              <span>Ghi nhận</span>
-            </button>
-          </div>
-
-          {/* Bar Chart with Y-Axis ticks and horizontal grid lines */}
-          <div className="flex-1 min-h-[180px] flex flex-col justify-end pt-2">
-            <div className="flex-1 min-h-0 flex items-stretch gap-2">
-              {/* Y-Axis Labels */}
-              <div className="flex flex-col justify-between text-[10px] font-mono text-slate-400 text-right pr-1 select-none">
-                {yTicks.map((tick, idx) => (
-                  <span key={idx} className="leading-none">
-                    {tick}
-                  </span>
-                ))}
+        {/* ================= CỘT 1 (BÊN TRÁI): XẾP CHỒNG 2 KHỐI BIỂU ĐỒ TRÊN - DƯỚI ================= */}
+        <div className="flex flex-col gap-3 h-full min-h-0">
+          {/* Khối trên: Phân bổ nhân sự theo Bộ phận */}
+          <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-1.5 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                  Phân bổ nhân sự theo Bộ phận
+                </h2>
+                <p className="text-[10px] text-slate-500 truncate">
+                  Tỷ trọng nhân sự tại {departmentDist.length} bộ phận
+                </p>
               </div>
-
-              {/* Plot Area */}
-              <div className="relative flex-1 flex items-end justify-around gap-3 px-2 border-b border-l border-slate-200">
-                {/* Horizontal Dashed Grid Lines */}
-                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-                  <div className="w-full border-b border-slate-100 border-dashed" />
-                  <div className="w-full border-b border-slate-100 border-dashed" />
-                  <div className="w-full border-b border-slate-100 border-dashed" />
-                  <div className="w-full border-b border-slate-100 border-dashed" />
-                  <div className="w-full" />
-                </div>
-
-                {leaveTypeDist.map((item) => {
-                  const heightPct = Math.round((item.count / yAxisMax) * 100);
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex-1 flex flex-col items-center h-full justify-end group z-10"
-                    >
-                      <span className="text-[11px] font-mono font-bold text-slate-700 mb-1">
-                        {item.count}
-                      </span>
-                      <div
-                        className="w-full max-w-[40px] rounded-t-lg transition-all duration-500 group-hover:opacity-90 shadow-xs"
-                        style={{
-                          height: `${Math.max(heightPct, item.count > 0 ? 10 : 4)}%`,
-                          backgroundColor: item.color,
-                        }}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('employees')}
+                className="text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer shrink-0"
+              >
+                Chi tiết
+              </button>
             </div>
 
-            {/* X-Axis Labels */}
-            <div className="flex justify-around gap-2 pt-2 pl-6 pr-1 text-center shrink-0">
-              {leaveTypeDist.map((item) => (
-                <div key={item.label} className="flex-1 min-w-0">
-                  <div
-                    className="text-[10px] font-bold text-slate-800 truncate"
-                    title={item.label}
-                  >
-                    {item.label}
-                  </div>
-                  <div className="text-[9px] text-slate-500 font-mono truncate">
-                    {item.subLabel}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* KHỐI 2 (CỘT 2): Biểu đồ Phân bổ nhân sự theo Bộ phận */}
-        <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-2 shrink-0">
-            <div>
-              <h2 className="text-xs sm:text-sm font-bold text-slate-900">
-                Phân bổ nhân sự theo Bộ phận
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                Tỷ trọng nhân sự tại {departmentDist.length} bộ phận
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('employees')}
-              className="text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer shrink-0"
-            >
-              Chi tiết
-            </button>
-          </div>
-
-          <div className="flex-1 min-h-0 flex flex-col sm:flex-row items-center gap-3.5 py-1">
-            {/* SVG Donut Chart */}
-            <div className="relative w-32 h-32 shrink-0">
-              <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
-                {donutSlices.map((slice, idx) => (
-                  <circle
-                    key={idx}
-                    cx="18"
-                    cy="18"
-                    r="15.9155"
-                    fill="transparent"
-                    stroke={slice.color}
-                    strokeWidth="4.5"
-                    strokeDasharray={slice.dashArray}
-                    strokeDashoffset={slice.dashOffset}
-                    className="transition-all duration-500 hover:opacity-90"
-                  />
-                ))}
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-                <span className="text-xl font-extrabold text-slate-900 font-mono">
-                  {kpis.totalEmployees}
-                </span>
-                <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Nhân sự
-                </span>
-              </div>
-            </div>
-
-            {/* Full 8 Departments Legend (text-xs space-y-1 no scroll needed) */}
-            <div className="flex-1 w-full flex flex-col justify-center space-y-1">
-              {departmentDist.map((item) => (
-                <div key={item.label} className="flex items-center justify-between text-xs py-0.5">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
-                      style={{ backgroundColor: item.color }}
+            <div className="flex-1 min-h-0 flex items-center gap-3">
+              {/* SVG Donut Chart nhỏ gọn bên trái */}
+              <div className="relative w-24 h-24 xl:w-28 xl:h-28 shrink-0">
+                <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
+                  {donutSlices.map((slice, idx) => (
+                    <circle
+                      key={idx}
+                      cx="18"
+                      cy="18"
+                      r="15.9155"
+                      fill="transparent"
+                      stroke={slice.color}
+                      strokeWidth="4.5"
+                      strokeDasharray={slice.dashArray}
+                      strokeDashoffset={slice.dashOffset}
+                      className="transition-all duration-500 hover:opacity-90"
                     />
-                    <span className="font-medium text-slate-700 truncate" title={item.label}>
-                      {item.label}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 font-mono tabular-nums pl-2">
-                    <span className="font-bold text-slate-900">{item.count}</span>
-                    <span className="text-slate-400 text-[11px]">({item.percentage}%)</span>
-                  </div>
+                  ))}
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                  <span className="text-base xl:text-lg font-extrabold text-slate-900 font-mono leading-none">
+                    {kpis.totalEmployees}
+                  </span>
+                  <span className="text-[8px] font-semibold text-slate-500 uppercase tracking-wider mt-0.5">
+                    Nhân sự
+                  </span>
                 </div>
-              ))}
+              </div>
+
+              {/* Danh sách đầy đủ cả 8 bộ phận bên phải */}
+              <div className="flex-1 min-w-0 flex flex-col justify-center space-y-0.5">
+                {departmentDist.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center justify-between text-[11px] leading-tight py-0.5"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span
+                        className="font-medium text-slate-700 truncate"
+                        title={item.label}
+                      >
+                        {item.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 font-mono tabular-nums pl-1.5">
+                      <span className="font-bold text-slate-900">{item.count}</span>
+                      <span className="text-slate-400 text-[10px]">
+                        ({item.percentage}%)
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Khối dưới: Thống kê loại hình nghỉ trong tháng */}
+          <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-1.5 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                  Thống kê loại hình nghỉ trong tháng
+                </h2>
+                <p className="text-[10px] text-slate-500 truncate">
+                  Phép năm, Không lương, Chế độ &amp; Đi muộn
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenAddLeave}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] transition-colors cursor-pointer shrink-0"
+              >
+                <CalendarPlus className="w-3.5 h-3.5" />
+                <span>+ Ghi nhận</span>
+              </button>
+            </div>
+
+            {/* Biểu đồ cột có đường lưới ngang đứt nét và trục Y tự động co giãn */}
+            <div className="flex-1 min-h-[110px] lg:min-h-0 flex flex-col justify-end pt-1">
+              <div className="flex-1 min-h-0 flex items-stretch gap-2">
+                {/* Y-Axis Labels */}
+                <div className="flex flex-col justify-between text-[10px] font-mono text-slate-400 text-right pr-1 select-none">
+                  {yTicks.map((tick, idx) => (
+                    <span key={idx} className="leading-none">
+                      {tick}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Plot Area */}
+                <div className="relative flex-1 flex items-end justify-around gap-3 px-2 border-b border-l border-slate-200">
+                  {/* Horizontal Dashed Grid Lines */}
+                  <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                    <div className="w-full border-b border-slate-100 border-dashed" />
+                    <div className="w-full border-b border-slate-100 border-dashed" />
+                    <div className="w-full border-b border-slate-100 border-dashed" />
+                    <div className="w-full border-b border-slate-100 border-dashed" />
+                    <div className="w-full" />
+                  </div>
+
+                  {leaveTypeDist.map((item) => {
+                    const heightPct = Math.round((item.count / yAxisMax) * 100);
+                    return (
+                      <div
+                        key={item.label}
+                        className="flex-1 flex flex-col items-center h-full justify-end group z-10"
+                      >
+                        <span className="text-[10px] font-mono font-bold text-slate-700 mb-0.5">
+                          {item.count}
+                        </span>
+                        <div
+                          className="w-full max-w-[36px] rounded-t-md transition-all duration-500 group-hover:opacity-90 shadow-xs"
+                          style={{
+                            height: `${Math.max(heightPct, item.count > 0 ? 10 : 4)}%`,
+                            backgroundColor: item.color,
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* X-Axis Labels */}
+              <div className="flex justify-around gap-1.5 pt-1.5 pl-6 pr-1 text-center shrink-0">
+                {leaveTypeDist.map((item) => (
+                  <div key={item.label} className="flex-1 min-w-0">
+                    <div
+                      className="text-[10px] font-bold text-slate-800 truncate leading-tight"
+                      title={item.label}
+                    >
+                      {item.label}
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-mono truncate leading-tight">
+                      {item.subLabel}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* KHỐI 3 (CỘT 3): Bảng Nghỉ phép & Đi muộn Gần đây */}
+        {/* ================= CỘT 2 (Ở GIỮA): NGHỈ PHÉP & ĐI MUỘN GẦN ĐÂY ================= */}
         <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col">
-          {/* Header của Khối 3 */}
+          {/* Header của Cột 2 */}
           <div className="flex items-center justify-between mb-2 shrink-0">
             <div>
               <h2 className="text-xs sm:text-sm font-bold text-slate-900">
@@ -648,7 +729,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          {/* Bảng dữ liệu 4 cột bên trong Khối 3 (flex-1 min-h-0 overflow-y-auto) */}
+          {/* Bảng dữ liệu 4 cột bên trong Cột 2 (flex-1 min-h-0 overflow-y-auto) */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200/80">
             {recentRecords.length === 0 ? (
               <div className="h-full min-h-[180px] flex flex-col items-center justify-center text-center p-4 text-xs text-slate-400">
@@ -759,6 +840,136 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   })}
                 </tbody>
               </table>
+            )}
+          </div>
+        </div>
+
+        {/* ================= CỘT 3 (BÊN PHẢI): TOP NGƯỜI NGHỈ VÀ ĐI MUỘN TRONG THÁNG ================= */}
+        <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col gap-3">
+          {/* Header & Bộ lọc điều khiển (shrink-0 flex flex-col gap-2) */}
+          <div className="shrink-0 flex flex-col gap-2">
+            {/* Hàng trên: Tiêu đề + Dropdown chọn Tháng/Năm */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                  Top Nghỉ phép &amp; Đi muộn
+                </h2>
+              </div>
+              <select
+                value={topMonthFilter}
+                onChange={(e) => setTopMonthFilter(e.target.value)}
+                aria-label="Chọn tháng thống kê Top Nghỉ phép và Đi muộn"
+                className="text-[16px] sm:text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 outline-none focus:border-[#0D9488] transition-colors cursor-pointer shrink-0"
+              >
+                {monthOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+                <option value="ALL_YEAR">Cả năm {currentYear}</option>
+              </select>
+            </div>
+
+            {/* Hàng dưới: Thanh chuyển đổi nhanh (Segmented Control / Tabs) */}
+            <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setTopTab('leave')}
+                className={`py-1.5 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  topTab === 'leave'
+                    ? 'bg-white text-[#0F232E] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>🏖️ Nghỉ phép</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTopTab('late')}
+                className={`py-1.5 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  topTab === 'late'
+                    ? 'bg-white text-[#0F232E] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>⏰ Đi muộn</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Danh sách xếp hạng Top nhân sự (flex-1 min-h-0 overflow-y-auto) */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-2">
+            {topRankingList.length === 0 ? (
+              <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center p-4 rounded-lg border border-dashed border-slate-200 bg-slate-50/50">
+                <div className="text-xs font-medium text-slate-400">
+                  Không có nhân sự nào phát sinh trong tháng này
+                </div>
+              </div>
+            ) : (
+              topRankingList.map((item, idx) => {
+                const rank = idx + 1;
+                const rankBadgeClass =
+                  rank === 1
+                    ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs'
+                    : rank === 2
+                      ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                      : rank === 3
+                        ? 'bg-orange-100 text-orange-800 border border-orange-200'
+                        : 'bg-slate-100 text-slate-500 border border-slate-200/80';
+
+                return (
+                  <div
+                    key={item.employeeId}
+                    className="flex items-center justify-between gap-2.5 p-2.5 rounded-xl border border-slate-200/70 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-50 transition-colors"
+                  >
+                    {/* Left: Rank Badge + Thông tin nhân sự */}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`w-7 h-7 rounded-lg font-mono text-xs font-extrabold flex items-center justify-center shrink-0 ${rankBadgeClass}`}
+                      >
+                        #{rank}
+                      </div>
+                      <div className="min-w-0">
+                        <div
+                          className="text-xs font-bold text-slate-900 truncate"
+                          title={item.fullName}
+                        >
+                          {item.fullName}
+                        </div>
+                        <div
+                          className="text-[10px] text-slate-500 font-mono truncate"
+                          title={`${item.employeeCode} · ${item.department}`}
+                        >
+                          {item.employeeCode} · {item.department}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Chỉ số thống kê */}
+                    <div className="text-right shrink-0 font-mono tabular-nums">
+                      {topTab === 'leave' ? (
+                        <>
+                          <div className="text-xs font-extrabold text-teal-700 bg-teal-50 border border-teal-200/70 px-2 py-0.5 rounded-md inline-block">
+                            {item.totalAmount} ngày
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {item.recordCount} lượt
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-xs font-extrabold text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md inline-block">
+                            {item.recordCount} lượt
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {item.totalAmount} giờ
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
