@@ -364,26 +364,26 @@ export function calculateMonthlyLeaveTypeDistribution(
     return month === 0 ? true : rMonth === month;
   });
 
-  const types: LeaveRecordType[] = [
-    'annual_leave',
-    'unpaid_leave',
-    'regime_leave',
-    'late_early',
+  const types: { type: LeaveRecordType; displayLabel: string }[] = [
+    { type: 'annual_leave', displayLabel: 'Nghỉ phép năm' },
+    { type: 'unpaid_leave', displayLabel: 'Nghỉ không lương' },
+    { type: 'regime_leave', displayLabel: 'Nghỉ chế độ' },
+    { type: 'late_early', displayLabel: 'Đi muộn' },
   ];
 
   const totalRecords = filtered.length || 1;
 
-  return types.map((t) => {
+  return types.map(({ type: t, displayLabel }) => {
     const matching = filtered.filter((r) => r.type === t);
     const count = matching.length;
     const totalAmount = matching.reduce((acc, item) => Number((acc + item.amount).toFixed(2)), 0);
     const meta = LEAVE_TYPE_META[t];
     return {
-      label: meta.label,
+      label: displayLabel,
       count,
       percentage: filtered.length === 0 ? 0 : Math.round((count / totalRecords) * 100),
       color: meta.color,
-      subLabel: `${count} lượt (${totalAmount} ${meta.unit})`,
+      subLabel: t === 'late_early' ? `${count} lượt` : `${count} lượt (${totalAmount} ${meta.unit})`,
     };
   });
 }

@@ -132,15 +132,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
   const onLeaveTodayEmpCount = new Set(leaveTodayRecords.map((r) => r.employeeId)).size;
   const leaveTodayCount = leaveTodayRecords.length;
-  const leaveTodayDays = Number(
-    leaveTodayRecords.reduce((sum, r) => sum + r.amount, 0).toFixed(2)
-  );
 
   const workingTodayCount = Math.max(0, activeEmployeesCount - onLeaveTodayEmpCount);
-  const attendancePct =
-    activeEmployeesCount > 0
-      ? Math.round((workingTodayCount / activeEmployeesCount) * 100)
-      : 100;
 
   // 3. Late today records (Đi muộn / Về sớm hôm nay)
   const lateTodayRecords = records.filter(
@@ -149,15 +142,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       isDateInRange(todayStr, r.startDate, r.endDate || r.startDate)
   );
   const lateTodayCount = lateTodayRecords.length;
-  const lateTodayHours = Number(
-    lateTodayRecords.reduce((sum, r) => sum + r.amount, 0).toFixed(2)
-  );
 
   // 4. Missing paper records ("Chưa có")
   const missingPaperRecords = records.filter(
     (r) => (r.paperStatus || (r.attachmentUrl ? 'Đã có' : 'Chưa có')) === 'Chưa có'
   );
   const missingPaperCount = missingPaperRecords.length;
+
+  const formatCompactDateRange = (startDate: string, endDate?: string) => {
+    const s = formatDateVN(startDate);
+    const e = formatDateVN(endDate || startDate);
+    if (!s) return '';
+    const [sD, sM, sY] = s.split('/');
+    const [eD, eM, eY] = (e || s).split('/');
+    if (!e || s === e || (sD === eD && sM === eM && sY === eY)) {
+      return `${sD}/${sM}`;
+    }
+    if (sM === eM && sY === eY) {
+      return `${sD}-${eD}/${sM}`;
+    }
+    return `${sD}/${sM}-${eD}/${eM}`;
+  };
 
   const handleOpenMissingPaper = () => {
     if (onFilterMissingPaper) {
@@ -452,12 +457,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <div
                 data-testid="kpi-total-employees"
-                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight"
+                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight mt-0.5"
               >
                 {workingTodayCount}/{activeEmployeesCount}
-              </div>
-              <div className="text-[11px] text-emerald-600 font-semibold truncate">
-                {attendancePct}% có mặt
               </div>
             </div>
           </div>
@@ -473,14 +475,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <div
                 data-testid="kpi-leave-today"
-                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight"
+                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight mt-0.5"
               >
                 {leaveTodayCount}
-              </div>
-              <div className="text-[11px] text-blue-600 font-medium truncate">
-                {leaveTodayCount === 0
-                  ? 'Đủ mặt 100%'
-                  : `Tổng ${leaveTodayDays} ngày nghỉ`}
               </div>
             </div>
           </div>
@@ -496,12 +493,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <div
                 data-testid="kpi-late-count"
-                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight"
+                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight mt-0.5"
               >
-                {lateTodayCount} lượt
-              </div>
-              <div className="text-[11px] text-amber-700 font-medium truncate">
-                Tổng {lateTodayHours} giờ
+                {lateTodayCount}
               </div>
             </div>
           </div>
@@ -521,12 +515,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <div
                 data-testid="kpi-missing-paper"
-                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight"
+                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight mt-0.5"
               >
                 {missingPaperCount}
-              </div>
-              <div className="text-[11px] text-rose-600 font-medium truncate">
-                Trạng thái &quot;Chưa có&quot;
               </div>
             </div>
           </button>
@@ -543,14 +534,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Khối trên: Phân bổ nhân sự theo Bộ phận */}
           <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1.5 shrink-0">
-              <div className="min-w-0">
-                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                  Phân bổ nhân sự theo Bộ phận
-                </h2>
-                <p className="text-[10px] text-slate-500 truncate">
-                  Tỷ trọng nhân sự tại {departmentDist.length} bộ phận
-                </p>
-              </div>
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                Phân bổ nhân sự theo Bộ phận
+              </h2>
               <button
                 type="button"
                 onClick={() => onNavigate('employees')}
@@ -623,14 +609,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Khối dưới: Thống kê loại hình nghỉ trong tháng */}
           <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1.5 shrink-0">
-              <div className="min-w-0">
-                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                  Thống kê loại hình nghỉ trong tháng
-                </h2>
-                <p className="text-[10px] text-slate-500 truncate">
-                  Phép năm, Không lương, Chế độ &amp; Đi muộn
-                </p>
-              </div>
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                Thống kê loại hình nghỉ trong tháng
+              </h2>
               <button
                 type="button"
                 onClick={onOpenAddLeave}
@@ -687,21 +668,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* X-Axis Labels */}
+              {/* X-Axis Labels (Chỉ giữ tên loại hình, xóa chú thích phụ) */}
               <div className="flex justify-around gap-1.5 pt-1.5 pl-6 pr-1 text-center shrink-0">
-                {leaveTypeDist.map((item) => (
-                  <div key={item.label} className="flex-1 min-w-0">
-                    <div
-                      className="text-[10px] font-bold text-slate-800 truncate leading-tight"
-                      title={item.label}
-                    >
-                      {item.label}
+                {leaveTypeDist.map((item) => {
+                  const cleanLabel = item.label.includes('Nghỉ chế độ')
+                    ? 'Nghỉ chế độ'
+                    : item.label.includes('Đi muộn')
+                      ? 'Đi muộn'
+                      : item.label;
+                  return (
+                    <div key={item.label} className="flex-1 min-w-0">
+                      <div
+                        className="text-[10px] font-bold text-slate-800 truncate leading-tight"
+                        title={cleanLabel}
+                      >
+                        {cleanLabel}
+                      </div>
                     </div>
-                    <div className="text-[9px] text-slate-500 font-mono truncate leading-tight">
-                      {item.subLabel}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -710,15 +695,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* ================= CỘT 2 (Ở GIỮA): NGHỈ PHÉP & ĐI MUỘN GẦN ĐÂY ================= */}
         <div className="h-full min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col">
           {/* Header của Cột 2 */}
-          <div className="flex items-center justify-between mb-2 shrink-0">
-            <div>
-              <h2 className="text-xs sm:text-sm font-bold text-slate-900">
-                Nghỉ phép &amp; Đi muộn Gần đây
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                Tổng số {recentRecords.length} bản ghi phát sinh
-              </p>
-            </div>
+          <div className="flex items-center justify-between mb-2.5 shrink-0">
+            <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+              Nghỉ phép &amp; Đi muộn Gần đây
+            </h2>
             <button
               type="button"
               onClick={() => onNavigate('leave_logs')}
@@ -752,7 +732,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     const hasPaper =
                       rec.paperStatus === 'Đã có' ||
                       (!rec.paperStatus && Boolean(rec.attachmentUrl));
-                    const shortDate = formatDateVN(rec.startDate).slice(0, 5);
+                    const dateDisplay = formatCompactDateRange(
+                      rec.startDate,
+                      rec.endDate
+                    );
 
                     return (
                       <tr
@@ -760,31 +743,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         className="hover:bg-slate-50/90 transition-colors"
                       >
                         {/* 1. THỜI GIAN */}
-                        <td className="py-1.5 px-2.5 whitespace-nowrap align-middle">
+                        <td className="py-2 px-2.5 whitespace-nowrap align-middle">
                           <div className="font-mono font-bold text-slate-800 text-[11px]">
-                            {shortDate}
-                          </div>
-                          <div className="text-[10px] font-mono text-slate-500">
-                            {rec.amount} {meta.unit}
+                            {dateDisplay}
                           </div>
                         </td>
 
-                        {/* 2. NHÂN SỰ */}
-                        <td className="py-1.5 px-2.5 align-middle max-w-[125px]">
+                        {/* 2. NHÂN SỰ (Chỉ hiển thị Họ và tên) */}
+                        <td className="py-2 px-2.5 align-middle max-w-[140px]">
                           <div
                             className="font-semibold text-slate-900 truncate text-[11px]"
                             title={emp?.fullName || 'N/A'}
                           >
                             {emp?.fullName || 'N/A'}
                           </div>
-                          <div className="text-[10px] text-slate-400 truncate font-mono">
-                            {emp?.employeeCode}
-                            {emp?.department ? ` · ${emp.department}` : ''}
-                          </div>
                         </td>
 
                         {/* 3. LOẠI GIẤY PHÉP */}
-                        <td className="py-1.5 px-2 whitespace-nowrap align-middle">
+                        <td className="py-2 px-2 whitespace-nowrap align-middle">
                           <span
                             className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold"
                             style={{
@@ -803,7 +779,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </td>
 
                         {/* 4. GIẤY PHÉP */}
-                        <td className="py-1.5 px-2.5 text-center whitespace-nowrap align-middle">
+                        <td className="py-2 px-2.5 text-center whitespace-nowrap align-middle">
                           {rec.attachmentUrl ? (
                             <button
                               type="button"
@@ -850,11 +826,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="shrink-0 flex flex-col gap-2">
             {/* Hàng trên: Tiêu đề + Dropdown chọn Tháng/Năm */}
             <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                  Top Nghỉ phép &amp; Đi muộn
-                </h2>
-              </div>
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                Top Nghỉ phép &amp; Đi muộn
+              </h2>
               <select
                 value={topMonthFilter}
                 onChange={(e) => setTopMonthFilter(e.target.value)}
@@ -922,26 +896,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     key={item.employeeId}
                     className="flex items-center justify-between gap-2.5 p-2.5 rounded-xl border border-slate-200/70 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-50 transition-colors"
                   >
-                    {/* Left: Rank Badge + Thông tin nhân sự */}
+                    {/* Left: Rank Badge + Họ và tên nhân viên (Bỏ Mã NV & Bộ phận) */}
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div
                         className={`w-7 h-7 rounded-lg font-mono text-xs font-extrabold flex items-center justify-center shrink-0 ${rankBadgeClass}`}
                       >
                         #{rank}
                       </div>
-                      <div className="min-w-0">
-                        <div
-                          className="text-xs font-bold text-slate-900 truncate"
-                          title={item.fullName}
-                        >
-                          {item.fullName}
-                        </div>
-                        <div
-                          className="text-[10px] text-slate-500 font-mono truncate"
-                          title={`${item.employeeCode} · ${item.department}`}
-                        >
-                          {item.employeeCode} · {item.department}
-                        </div>
+                      <div
+                        className="text-xs font-bold text-slate-900 truncate"
+                        title={item.fullName}
+                      >
+                        {item.fullName}
                       </div>
                     </div>
 
