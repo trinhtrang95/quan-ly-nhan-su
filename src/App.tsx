@@ -1225,6 +1225,7 @@ export default function App() {
                 departmentDist={departmentDist}
                 leaveTypeDist={leaveTypeDist}
                 employees={companyEmployees}
+                records={companyRecords}
                 recentRecords={sortedRecords}
                 matrixRows={matrixRows2026}
                 onNavigate={setActiveModule}
@@ -1234,6 +1235,10 @@ export default function App() {
                   setLeaveDefaultMonth(undefined);
                   setLeaveDefaultYear(undefined);
                   setIsLeaveModalOpen(true);
+                }}
+                onOpenAddEmployee={() => {
+                  setEditingEmployee(null);
+                  setIsEmpModalOpen(true);
                 }}
                 onInspectAttachment={(url, title) =>
                   setLightboxImage({ url, title })
