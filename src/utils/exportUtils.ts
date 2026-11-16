@@ -14,7 +14,13 @@ import {
   EmployeeColumnId,
   getEmployeeColumnTextValue,
 } from './employeeColumns';
-import { formatDateVN, getDepartmentPriorityRank, LEAVE_TYPE_META } from './hrCalculations';
+import {
+  formatDateVN,
+  getDepartmentPriorityRank,
+  getShortGroupCode,
+  LEAVE_TYPE_META,
+  MonthlyAttendanceSummaryReport,
+} from './hrCalculations';
 
 /**
  * Triggers a browser file download from a Blob
@@ -637,3 +643,114 @@ export function exportLeaveRecordsToExcel(
   });
   triggerBlobDownload(blob, `HR_PRO_Nhat_Ky_Nghi_Phep_Di_Muon_${new Date().toISOString().slice(0, 10)}.xls`);
 }
+
+/**
+ * Exports the Monthly Attendance & Leave Summary Matrix (Khối 1 + Khối 2 + Khối 3 days 01..31) to Excel (.xls)
+ */
+export function exportMonthlyAttendanceMatrixToExcel(
+  report: MonthlyAttendanceSummaryReport,
+  groups?: DepartmentGroup[]
+): void {
+  const monthPadded = String(report.month).padStart(2, '0');
+  const dayHeadersHtml = report.dayColumns
+    .map(
+      (col) =>
+        `<th style="text-align:center;min-width:34px;${
+          col.isToday
+            ? 'background-color:#B45309;color:#FFFFFF;'
+            : col.isSunday
+            ? 'background-color:#1E293B;color:#FCA5A5;'
+            : ''
+        }">${col.dayLabel}<br/><span style="font-size:8pt;font-weight:normal;">${col.weekdayLabel}</span></th>`
+    )
+    .join('');
+
+  const bodyRowsHtml = report.rows
+    .map((row) => {
+      const dayCellsHtml = report.dayColumns
+        .map((col) => {
+          const badges = row.dayBadges[col.day] || [];
+          if (badges.length === 0) {
+            return `<td style="text-align:center;color:#CBD5E1;${
+              col.isToday
+                ? 'background-color:#FFFBEB;'
+                : col.isSunday
+                ? 'background-color:#F8FAFC;'
+                : ''
+            }">-</td>`;
+          }
+          const text = badges.map((b) => b.code).join(' ');
+          return `<td style="text-align:center;font-weight:bold;${
+            col.isToday ? 'background-color:#FEF3C7;' : 'background-color:#F0FDFA;'
+          }">${escapeHtml(text)}</td>`;
+        })
+        .join('');
+
+      const lateSummary =
+        row.monthLateHours > 0
+          ? `${row.monthLateHours}h (${row.monthLateCount}L)`
+          : '-';
+
+      return `
+        <tr>
+          <td style="font-weight:bold;color:#0D9488;text-align:center;">${escapeHtml(row.employee.employeeCode)}</td>
+          <td style="font-weight:bold;">${escapeHtml(row.employee.fullName)}</td>
+          <td style="text-align:center;font-weight:bold;">${escapeHtml(getShortGroupCode(row.employee.department, groups))}</td>
+          <td style="text-align:center;font-weight:bold;background-color:#F0FDFA;color:#0F766E;">${row.remainingAnnualLeave}</td>
+          <td style="text-align:center;font-weight:bold;">${row.monthAnnualAndRegimeDays > 0 ? row.monthAnnualAndRegimeDays : '-'}</td>
+          <td style="text-align:center;color:#B45309;font-weight:bold;">${row.monthUnpaidDays > 0 ? row.monthUnpaidDays : '-'}</td>
+          <td style="text-align:center;color:#DC2626;font-weight:bold;">${escapeHtml(lateSummary)}</td>
+          ${dayCellsHtml}
+        </tr>
+      `;
+    })
+    .join('');
+
+  const html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="UTF-8" />
+      <style>
+        table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 9.5pt; }
+        th { background-color: #0F232E; color: #FFFFFF; font-weight: bold; padding: 6px 6px; border: 1px solid #334155; }
+        td { padding: 5px 6px; border: 1px solid #CBD5E1; }
+      </style>
+    </head>
+    <body>
+      <h2>BẢNG TỔNG HỢP NGHỈ PHÉP &amp; ĐI MUỘN - THÁNG ${monthPadded}/${report.year}</h2>
+      <p>
+        Tổng Phép năm/Chế độ: <b>${report.kpi.totalAnnualAndRegimeDays} ngày (${report.kpi.totalAnnualAndRegimeCount} lượt)</b> |
+        Tổng Không lương: <b>${report.kpi.totalUnpaidDays} ngày (${report.kpi.totalUnpaidCount} lượt)</b> |
+        Tổng Đi muộn: <b>${report.kpi.totalLateHours} giờ (${report.kpi.totalLateCount} lượt)</b> |
+        Nhân sự phát sinh: <b>${report.kpi.employeesWithActivityCount}/${report.kpi.totalEmployeesCount} nhân sự</b>
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>MÃ NV</th>
+            <th>HỌ VÀ TÊN</th>
+            <th>NHÓM / BỘ PHẬN</th>
+            <th>TỒN PHÉP NĂM</th>
+            <th>NGHỈ PHÉP NĂM / CHẾ ĐỘ</th>
+            <th>NGHỈ KHÔNG LƯƠNG</th>
+            <th>ĐI MUỘN</th>
+            ${dayHeadersHtml}
+          </tr>
+        </thead>
+        <tbody>
+          ${bodyRowsHtml}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\uFEFF' + html], {
+    type: 'application/vnd.ms-excel;charset=utf-8;',
+  });
+  triggerBlobDownload(
+    blob,
+    `Bang_Tong_Hop_Nghi_Phep_Di_Muon_Thang_${monthPadded}_${report.year}.xls`
+  );
+}
+

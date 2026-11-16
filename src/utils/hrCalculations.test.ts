@@ -326,3 +326,51 @@ test('employeeColumns catalog defines all 6 groups and extracts accurate values 
   );
 });
 
+test('calculateMonthlyAttendanceMatrix generates accurate 30/31 day columns, today highlight, short group codes, and standardized PN/CĐ/KL/ĐM badges', async () => {
+  const {
+    calculateMonthlyAttendanceMatrix,
+    formatLateDurationBadge,
+    getShortGroupCode,
+  } = await import('./hrCalculations');
+
+  assert.equal(formatLateDurationBadge(0.5), '30p');
+  assert.equal(formatLateDurationBadge(0.25), '15p');
+  assert.equal(formatLateDurationBadge(1.5), '1.5h');
+  assert.equal(formatLateDurationBadge(2), '2h');
+
+  assert.equal(getShortGroupCode('PE'), 'PE');
+  assert.equal(getShortGroupCode('ST'), 'ST');
+  assert.equal(getShortGroupCode('Quản lý chung'), 'QLC');
+  assert.equal(getShortGroupCode('JIG/AUTO 2'), 'JIG 2');
+  assert.equal(getShortGroupCode('DOCUMENT'), 'DOC');
+
+  const report = calculateMonthlyAttendanceMatrix(
+    INITIAL_EMPLOYEES,
+    INITIAL_LEAVE_RECORDS,
+    2026,
+    11,
+    'ALL',
+    '',
+    '2026-11-15'
+  );
+
+  assert.equal(report.year, 2026);
+  assert.equal(report.month, 11);
+  assert.equal(report.daysInMonth, 30);
+  assert.equal(report.dayColumns.length, 30);
+  assert.equal(report.dayColumns[14].dayLabel, '15');
+  assert.equal(report.dayColumns[14].isToday, true);
+  assert.equal(report.rows.length, INITIAL_EMPLOYEES.length);
+
+  // Verify standardized badge codes are strictly in ['PN', 'CĐ', 'KL', 'ĐM']
+  const allBadges = report.rows.flatMap((r) =>
+    Object.values(r.dayBadges).flat()
+  );
+  assert.ok(allBadges.length > 0);
+  for (const b of allBadges) {
+    assert.ok(['PN', 'CĐ', 'KL', 'ĐM'].includes(b.code));
+    assert.ok(b.durationText.length > 0);
+  }
+});
+
+

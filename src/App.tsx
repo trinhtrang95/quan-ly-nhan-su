@@ -64,7 +64,7 @@ import {
   updatePositionInSupabase,
 } from './utils/supabaseService';
 import { LoginView } from './components/LoginView';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, ReportSubTab } from './components/Sidebar';
 import { TopBannerHeader } from './components/TopBannerHeader';
 import { DashboardView } from './components/DashboardView';
 import { EmployeeDirectoryView } from './components/EmployeeDirectoryView';
@@ -138,6 +138,8 @@ export default function App() {
   enforceCloudStrictCacheVersion();
 
   const [activeModule, setActiveModule] = useState<ActiveModule>('dashboard');
+  const [reportSubTab, setReportSubTab] =
+    useState<ReportSubTab>('monthly_summary');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -1469,6 +1471,8 @@ export default function App() {
           setLeaveInitialTypeFilter('ALL');
           setActiveModule(mod);
         }}
+        reportSubTab={reportSubTab}
+        onSelectReportSubTab={(subTab) => setReportSubTab(subTab)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
         employeeCount={companyEmployees.length}
@@ -1664,6 +1668,7 @@ export default function App() {
                 employees={companyEmployees}
                 records={companyRecords}
                 groups={effectiveGroups}
+                activeSubTab={reportSubTab}
                 onExportMatrixExcel={(rows, year, viewMode) => {
                   exportAnnualMatrixToExcel(rows, year, viewMode);
                   showToast(`Đã xuất tệp Excel Báo cáo Ma trận Tồn phép năm ${year}.`);

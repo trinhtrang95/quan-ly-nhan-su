@@ -509,6 +509,332 @@ export function calculateAnnualMatrixReport(
   });
 }
 
+export interface MonthlyDayColumnMeta {
+  day: number; // 1..31
+  dayLabel: string; // '01'..'31'
+  dateStr: string; // 'YYYY-MM-DD'
+  weekdayLabel: string; // 'CN', 'T2'..'T7'
+  isSunday: boolean;
+  isWeekend: boolean;
+  isToday: boolean;
+}
+
+export interface MonthlyDayBadge {
+  id: string;
+  type: LeaveRecordType;
+  code: 'PN' | 'CĐ' | 'KL' | 'ĐM'; // Standardized short badge code
+  durationText: string; // e.g. '30p', '1.5h', '3h', '1 ngày', '0.5 ngày'
+  tooltip: string;
+  record: LeaveRecord;
+}
+
+export interface EmployeeMonthlyAttendanceRow {
+  employee: Employee;
+  remainingAnnualLeave: number;
+  monthAnnualDays: number;
+  monthRegimeDays: number;
+  monthAnnualAndRegimeDays: number;
+  monthAnnualAndRegimeCount: number;
+  monthUnpaidDays: number;
+  monthUnpaidCount: number;
+  monthLateHours: number;
+  monthLateCount: number;
+  hasAnyActivityInMonth: boolean;
+  monthRecords: LeaveRecord[];
+  dayBadges: Record<number, MonthlyDayBadge[]>; // day 1..daysInMonth -> badges
+}
+
+export interface MonthlyAttendanceSummaryReport {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  dayColumns: MonthlyDayColumnMeta[];
+  rows: EmployeeMonthlyAttendanceRow[];
+  kpi: {
+    totalAnnualAndRegimeDays: number;
+    totalAnnualAndRegimeCount: number;
+    totalUnpaidDays: number;
+    totalUnpaidCount: number;
+    totalLateHours: number;
+    totalLateCount: number;
+    employeesWithActivityCount: number;
+    totalEmployeesCount: number;
+  };
+}
+
+/**
+ * Formats late hours into a compact badge code (e.g. 0.5 -> '30p', 0.25 -> '15p', 1 -> '1h', 1.5 -> '1.5h')
+ */
+export function formatLateDurationBadge(hours: number): string {
+  if (hours <= 0) return '0p';
+  if (hours < 1) {
+    return `${Math.round(hours * 60)}p`;
+  }
+  return `${Number(hours.toFixed(2))}h`;
+}
+
+/**
+ * Returns a short group/department code (e.g. PE, ST, ME, IOT, DOC, JIG 2, AUTO 1, QLC)
+ */
+export function getShortGroupCode(
+  department?: string | null,
+  groups?: DepartmentGroup[]
+): string {
+  const raw = (department || '').trim();
+  if (!raw || raw === '-' || raw === '—') return '-';
+
+  if (groups && groups.length > 0) {
+    const matched = groups.find(
+      (g) => g.name.trim().toLowerCase() === raw.toLowerCase()
+    );
+    if (matched && matched.code && matched.code.trim()) {
+      return matched.code.trim().toUpperCase();
+    }
+  }
+
+  const lower = raw.toLowerCase();
+  if (lower.includes('quản lý chung')) return 'QLC';
+  if (lower.includes('document')) return 'DOC';
+  if (lower.includes('jig/auto 2')) return 'JIG 2';
+  if (lower.includes('auto 1')) return 'AUTO 1';
+  if (raw.length <= 8) return raw.toUpperCase();
+
+  // Extract uppercase acronym for longer department names
+  const words = raw.split(/[\s/&,-]+/).filter(Boolean);
+  if (words.length >= 2) {
+    return words
+      .map((w) => w[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 6);
+  }
+  return raw.slice(0, 6).toUpperCase();
+}
+
+/**
+ * Builds the Monthly Attendance & Leave Matrix Report for a given year, month (1..12),
+ * department filter, and search query.
+ */
+export function calculateMonthlyAttendanceMatrix(
+  employees: Employee[],
+  records: LeaveRecord[],
+  year: number,
+  month: number,
+  departmentFilter: string = 'ALL',
+  searchQuery: string = '',
+  todayDateStr?: string
+): MonthlyAttendanceSummaryReport {
+  const resolvedToday =
+    todayDateStr ||
+    (() => {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    })();
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const weekdayMap = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  const monthPadded = String(month).padStart(2, '0');
+
+  const dayColumns: MonthlyDayColumnMeta[] = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dayLabel = String(d).padStart(2, '0');
+    const dateStr = `${year}-${monthPadded}-${dayLabel}`;
+    const dt = new Date(year, month - 1, d);
+    const dow = dt.getDay();
+    dayColumns.push({
+      day: d,
+      dayLabel,
+      dateStr,
+      weekdayLabel: weekdayMap[dow],
+      isSunday: dow === 0,
+      isWeekend: dow === 0 || dow === 6,
+      isToday: dateStr === resolvedToday,
+    });
+  }
+
+  // Filter employees by department and searchQuery (Mã NV or Họ tên), then sort by default 2-tier priority
+  const q = searchQuery.trim().toLowerCase();
+  const filteredEmployees = sortEmployees(
+    employees.filter((emp) => {
+      if (departmentFilter !== 'ALL' && emp.department !== departmentFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        emp.employeeCode.toLowerCase().includes(q) ||
+        emp.fullName.toLowerCase().includes(q) ||
+        (emp.department || '').toLowerCase().includes(q)
+      );
+    }),
+    null,
+    null
+  );
+
+  // Also compute annual matrix for `year` to get accurate `remainingAnnualLeave`
+  const annualMatrixRows = calculateAnnualMatrixReport(
+    filteredEmployees,
+    records,
+    year,
+    'ALL'
+  );
+  const annualRowMap = new Map<string, EmployeeAnnualMatrixRow>(
+    annualMatrixRows.map((r) => [r.employee.id, r])
+  );
+
+  const monthStartStr = `${year}-${monthPadded}-01`;
+  const monthEndStr = `${year}-${monthPadded}-${String(daysInMonth).padStart(2, '0')}`;
+
+  let totalAnnualAndRegimeDays = 0;
+  let totalAnnualAndRegimeCount = 0;
+  let totalUnpaidDays = 0;
+  let totalUnpaidCount = 0;
+  let totalLateHours = 0;
+  let totalLateCount = 0;
+  let employeesWithActivityCount = 0;
+
+  const rows: EmployeeMonthlyAttendanceRow[] = filteredEmployees.map((employee) => {
+    const annualRow = annualRowMap.get(employee.id);
+    const remainingAnnualLeave = annualRow
+      ? annualRow.remainingAnnualLeave
+      : employee.standardAnnualLeave;
+
+    const dayBadges: Record<number, MonthlyDayBadge[]> = {};
+    for (let d = 1; d <= daysInMonth; d++) {
+      dayBadges[d] = [];
+    }
+
+    // Find all records for this employee that overlap with this month
+    const empMonthRecords = records.filter((rec) => {
+      if (rec.employeeId !== employee.id) return false;
+      const start = rec.startDate;
+      const end = rec.endDate || rec.startDate;
+      return start <= monthEndStr && end >= monthStartStr;
+    });
+
+    let monthAnnualDays = 0;
+    let monthRegimeDays = 0;
+    let monthAnnualAndRegimeCount = 0;
+    let monthUnpaidDays = 0;
+    let monthUnpaidCount = 0;
+    let monthLateHours = 0;
+    let monthLateCount = 0;
+
+    for (const rec of empMonthRecords) {
+      const { year: rYear, month: rMonth } = getYearMonth(rec.startDate);
+      if (rYear === year && rMonth === month) {
+        if (rec.type === 'annual_leave') {
+          monthAnnualDays = Number((monthAnnualDays + rec.amount).toFixed(2));
+          monthAnnualAndRegimeCount += 1;
+        } else if (rec.type === 'regime_leave') {
+          monthRegimeDays = Number((monthRegimeDays + rec.amount).toFixed(2));
+          monthAnnualAndRegimeCount += 1;
+        } else if (rec.type === 'unpaid_leave') {
+          monthUnpaidDays = Number((monthUnpaidDays + rec.amount).toFixed(2));
+          monthUnpaidCount += 1;
+        } else if (rec.type === 'late_early') {
+          monthLateHours = Number((monthLateHours + rec.amount).toFixed(2));
+          monthLateCount += 1;
+        }
+      }
+
+      // Populate daily badges for each day in the month covered by [rec.startDate, rec.endDate]
+      const start = rec.startDate;
+      const end = rec.endDate || rec.startDate;
+
+      for (const col of dayColumns) {
+        if (isDateInRange(col.dateStr, start, end)) {
+          let code: 'PN' | 'CĐ' | 'KL' | 'ĐM' = 'PN';
+          let durationText = `${rec.amount} ngày`;
+          if (rec.type === 'annual_leave') {
+            code = 'PN';
+            durationText = `${rec.amount} ngày`;
+          } else if (rec.type === 'regime_leave') {
+            code = 'CĐ';
+            durationText = `${rec.amount} ngày`;
+          } else if (rec.type === 'unpaid_leave') {
+            code = 'KL';
+            durationText = `${rec.amount} ngày`;
+          } else if (rec.type === 'late_early') {
+            code = 'ĐM';
+            durationText = formatLateDurationBadge(rec.amount);
+          }
+
+          const meta = LEAVE_TYPE_META[rec.type];
+          dayBadges[col.day].push({
+            id: `${rec.id}-${col.day}`,
+            type: rec.type,
+            code,
+            durationText,
+            tooltip:
+              rec.type === 'late_early'
+                ? `Đi muộn: ${durationText}${rec.reason ? ` — ${rec.reason}` : ''}`
+                : `${meta.shortLabel}: ${rec.amount} ${meta.unit}${rec.reason ? ` — ${rec.reason}` : ''}`,
+            record: rec,
+          });
+        }
+      }
+    }
+
+    const monthAnnualAndRegimeDays = Number(
+      (monthAnnualDays + monthRegimeDays).toFixed(2)
+    );
+    const hasAnyActivityInMonth =
+      monthAnnualAndRegimeDays > 0 ||
+      monthUnpaidDays > 0 ||
+      monthLateHours > 0 ||
+      empMonthRecords.length > 0;
+
+    totalAnnualAndRegimeDays = Number(
+      (totalAnnualAndRegimeDays + monthAnnualAndRegimeDays).toFixed(2)
+    );
+    totalAnnualAndRegimeCount += monthAnnualAndRegimeCount;
+    totalUnpaidDays = Number((totalUnpaidDays + monthUnpaidDays).toFixed(2));
+    totalUnpaidCount += monthUnpaidCount;
+    totalLateHours = Number((totalLateHours + monthLateHours).toFixed(2));
+    totalLateCount += monthLateCount;
+    if (hasAnyActivityInMonth) {
+      employeesWithActivityCount += 1;
+    }
+
+    return {
+      employee,
+      remainingAnnualLeave,
+      monthAnnualDays,
+      monthRegimeDays,
+      monthAnnualAndRegimeDays,
+      monthAnnualAndRegimeCount,
+      monthUnpaidDays,
+      monthUnpaidCount,
+      monthLateHours,
+      monthLateCount,
+      hasAnyActivityInMonth,
+      monthRecords: empMonthRecords,
+      dayBadges,
+    };
+  });
+
+  return {
+    year,
+    month,
+    daysInMonth,
+    dayColumns,
+    rows,
+    kpi: {
+      totalAnnualAndRegimeDays,
+      totalAnnualAndRegimeCount,
+      totalUnpaidDays,
+      totalUnpaidCount,
+      totalLateHours,
+      totalLateCount,
+      employeesWithActivityCount,
+      totalEmployeesCount: filteredEmployees.length,
+    },
+  };
+}
+
 /**
  * Calculates the 5 KPI stat cards on the Dashboard
  * Low leave threshold: remaining annual leave <= 2 days
