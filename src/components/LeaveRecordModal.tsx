@@ -369,10 +369,10 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
     >
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[96vh]">
         {/* Header */}
-        <div className="bg-[#0F232E] text-white px-4 py-2.5 flex items-center justify-between shrink-0">
+        <div className="bg-white border-b border-slate-200 text-slate-800 px-4 py-2.5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <CalendarClock className="w-4 h-4 text-[#2DD4BF]" />
-            <h3 id="leave-modal-title" className="text-sm font-bold tracking-wide">
+            <CalendarClock className="w-4 h-4 text-[#14539E]" />
+            <h3 id="leave-modal-title" className="text-sm font-bold text-slate-800 tracking-wide">
               {editingRecord
                 ? 'Cập nhật Ghi chép Nghỉ phép & Đi muộn'
                 : 'Ghi nhận Nghỉ phép & Đi muộn Mới'}
@@ -382,7 +382,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Đóng cửa sổ ghi nhận"
-            className="p-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -409,7 +409,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                 }}
                 className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
                   activeTab === 'leave'
-                    ? 'bg-[#0F232E] text-white shadow-xs'
+                    ? 'bg-[#14539E] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                 }`}
               >
@@ -424,7 +424,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                 }}
                 className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
                   activeTab === 'late'
-                    ? 'bg-[#0F232E] text-white shadow-xs'
+                    ? 'bg-[#14539E] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                 }`}
               >
@@ -961,7 +961,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             </button>
             <button
               type="submit"
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
               <span>{editingRecord ? 'Lưu thay đổi' : 'Xác nhận ghi chép'}</span>

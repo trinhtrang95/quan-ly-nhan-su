@@ -6,11 +6,11 @@
 }
 
 :root {
-  --theme-sidebar-bg: #1E293B;
-  --theme-sidebar-darker: #0F172A;
-  --theme-sidebar-active: #334155;
-  --theme-primary: #2563EB;
-  --theme-primary-hover: #1D4ED8;
+  --theme-sidebar-bg: #14539E;
+  --theme-sidebar-darker: #0F3E77;
+  --theme-sidebar-active: #1B64BA;
+  --theme-primary: #14539E;
+  --theme-primary-hover: #2563EB;
   --theme-accent-light: #93C5FD;
   --theme-page-bg: #F8FAFC;
 }
@@ -29,25 +29,8 @@
 }
 
 /* ==========================================================================
-   DYNAMIC THEME ENGINE: Dark Slate (#1E293B) & Blue Accent (#2563EB / #1D4ED8)
+   DYNAMIC THEME ENGINE: Brand Blue (#14539E) & Hover (#2563EB / bg-blue-600)
    ========================================================================== */
-.bg-\[\#0F232E\],
-.bg-\[\#0B224B\] {
-  background-color: var(--theme-sidebar-bg) !important;
-}
-.bg-\[\#0B1B24\] {
-  background-color: var(--theme-sidebar-darker) !important;
-}
-.bg-\[\#163C45\],
-.hover\:bg-\[\#163C45\]:hover {
-  background-color: var(--theme-sidebar-active) !important;
-}
-.from-\[\#0F232E\] {
-  --tw-gradient-from: var(--theme-sidebar-bg) !important;
-}
-.to-\[\#163546\] {
-  --tw-gradient-to: var(--theme-sidebar-darker) !important;
-}
 .bg-\[\#0D9488\],
 .hover\:bg-\[\#0D9488\]:hover {
   background-color: var(--theme-primary) !important;

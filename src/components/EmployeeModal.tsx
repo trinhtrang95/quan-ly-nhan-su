@@ -304,8 +304,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     >
       <div className="bg-white rounded-xl border border-slate-200 shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-visible">
         {/* Modal Header (Compact, không có dòng chú thích thừa) */}
-        <div className="bg-[#0F232E] text-white px-5 py-3 rounded-t-xl flex items-center justify-between shrink-0">
-          <h3 id="employee-modal-title" className="text-sm sm:text-base font-bold">
+        <div className="bg-white border-b border-slate-200 text-slate-800 px-5 py-3 rounded-t-xl flex items-center justify-between shrink-0">
+          <h3 id="employee-modal-title" className="text-sm sm:text-base font-bold text-slate-800">
             {editingEmployee
               ? `Cập nhật Hồ sơ Nhân sự (${editingEmployee.employeeCode})`
               : 'Thêm Hồ sơ Nhân sự Mới'}
@@ -314,7 +314,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Đóng cửa sổ"
-            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -791,7 +791,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
               </button>
               <button
                 type="submit"
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>{editingEmployee ? 'Lưu thay đổi' : 'Thêm nhân sự'}</span>

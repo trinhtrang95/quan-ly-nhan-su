@@ -439,15 +439,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="lg:h-screen lg:max-h-screen lg:overflow-hidden flex flex-col justify-between p-3 gap-3">
-      {/* 1. KHỐI HERO BANNER CHÀO MỪNG (shrink-0) */}
+      {/* 1. KHỐI HERO BANNER CHÀO MỪNG (shrink-0 - Nền trắng tinh bg-white border-slate-200 shadow-sm) */}
       <section aria-label="Hero Banner Chào mừng" className="shrink-0 relative z-30">
-        <div className="rounded-2xl px-6 py-4 bg-gradient-to-r from-[#0F232E] to-[#163546] text-white shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shrink-0">
+        <div className="rounded-2xl px-6 py-4 bg-white border border-slate-200 shadow-sm text-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shrink-0">
           {/* Cụm Bên Trái: Thời gian & Lời chào + Ô tìm tính năng bên dưới */}
           <div className="min-w-0 w-full md:w-auto flex-1">
-            <div className="text-xs text-teal-400 font-medium">
+            <div className="text-xs text-[#14539E] font-semibold">
               {formatDateHeader(currentTime)}
             </div>
-            <h1 className="text-xl md:text-2xl font-bold text-white mt-0.5 truncate">
+            <h1 className="text-xl md:text-2xl font-bold text-slate-800 mt-0.5 truncate">
               {greeting}, {displayUserName}! 👋
             </h1>
 
@@ -456,8 +456,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ref={searchContainerRef}
               className="relative w-full md:w-80 lg:w-96 mt-2.5"
             >
-              <div className="flex items-center gap-2.5 bg-white/10 hover:bg-white/15 focus-within:bg-white/20 border border-white/15 rounded-xl px-3.5 py-2 backdrop-blur transition-colors">
-                <Search className="w-4 h-4 text-slate-300 shrink-0" />
+              <div className="flex items-center gap-2.5 bg-slate-50 hover:bg-slate-100/80 focus-within:bg-white border border-slate-200 focus-within:border-[#14539E] rounded-xl px-3.5 py-2 transition-colors">
+                <Search className="w-4 h-4 text-slate-400 shrink-0" />
                 <input
                   type="text"
                   value={menuQuery}
@@ -477,7 +477,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     }
                   }}
                   placeholder="Tìm tính năng trong menu..."
-                  className="w-full bg-transparent text-[16px] md:text-sm text-white placeholder-slate-300 outline-none"
+                  className="w-full bg-transparent text-[16px] md:text-sm text-slate-800 placeholder-slate-400 outline-none"
                 />
               </div>
 
@@ -529,11 +529,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Cụm Bên Phải: Đồng hồ số thời gian thực */}
-          <div className="bg-white/10 border border-white/10 backdrop-blur px-4 py-2 rounded-xl text-center shrink-0">
-            <div className="text-xl md:text-2xl font-bold text-teal-300 tracking-wider font-mono leading-tight">
+          <div className="bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-center shrink-0">
+            <div className="text-xl md:text-2xl font-bold text-[#14539E] tracking-wider font-mono leading-tight">
               {formatTime(currentTime)}
             </div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-300">
+            <div className="text-[10px] uppercase tracking-widest text-slate-500">
               GIỜ VIỆT NAM
             </div>
           </div>
@@ -1027,12 +1027,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             ) : (
               <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-[#0F232E] text-white text-[10px] font-semibold tracking-wider uppercase z-10">
+                <thead className="sticky top-0 bg-slate-50 text-slate-500 text-[10px] font-medium tracking-wider uppercase border-b border-slate-200 z-10">
                   <tr>
-                    <th className="py-2 px-2.5 bg-[#0F232E]">Thời gian</th>
-                    <th className="py-2 px-2.5 bg-[#0F232E]">Nhân sự</th>
-                    <th className="py-2 px-2 bg-[#0F232E]">Loại hình</th>
-                    <th className="py-2 px-2.5 text-center bg-[#0F232E]">Trạng thái</th>
+                    <th className="py-2 px-2.5 bg-slate-50 font-medium">Thời gian</th>
+                    <th className="py-2 px-2.5 bg-slate-50 font-medium">Nhân sự</th>
+                    <th className="py-2 px-2 bg-slate-50 font-medium">Loại hình</th>
+                    <th className="py-2 px-2.5 text-center bg-slate-50 font-medium">Trạng thái</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">

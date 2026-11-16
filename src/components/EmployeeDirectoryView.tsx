@@ -627,16 +627,16 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             className="w-full table-auto text-left border-collapse"
           >
             <thead>
-              <tr className="sticky top-0 z-30 bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase select-none shadow-sm">
+              <tr className="sticky top-0 z-30 bg-slate-50 text-slate-600 text-[11px] font-semibold tracking-wider uppercase select-none border-b border-slate-200">
                 {/* 1. STT (Cố định) */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-2.5 w-12 text-center whitespace-nowrap">
+                <th className="sticky top-0 z-30 bg-slate-50 py-2.5 px-2.5 w-12 text-center whitespace-nowrap">
                   STT
                 </th>
                 {/* 2. Mã nhân viên (Cố định - Sortable) */}
                 <th
                   data-testid="th-sort-code"
                   onClick={() => handleSortClick('employeeCode')}
-                  className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-28 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap"
+                  className="sticky top-0 z-30 bg-slate-50 py-2.5 px-3 w-28 cursor-pointer hover:bg-slate-100 transition-colors group/th whitespace-nowrap"
                 >
                   <div className="inline-flex items-center">
                     <span>Mã nhân viên</span>
@@ -647,7 +647,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 <th
                   data-testid="th-sort-name"
                   onClick={() => handleSortClick('fullName')}
-                  className={`sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 cursor-pointer hover:bg-slate-800/80 transition-colors group/th whitespace-nowrap ${
+                  className={`sticky top-0 z-30 bg-slate-50 py-2.5 px-3 cursor-pointer hover:bg-slate-100 transition-colors group/th whitespace-nowrap ${
                     visibleColumnDefs.length === 0
                       ? 'w-full min-w-[200px]'
                       : 'min-w-[170px]'
@@ -694,11 +694,11 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                       onClick={() =>
                         col.sortField && handleSortClick(col.sortField)
                       }
-                      className={`sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 ${alignClass} ${
+                      className={`sticky top-0 z-30 bg-slate-50 py-2.5 px-3 ${alignClass} ${
                         col.minWidthClass || ''
                       } ${shouldExpand ? 'w-auto' : 'w-px'} ${
                         isSortable
-                          ? 'cursor-pointer hover:bg-slate-800/80 transition-colors group/th'
+                          ? 'cursor-pointer hover:bg-slate-100 transition-colors group/th'
                           : ''
                       } whitespace-nowrap`}
                     >
@@ -715,7 +715,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 })}
 
                 {/* Cột cuối cố định: Thao tác */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-24 text-center whitespace-nowrap">
+                <th className="sticky top-0 z-30 bg-slate-50 py-2.5 px-3 w-24 text-center whitespace-nowrap">
                   Thao tác
                 </th>
               </tr>

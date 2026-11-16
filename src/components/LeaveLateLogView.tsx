@@ -451,7 +451,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
             <button
               type="button"
               onClick={onOpenAddRecord}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
               <span>+ Ghi nhận mới</span>
             </button>
@@ -460,7 +460,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
             <button
               type="button"
               onClick={onOpenBulkRecord}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
               <span>👥 + Ghi nhận hàng loạt</span>
             </button>
@@ -647,14 +647,14 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
       {/* 2. KHUNG BẢNG DỮ LIỆU BÊN DƯỚI (flex-1 min-h-0 overflow-auto) VỚI STICKY HEADER */}
       <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full table-auto text-left border-collapse">
-          <thead className="sticky top-0 z-20 bg-[#0F232E] text-white text-[11px] font-bold tracking-wider uppercase shadow-sm">
+          <thead className="sticky top-0 z-20 bg-slate-50 text-slate-600 text-[11px] font-semibold tracking-wider uppercase border-b border-slate-200">
             <tr>
-              <th className="py-2.5 px-2 w-10 text-center bg-[#0F232E] whitespace-nowrap">
+              <th className="py-2.5 px-2 w-10 text-center bg-slate-50 whitespace-nowrap">
                 STT
               </th>
               <th
                 onClick={() => handleSortClick('employeeCode')}
-                className="py-2.5 px-2 bg-[#0F232E] whitespace-nowrap cursor-pointer hover:bg-slate-800/80 select-none"
+                className="py-2.5 px-2 bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center gap-1">
                   <span>MÃ NV</span>
@@ -663,7 +663,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               </th>
               <th
                 onClick={() => handleSortClick('fullName')}
-                className="py-2.5 px-2.5 bg-[#0F232E] hover:bg-slate-800/80 whitespace-nowrap cursor-pointer select-none"
+                className="py-2.5 px-2.5 bg-slate-50 hover:bg-slate-100 whitespace-nowrap cursor-pointer select-none"
               >
                 <div className="inline-flex items-center gap-1">
                   <span>HỌ TÊN</span>
@@ -672,7 +672,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               </th>
               <th
                 onClick={() => handleSortClick('department')}
-                className="py-2.5 px-2 bg-[#0F232E] whitespace-nowrap cursor-pointer hover:bg-slate-800/80 select-none"
+                className="py-2.5 px-2 bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center gap-1">
                   <span>BỘ PHẬN</span>
@@ -681,7 +681,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               </th>
               <th
                 onClick={() => handleSortClick('type')}
-                className="py-2.5 px-2 bg-[#0F232E] whitespace-nowrap cursor-pointer hover:bg-slate-800/80 select-none"
+                className="py-2.5 px-2 bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center gap-1">
                   <span>LOẠI HÌNH</span>
@@ -690,7 +690,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               </th>
               <th
                 onClick={() => handleSortClick('startDate')}
-                className="py-2.5 px-2 bg-[#0F232E] whitespace-nowrap cursor-pointer hover:bg-slate-800/80 select-none"
+                className="py-2.5 px-2 bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center gap-1">
                   <span>THỜI GIAN</span>
@@ -699,29 +699,29 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               </th>
               <th
                 onClick={() => handleSortClick('amount')}
-                className="py-2.5 px-2 text-right bg-[#0F232E] whitespace-nowrap cursor-pointer hover:bg-slate-800/80 select-none"
+                className="py-2.5 px-2 text-right bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center justify-end gap-1 w-full">
                   <span>SỐ LƯỢNG</span>
                   {renderSortIcon('amount')}
                 </div>
               </th>
-              <th className="py-2.5 px-2.5 w-full min-w-[140px] bg-[#0F232E] whitespace-nowrap">
+              <th className="py-2.5 px-2.5 w-full min-w-[140px] bg-slate-50 whitespace-nowrap">
                 LÝ DO / GHI CHÚ
               </th>
               <th
                 onClick={() => handleSortClick('paperStatus')}
-                className="py-2.5 px-2 text-center bg-[#0F232E] whitespace-nowrap cursor-pointer hover:bg-slate-800/80 select-none"
+                className="py-2.5 px-2 text-center bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center justify-center gap-1">
                   <span>GIẤY PHÉP</span>
                   {renderSortIcon('paperStatus')}
                 </div>
               </th>
-              <th className="py-2.5 px-2 text-center bg-[#0F232E] whitespace-nowrap">
+              <th className="py-2.5 px-2 text-center bg-slate-50 whitespace-nowrap">
                 ĐÍNH KÈM
               </th>
-              <th className="py-2.5 px-2 w-20 text-center bg-[#0F232E] whitespace-nowrap">
+              <th className="py-2.5 px-2 w-20 text-center bg-slate-50 whitespace-nowrap">
                 THAO TÁC
               </th>
             </tr>
