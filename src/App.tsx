@@ -1683,6 +1683,8 @@ export default function App() {
                 employees={companyEmployees}
                 records={companyRecords}
                 groups={effectiveGroups}
+                companyUnits={companyUnits}
+                activeCompanyId={activeCompany.id}
                 defaultAnnualLeaveQuota={
                   activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
                 }
@@ -1694,6 +1696,17 @@ export default function App() {
                     id
                   );
                 }}
+                onUpdateCompanyQuota={(compId, newQuota) => {
+                  const targetComp = companyUnits.find((c) => c.id === compId);
+                  if (targetComp) {
+                    const { id, ...rest } = targetComp;
+                    handleUpdateCompany(id, {
+                      ...rest,
+                      defaultLeaveQuota: newQuota,
+                    });
+                  }
+                }}
+                onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
                 onImportOpeningBalances={(importedRows) => {
                   const rowByCode = new Map(
                     importedRows.map((r) => [
@@ -1718,28 +1731,6 @@ export default function App() {
                     `Đã chốt số dư phép đầu kỳ (đến 31/10/2026) cho ${importedRows.length} nhân sự vào bảng Quỹ phép năm.`
                   );
                 }}
-              />
-            )}
-
-            {activeModule === 'leave_logs' && leaveSubTab === 'leave_rules' && (
-              <AnnualLeaveRulesView
-                companyUnits={companyUnits}
-                activeCompanyId={activeCompany.id}
-                defaultAnnualLeaveQuota={
-                  activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
-                }
-                isAdmin={isAdmin}
-                onUpdateCompanyQuota={(compId, newQuota) => {
-                  const targetComp = companyUnits.find((c) => c.id === compId);
-                  if (targetComp) {
-                    const { id, ...rest } = targetComp;
-                    handleUpdateCompany(id, {
-                      ...rest,
-                      defaultLeaveQuota: newQuota,
-                    });
-                  }
-                }}
-                onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
               />
             )}
 

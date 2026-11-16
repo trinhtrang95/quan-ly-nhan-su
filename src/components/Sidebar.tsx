@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
-export type LeaveSubTab = 'leave_requests' | 'leave_fund' | 'leave_rules';
+export type LeaveSubTab = 'leave_requests' | 'leave_fund';
 export type ReportSubTab = 'monthly_summary' | 'annual_matrix';
 
 interface SidebarProps {
@@ -187,7 +187,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               const isRequestsActive =
                 isActive && leaveSubTab === 'leave_requests';
               const isFundActive = isActive && leaveSubTab === 'leave_fund';
-              const isRulesActive = isActive && leaveSubTab === 'leave_rules';
 
               return (
                 <div key={item.id} className="space-y-1">
@@ -247,7 +246,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </button>
 
-                  {/* 3 Menu con dưới "Nghỉ phép": Đơn nghỉ | Quỹ phép năm | Quy định phép năm */}
+                  {/* 2 Menu con dưới "Nghỉ phép": Đơn nghỉ | Quỹ phép năm */}
                   {!collapsed && isLeaveExpanded && (
                     <div className="ml-5 pl-3 border-l border-white/30 space-y-1 py-0.5">
                       {/* Sub-menu 1: Đơn nghỉ */}
@@ -290,25 +289,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           }`}
                         />
                         <span className="leading-snug">Quỹ phép năm</span>
-                      </button>
-
-                      {/* Sub-menu 3: Quy định phép năm */}
-                      <button
-                        type="button"
-                        data-testid="sidebar-subnav-leave-rules"
-                        onClick={() => handleSelectLeaveChild('leave_rules')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
-                          isRulesActive
-                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
-                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                        }`}
-                      >
-                        <BookOpenCheck
-                          className={`w-4 h-4 shrink-0 ${
-                            isRulesActive ? 'text-[#14539E]' : 'text-blue-100'
-                          }`}
-                        />
-                        <span className="leading-snug">Quy định phép năm</span>
                       </button>
                     </div>
                   )}

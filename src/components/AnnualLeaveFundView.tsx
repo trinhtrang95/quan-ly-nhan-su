@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, RotateCcw, Upload, X, CheckCircle2 } from 'lucide-react';
+import { Search, RotateCcw, Upload, FileSpreadsheet, Settings } from 'lucide-react';
 import {
+  CompanyUnit,
   DepartmentGroup,
   Employee,
   LeaveBalanceRecord,
@@ -14,16 +15,24 @@ import {
   saveLeaveBalancesBatch,
   sortEmployees,
 } from '../utils/hrCalculations';
-import { OpeningBalanceImportRow } from '../utils/exportUtils';
+import {
+  exportAnnualLeaveFundToExcel,
+  OpeningBalanceImportRow,
+} from '../utils/exportUtils';
 import { OpeningBalanceImportModal } from './OpeningBalanceImportModal';
+import { AnnualLeaveRulesModal } from './AnnualLeaveRulesModal';
 
 interface AnnualLeaveFundViewProps {
   employees: Employee[];
   records: LeaveRecord[];
   groups: DepartmentGroup[];
+  companyUnits?: CompanyUnit[];
+  activeCompanyId?: string;
   defaultAnnualLeaveQuota?: number;
   isAdmin?: boolean;
   onUpdateEmployeeQuota?: (employee: Employee, newQuota: number) => void;
+  onUpdateCompanyQuota?: (companyId: string, newQuota: number) => void;
+  onChangeDefaultAnnualLeaveQuota?: (newQuota: number) => void;
   onImportOpeningBalances?: (rows: OpeningBalanceImportRow[]) => void;
 }
 
@@ -31,7 +40,11 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
   employees,
   records,
   groups,
+  companyUnits = [],
+  activeCompanyId,
   defaultAnnualLeaveQuota = 12,
+  onUpdateCompanyQuota,
+  onChangeDefaultAnnualLeaveQuota,
   onImportOpeningBalances,
 }) => {
   const currentYear = 2026;
@@ -45,10 +58,12 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
   const [leaveBalancesMap, setLeaveBalancesMap] = useState<
     Record<string, LeaveBalanceRecord>
   >(() => loadLeaveBalancesMap(currentYear));
+
   const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] =
     useState<boolean>(false);
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState<boolean>(false);
 
-  // Đồng bộ thời gian thực khi thay đổi quy định ở màn hình "Quy định phép năm" hoặc khi Chốt số dư đầu kỳ
+  // Đồng bộ thời gian thực khi thay đổi quy định ở modal "Quy định phép năm" hoặc khi Chốt số dư đầu kỳ
   useEffect(() => {
     const handlePolicyChange = (e: Event) => {
       const detail = (e as CustomEvent<LeavePolicyConfig>).detail;
@@ -159,53 +174,57 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
     currentMonth,
   ]);
 
-  const importedCount = Object.keys(leaveBalancesMap).length;
+  const fmtZero = (val: number) => (val === 0 ? '-' : val);
 
   return (
     <div className="space-y-3">
-      {/* Tiêu đề trang gọn gàng chuẩn ERP */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      {/* Tiêu đề trang & Cụm 3 nút hành động căn phải */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {/* Góc trái: Tiêu đề + Dòng phụ Tổng số nhân sự */}
         <div>
           <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
             Quỹ phép năm ({currentYear})
           </h1>
-          <p className="text-xs text-slate-500">
-            Phương trình tự động: <code className="font-mono text-slate-700">Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]</code> &bull; <code className="font-mono text-[#14539E] font-semibold">Còn lại = [Tổng quỹ phép] - [Đã nghỉ]</code>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Tổng số: <strong className="font-semibold text-slate-700">{fundRows.length}</strong> nhân sự
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-          {importedCount > 0 && (
-            <span
-              data-testid="opening-balance-status-badge"
-              className="px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 text-[#14539E] font-semibold inline-flex items-center gap-1"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Đã chốt số dư đầu kỳ (đến 31/10): {importedCount} NV</span>
-            </span>
-          )}
-          <span className="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-600">
-            Cơ chế:{' '}
-            <strong className="text-slate-800">
-              {leavePolicy.accrualMode === 'monthly'
-                ? `Tích lũy theo tháng (T1-T${currentMonth})`
-                : 'Cấp 1 lần đầu năm'}
-            </strong>
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-600">
-            Tổng số:{' '}
-            <strong className="font-mono font-bold text-[#14539E]">
-              {fundRows.length}
-            </strong>{' '}
-            nhân sự
-          </span>
+
+        {/* Góc phải: 3 nút thao tác xếp cạnh nhau */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 1. Nút Quy định phép năm (Gear / Settings icon, outline button) */}
+          <button
+            type="button"
+            onClick={() => setIsRulesModalOpen(true)}
+            data-testid="open-rules-modal-btn"
+            className="h-8 px-3 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+          >
+            <Settings className="w-3.5 h-3.5 text-slate-500" />
+            <span>Quy định phép năm</span>
+          </button>
+
+          {/* 2. Nút Nhập từ file (Upload icon, outline button) */}
           <button
             type="button"
             onClick={() => setIsOpeningBalanceModalOpen(true)}
             data-testid="open-opening-balance-modal-btn"
-            className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            className="h-8 px-3 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Nhập từ file (Chốt số dư đầu kỳ)</span>
+            <Upload className="w-3.5 h-3.5 text-slate-500" />
+            <span>Nhập từ file</span>
+          </button>
+
+          {/* 3. Nút Xuất file (Excel icon, brand blue #14539E button) */}
+          <button
+            type="button"
+            onClick={() => {
+              exportAnnualLeaveFundToExcel(fundRows, currentYear);
+            }}
+            data-testid="export-leave-fund-excel-btn"
+            className="h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white font-semibold text-xs inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Xuất file</span>
           </button>
         </div>
       </div>
@@ -232,7 +251,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
                 aria-label="Xóa từ khóa tìm kiếm"
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <Search className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -272,7 +291,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
         </div>
       </div>
 
-      {/* HÀNG 2: BẢNG DỮ LIỆU PHƯƠNG TRÌNH TOÁN HỌC MINH BẠCH (High Density: px-2 py-1.5, border-slate-100) */}
+      {/* HÀNG 2: BẢNG DỮ LIỆU PHƯƠNG TRÌNH TOÁN HỌC MINH BẠCH (Zero-Noise: 0 -> "-") */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table
@@ -345,27 +364,27 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
 
                       {/* 4. Định mức/năm */}
                       <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap">
-                        {row.annualQuota}
+                        {fmtZero(row.annualQuota)}
                       </td>
 
                       {/* 5. Tích lũy năm nay */}
                       <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-700 align-middle whitespace-nowrap">
-                        {row.accruedThisYear}
+                        {fmtZero(row.accruedThisYear)}
                       </td>
 
                       {/* 6. Tồn năm trước */}
                       <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap">
-                        {row.carriedOverLastYear}
+                        {fmtZero(row.carriedOverLastYear)}
                       </td>
 
                       {/* 7. Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước] */}
                       <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums font-bold text-slate-800 bg-slate-50/50 align-middle whitespace-nowrap">
-                        {row.totalFund}
+                        {fmtZero(row.totalFund)}
                       </td>
 
-                      {/* 8. Đã nghỉ (Từ đơn Đã duyệt ở màn hình Đơn nghỉ) */}
+                      {/* 8. Đã nghỉ */}
                       <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-700 align-middle whitespace-nowrap">
-                        {row.usedLeave}
+                        {fmtZero(row.usedLeave)}
                       </td>
 
                       {/* 9. Còn lại = [Tổng quỹ phép] - [Đã nghỉ] */}
@@ -376,7 +395,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
                             : 'text-red-600'
                         }`}
                       >
-                        {row.remainingLeave}
+                        {row.remainingLeave === 0 ? '-' : row.remainingLeave}
                       </td>
                     </tr>
                   );
@@ -396,6 +415,18 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
         currentYear={currentYear}
         onClose={() => setIsOpeningBalanceModalOpen(false)}
         onConfirmImport={handleConfirmOpeningBalanceImport}
+      />
+
+      {/* Modal Quy định phép năm */}
+      <AnnualLeaveRulesModal
+        isOpen={isRulesModalOpen}
+        companyUnits={companyUnits}
+        activeCompanyId={activeCompanyId}
+        defaultAnnualLeaveQuota={defaultAnnualLeaveQuota}
+        isAdmin={true}
+        onClose={() => setIsRulesModalOpen(false)}
+        onUpdateCompanyQuota={onUpdateCompanyQuota || (() => {})}
+        onChangeDefaultAnnualLeaveQuota={onChangeDefaultAnnualLeaveQuota}
       />
     </div>
   );

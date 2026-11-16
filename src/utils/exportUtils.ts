@@ -980,4 +980,86 @@ export async function parseOpeningLeaveBalanceFile(
   return parseOpeningLeaveBalanceText(text, existingEmployees);
 }
 
+/**
+ * Exports the Annual Leave Fund table to an Excel file (.xls with UTF-8 BOM & A4 formatting)
+ */
+export function exportAnnualLeaveFundToExcel(
+  fundRows: Array<{
+    employee: Employee;
+    annualQuota: number;
+    accruedThisYear: number;
+    carriedOverLastYear: number;
+    totalFund: number;
+    usedLeave: number;
+    remainingLeave: number;
+  }>,
+  year: number = 2026
+): void {
+  const rowsHtml = fundRows
+    .map((row, idx) => {
+      const emp = row.employee;
+      const fmt = (val: number) => (val === 0 ? '-' : val);
+      return `
+        <tr>
+          <td style="text-align:center;">${idx + 1}</td>
+          <td style="text-align:center;font-weight:bold;color:#14539E;mso-number-format:'\\@';">${escapeHtml(emp.employeeCode)}</td>
+          <td style="font-weight:bold;">${escapeHtml(emp.fullName)}</td>
+          <td>${escapeHtml(emp.department || '-')}</td>
+          <td style="text-align:center;">${fmt(row.annualQuota)}</td>
+          <td style="text-align:center;">${fmt(row.accruedThisYear)}</td>
+          <td style="text-align:center;">${fmt(row.carriedOverLastYear)}</td>
+          <td style="text-align:center;font-weight:bold;background-color:#F8FAFC;">${fmt(row.totalFund)}</td>
+          <td style="text-align:center;">${fmt(row.usedLeave)}</td>
+          <td style="text-align:center;font-weight:bold;color:#14539E;">${fmt(row.remainingLeave)}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  const html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="UTF-8" />
+      <style>
+        table { border-collapse: collapse; font-family: Times New Roman, Arial, sans-serif; font-size: 11pt; }
+        th { background-color: #14539E; color: #FFFFFF; font-weight: bold; padding: 8px 10px; border: 1px solid #1e3a8a; }
+        td { padding: 6px 8px; border: 1px solid #CBD5E1; }
+      </style>
+    </head>
+    <body>
+      <table>
+        <thead>
+          <tr>
+            <th colspan="10" style="background-color:#FFFFFF;color:#14539E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
+              BÁO CÁO QUỸ PHÉP NĂM (${year})
+            </th>
+          </tr>
+          <tr>
+            <th>STT</th>
+            <th>Mã NV</th>
+            <th>Họ và tên</th>
+            <th>Nhóm / Bộ phận</th>
+            <th>Định mức/năm</th>
+            <th>Tích lũy năm nay</th>
+            <th>Tồn năm trước</th>
+            <th>Tổng quỹ phép</th>
+            <th>Đã nghỉ</th>
+            <th>Còn lại</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\uFEFF' + html], {
+    type: 'application/vnd.ms-excel;charset=utf-8;',
+  });
+  triggerBlobDownload(blob, `Bao_Cao_Quy_Phep_Nam_${year}.xls`);
+}
+
+
 
