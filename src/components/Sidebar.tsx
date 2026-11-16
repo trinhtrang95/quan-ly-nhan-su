@@ -225,7 +225,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {/* Các Menu con thụt lề + đường kẻ dọc mỏng dẫn hướng thị giác */}
                   {!collapsed && isReportsExpanded && (
                     <div className="ml-5 pl-3 border-l border-blue-400/35 space-y-1 py-0.5">
-                      {/* Menu con 1: Tổng hợp Nghỉ phép & Đi muộn (Tháng) */}
+                      {/* Menu con 1: Báo cáo tháng */}
                       <button
                         type="button"
                         onClick={() =>
@@ -244,9 +244,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               : 'text-slate-300'
                           }`}
                         />
-                        <span className="leading-snug">
-                          Tổng hợp Nghỉ phép &amp; Đi muộn (Tháng)
-                        </span>
+                        <span className="leading-snug">Báo cáo tháng</span>
                       </button>
 
                       {/* Menu con 2: Báo cáo năm */}

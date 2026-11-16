@@ -195,3 +195,141 @@ html[data-dark-mode="true"] ::-webkit-scrollbar-thumb {
     display: none !important;
   }
 }
+
+/* ==========================================================================
+   GLOBAL DATA DENSITY ENGINE (3 LEVELS)
+   - Lớn (14px): html.density-large / data-density="large" (text-sm, spacious padding)
+   - Tiêu chuẩn (12px - MẶC ĐỊNH): html.density-standard / data-density="standard" (text-xs, balanced padding)
+   - Nhỏ (10px): html.density-small / data-density="small" (text-[10px], ultra-compact px-1 py-0.5)
+   ========================================================================== */
+
+/* 1. CHẾ ĐỘ LỚN (14px - text-sm, khoảng cách ô rộng rãi) */
+html.density-large body,
+body.density-large {
+  font-size: 0.875rem; /* 14px (text-sm) */
+  line-height: 1.35rem;
+}
+
+.density-large main table th,
+.density-large main table td {
+  padding: 0.625rem 0.75rem !important; /* py-2.5 px-3 */
+  font-size: 0.875rem !important; /* 14px */
+  line-height: 1.25rem !important;
+}
+
+.density-large main table.compact-matrix-table th,
+.density-large main table.compact-matrix-table td {
+  padding: 0.5rem 0.375rem !important; /* py-2 px-1.5 */
+  font-size: 0.8125rem !important; /* 13px */
+}
+
+.density-large main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.density-large main select,
+.density-large main .compact-toolbar button {
+  height: 2.375rem !important; /* 38px */
+  font-size: 0.875rem !important; /* 14px */
+}
+
+.density-large aside nav button {
+  font-size: 0.875rem !important; /* 14px */
+  padding-top: 0.625rem !important;
+  padding-bottom: 0.625rem !important;
+}
+
+/* 2. CHẾ ĐỘ TIÊU CHUẨN (12px - MẶC ĐỊNH: text-xs, padding vừa phải) */
+html.density-standard body,
+body.density-standard {
+  font-size: 0.75rem; /* 12px (text-xs) */
+  line-height: 1.15rem;
+}
+
+.density-standard main table th,
+.density-standard main table td {
+  padding: 0.375rem 0.5rem; /* py-1.5 px-2 */
+  font-size: 0.75rem; /* 12px */
+}
+
+.density-standard main table.compact-matrix-table th,
+.density-standard main table.compact-matrix-table td {
+  padding: 0.25rem 0.375rem; /* py-1 px-1.5 */
+  font-size: 0.75rem; /* 12px */
+}
+
+/* 3. CHẾ ĐỘ NHỎ (10px - text-[10px], padding tối thiểu px-1 py-0.5) */
+html.density-small body,
+body.density-small {
+  font-size: 0.625rem; /* 10px (text-[10px]) */
+  line-height: 1rem;
+}
+
+.density-small main .text-sm,
+.density-small main .text-xs {
+  font-size: 0.625rem !important; /* 10px */
+  line-height: 0.95rem !important;
+}
+
+.density-small main h1,
+.density-small main h2 {
+  font-size: 0.875rem !important; /* 14px */
+  line-height: 1.25rem !important;
+}
+
+.density-small table th,
+.density-small table td,
+.density-small table.compact-matrix-table th,
+.density-small table.compact-matrix-table td {
+  padding: 0.125rem 0.25rem !important; /* py-0.5 (2px) px-1 (4px) */
+  font-size: 0.625rem !important; /* 10px */
+  line-height: 0.95rem !important;
+}
+
+.density-small main .p-5,
+.density-small main .p-6 {
+  padding: 0.625rem 0.875rem !important;
+}
+
+.density-small main .p-4 {
+  padding: 0.5rem 0.75rem !important;
+}
+
+.density-small main .space-y-4 > :not(:last-child),
+.density-small main .space-y-5 > :not(:last-child) {
+  margin-bottom: 0.5rem !important;
+}
+
+.density-small main .gap-4,
+.density-small main .gap-5 {
+  gap: 0.5rem !important;
+}
+
+.density-small main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.density-small main select {
+  height: 1.75rem !important; /* h-7 = 28px */
+  min-height: 1.75rem !important;
+  padding-top: 0.125rem !important;
+  padding-bottom: 0.125rem !important;
+  font-size: 0.6875rem !important; /* 11px */
+}
+
+.density-small main header button,
+.density-small main .compact-toolbar button,
+.density-small header button {
+  height: 1.75rem !important; /* h-7 = 28px */
+  padding-top: 0.125rem !important;
+  padding-bottom: 0.125rem !important;
+  font-size: 0.6875rem !important; /* 11px */
+}
+
+.density-small aside nav button {
+  padding-top: 0.3rem !important;
+  padding-bottom: 0.3rem !important;
+  font-size: 0.6875rem !important; /* 11px */
+}
+
+.density-small header.sticky.top-0 > div {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+  min-height: 2.5rem !important;
+}
+
+

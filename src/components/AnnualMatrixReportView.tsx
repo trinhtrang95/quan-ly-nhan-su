@@ -309,60 +309,29 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
     <div className="space-y-2.5">
       {/* =====================================================================
           TOP HEADER: TIÊU ĐỀ CHÍNH TRÊN CÙNG + NÚT XUẤT EXCEL / PDF
+          (Đã gỡ bỏ dải chú thích khỏi Header và đưa xuống dưới hàng Bộ lọc)
       ===================================================================== */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-4 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-3.5 py-2.5 compact-toolbar">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
             {activeSubTab === 'monthly_summary' ? (
-              <h2 className="text-base md:text-lg font-extrabold text-slate-900 tracking-tight">
+              <h2 className="text-sm md:text-base font-extrabold text-slate-900 tracking-tight">
                 Bảng tổng hợp Nghỉ phép &amp; Đi muộn - {formattedMonthTitle}
               </h2>
             ) : (
-              <h2 className="text-base md:text-lg font-extrabold text-slate-900 tracking-tight">
+              <h2 className="text-sm md:text-base font-extrabold text-slate-900 tracking-tight">
                 Báo cáo tổng hợp ({reportYear})
               </h2>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {activeSubTab === 'monthly_summary' && (
-              <div className="hidden xl:flex items-center gap-2 text-xs text-slate-600">
-                <span className="inline-flex items-center gap-1">
-                  <span className="px-1 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-bold text-[10px] leading-none">
-                    PN
-                  </span>
-                  <span>Phép năm</span>
-                </span>
-                <span className="text-slate-300">·</span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="px-1 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-mono font-bold text-[10px] leading-none">
-                    CĐ
-                  </span>
-                  <span>Chế độ</span>
-                </span>
-                <span className="text-slate-300">·</span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-mono font-bold text-[10px] leading-none">
-                    KL
-                  </span>
-                  <span>Không lương</span>
-                </span>
-                <span className="text-slate-300">·</span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="px-1 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 font-mono font-bold text-[10px] leading-none">
-                    ĐM
-                  </span>
-                  <span>Đi muộn (Chạm/hover xem giờ)</span>
-                </span>
-              </div>
-            )}
-
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* Nút thao tác Xuất Excel / PDF ở góc phải */}
             <div className="relative" ref={exportDropdownRef}>
               <button
                 type="button"
                 onClick={() => setIsExportDropdownOpen((prev) => !prev)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
+                className="h-8 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-[#0B224B]" />
                 <span>Xuất Excel / PDF</span>
@@ -421,18 +390,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
       </div>
 
       {/* =====================================================================
-          CHẾ ĐỘ 1: TỔNG HỢP NGHỈ PHÉP & ĐI MUỘN (THÁNG) - COMPACT MATRIX
+          CHẾ ĐỘ 1: BÁO CÁO THÁNG (TỔNG HỢP NGHỈ PHÉP & ĐI MUỘN)
       ===================================================================== */}
       {activeSubTab === 'monthly_summary' && (
         <>
-          {/* THANH CÔNG CỤ TÌM KIẾM & LỌC (3 TRƯỜNG TRÊN 1 HÀNG NGANG) */}
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-4 py-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          {/* THANH CÔNG CỤ TÌM KIẾM & LỌC (3 TRƯỜNG TRÊN 1 HÀNG NGANG - CAO h-8) */}
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-3.5 py-2.5 compact-toolbar">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 items-end">
               {/* 1. Tháng áp dụng (Dropdown Select: Tháng 11/2026) */}
               <div>
                 <label
                   htmlFor="monthly-report-select"
-                  className="block text-xs font-semibold text-slate-600 mb-1"
+                  className="block text-[11px] font-semibold text-slate-600 mb-1"
                 >
                   Tháng áp dụng
                 </label>
@@ -440,7 +409,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   id="monthly-report-select"
                   value={selectedYearMonth}
                   onChange={(e) => setSelectedYearMonth(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs font-semibold text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
+                  className="w-full h-8 px-2.5 py-1 text-xs font-semibold text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
                 >
                   {MONTH_DROPDOWN_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -454,26 +423,26 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
               <div>
                 <label
                   htmlFor="monthly-report-search"
-                  className="block text-xs font-semibold text-slate-600 mb-1"
+                  className="block text-[11px] font-semibold text-slate-600 mb-1"
                 >
                   Tìm kiếm
                 </label>
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="monthly-report-search"
                     type="text"
                     value={monthlySearchQuery}
                     onChange={(e) => setMonthlySearchQuery(e.target.value)}
                     placeholder="Gõ Mã NV hoặc Họ tên..."
-                    className="w-full pl-8 pr-8 py-1.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    className="w-full h-8 pl-8 pr-7 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                   {monthlySearchQuery && (
                     <button
                       type="button"
                       onClick={() => setMonthlySearchQuery('')}
                       aria-label="Xóa từ khóa tìm kiếm"
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -485,7 +454,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
               <div>
                 <label
                   htmlFor="monthly-report-dept"
-                  className="block text-xs font-semibold text-slate-600 mb-1"
+                  className="block text-[11px] font-semibold text-slate-600 mb-1"
                 >
                   Nhóm / Bộ phận
                 </label>
@@ -493,7 +462,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   id="monthly-report-dept"
                   value={monthlyDeptFilter}
                   onChange={(e) => setMonthlyDeptFilter(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs font-semibold text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
+                  className="w-full h-8 px-2.5 py-1 text-xs font-semibold text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
                 >
                   <option value="ALL">Tất cả ({groups.length} nhóm)</option>
                   {groups.map((g) => (
@@ -506,53 +475,98 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
             </div>
           </div>
 
+          {/* DẢI CHÚ THÍCH THẺ MÀU (LEGEND) NẰM DƯỚI BỘ LỌC VÀ NGAY TRÊN BẢNG MA TRẬN */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-0.5 text-[11px] text-slate-600">
+            <span className="text-slate-500 font-medium">
+              Hiển thị <strong className="text-slate-800 font-mono">{monthlyReport.rows.length}</strong> nhân sự · Cuộn ngang để xem chi tiết 31 ngày (5 cột đầu được cố định)
+            </span>
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              <span className="inline-flex items-center gap-1">
+                <span className="px-1 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-bold text-[10px] leading-none">
+                  PN
+                </span>
+                <span>Phép năm</span>
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="px-1 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-mono font-bold text-[10px] leading-none">
+                  CĐ
+                </span>
+                <span>Chế độ</span>
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-mono font-bold text-[10px] leading-none">
+                  KL
+                </span>
+                <span>Không lương</span>
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="px-1 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 font-mono font-bold text-[10px] leading-none">
+                  ĐM
+                </span>
+                <span>Đi muộn (Chạm/hover xem giờ)</span>
+              </span>
+            </div>
+          </div>
+
           {/* BẢNG DỮ LIỆU MA TRẬN SIÊU GỌN (COMPACT LAYOUT)
-              - Gộp cột "Nhân sự" (w-56, Sticky Left): Dòng 1 Tên NV đậm xanh navy hover gạch chân | Dòng 2 Mã NV • Nhóm
-              - Toàn bộ font chữ text-xs, padding tối thiểu px-2 py-1.5
-              - Các cột tổng hợp không dùng mảng màu nền khối lớn, chỉ đổi màu chữ số (PN xanh lá, CĐ xanh dương, KL cam, ĐM đỏ)
-              - Cột ngày 01->31 hẹp cố định (w-9), căn giữa
+              - Cố định (Sticky) cả 5 cột đầu tiên:
+                1. Nhân sự: left-0, w-[208px]
+                2. Tồn phép: left-[208px], w-[56px]
+                3. PN / CĐ: left-[264px], w-[64px]
+                4. K.Lương: left-[328px], w-[56px]
+                5. Đi muộn: left-[384px], w-[60px] + shadow-[4px_0_6px_rgba(0,0,0,0.05)] ở cạnh phải
+              - Cột ngày 01->31 hẹp cố định w-8 (32px), căn giữa
           */}
           <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="max-h-[calc(100vh-180px)] overflow-y-auto overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead className="sticky top-0 z-30 bg-[#0B224B] text-white select-none text-xs">
+            <div className="max-h-[calc(100vh-195px)] overflow-y-auto overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs compact-matrix-table">
+                <thead className="sticky top-0 z-30 bg-[#0B224B] text-white select-none text-[11px]">
                   <tr className="font-semibold">
-                    {/* CỘT GỘP "NHÂN SỰ" CỐ ĐỊNH MÉP TRÁI (w-56) */}
-                    <th className="px-2.5 py-1.5 w-56 min-w-[224px] max-w-[224px] bg-[#0B224B] border-r border-blue-900/70 sticky left-0 z-40 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.35)]">
+                    {/* CỘT 1 (STICKY left-0, 208px): NHÂN SỰ */}
+                    <th className="px-2 py-1 w-[208px] min-w-[208px] max-w-[208px] bg-[#0B224B] border-r border-blue-900/70 sticky left-0 z-40">
                       Nhân sự
                     </th>
 
-                    {/* CÁC CỘT TỔNG HỢP TRONG THÁNG */}
+                    {/* CỘT 2 (STICKY left-[208px], 56px): TỒN PHÉP */}
                     <th
-                      className="px-2 py-1.5 w-16 min-w-[64px] text-center bg-[#0B224B] border-r border-blue-900/70 whitespace-nowrap"
+                      className="px-1.5 py-1 w-[56px] min-w-[56px] max-w-[56px] text-center bg-[#0B224B] border-r border-blue-900/70 whitespace-nowrap sticky left-[208px] z-40"
                       title="Số ngày phép năm còn tồn lại"
                     >
                       Tồn phép
                     </th>
+
+                    {/* CỘT 3 (STICKY left-[264px], 64px): PN / CĐ */}
                     <th
-                      className="px-2 py-1.5 w-18 min-w-[72px] text-center bg-[#0B224B] border-r border-blue-900/70 whitespace-nowrap"
+                      className="px-1.5 py-1 w-[64px] min-w-[64px] max-w-[64px] text-center bg-[#0B224B] border-r border-blue-900/70 whitespace-nowrap sticky left-[264px] z-40"
                       title="Tổng số ngày Nghỉ phép năm (PN) & Chế độ (CĐ) trong tháng"
                     >
                       PN / CĐ
                     </th>
+
+                    {/* CỘT 4 (STICKY left-[328px], 56px): K.LƯƠNG */}
                     <th
-                      className="px-2 py-1.5 w-16 min-w-[64px] text-center bg-[#0B224B] border-r border-blue-900/70 whitespace-nowrap"
+                      className="px-1.5 py-1 w-[56px] min-w-[56px] max-w-[56px] text-center bg-[#0B224B] border-r border-blue-900/70 whitespace-nowrap sticky left-[328px] z-40"
                       title="Tổng số ngày Nghỉ không lương (KL) trong tháng"
                     >
                       K.Lương
                     </th>
+
+                    {/* CỘT 5 (STICKY left-[384px], 60px + ĐỔ BÓNG CẠNH PHẢI): ĐI MUỘN */}
                     <th
-                      className="px-2 py-1.5 w-18 min-w-[72px] text-center bg-[#0B224B] border-r border-blue-800 whitespace-nowrap"
+                      className="px-1.5 py-1 w-[60px] min-w-[60px] max-w-[60px] text-center bg-[#0B224B] border-r border-blue-800 whitespace-nowrap sticky left-[384px] z-40 shadow-[4px_0_6px_rgba(0,0,0,0.22)]"
                       title="Tổng số giờ / số lần Đi muộn (ĐM) trong tháng"
                     >
                       Đi muộn
                     </th>
 
-                    {/* CÁC CỘT NGÀY 01 -> 31 (HẸP CỐ ĐỊNH w-9, CĂN GIỮA) */}
+                    {/* CÁC CỘT NGÀY 01 -> 31 (HẸP CỐ ĐỊNH w-8 = 32px, CĂN GIỮA) */}
                     {monthlyReport.dayColumns.map((col) => (
                       <th
                         key={col.day}
-                        className={`px-1 py-1.5 w-9 min-w-[36px] max-w-[36px] text-center border-r border-blue-900/60 font-mono transition-colors ${
+                        className={`px-1 py-1 w-8 min-w-[32px] max-w-[32px] text-center border-r border-blue-900/60 font-mono transition-colors ${
                           col.isToday
                             ? 'bg-amber-400 text-slate-950 font-extrabold'
                             : col.isSunday
@@ -561,8 +575,8 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                         }`}
                         title={`Ngày ${col.dayLabel}/${String(monthlyReport.month).padStart(2, '0')}/${monthlyReport.year} (${col.weekdayLabel})${col.isToday ? ' - HÔM NAY' : ''}`}
                       >
-                        <div className="flex flex-col items-center justify-center leading-tight">
-                          <span className="text-xs font-bold">
+                        <div className="flex flex-col items-center justify-center leading-none gap-0.5">
+                          <span className="text-[11px] font-bold">
                             {col.dayLabel}
                           </span>
                           <span
@@ -587,7 +601,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                     <tr>
                       <td
                         colSpan={5 + monthlyReport.daysInMonth}
-                        className="py-10 text-center text-slate-500 italic bg-white"
+                        className="py-8 text-center text-slate-500 italic bg-white"
                       >
                         Không tìm thấy nhân sự nào phù hợp với bộ lọc hiện tại.
                       </td>
@@ -603,12 +617,9 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                       return (
                         <tr
                           key={emp.id}
-                          className="group hover:bg-slate-50/90 transition-colors"
+                          className="group hover:bg-slate-50/90 transition-colors min-h-[36px]"
                         >
-                          {/* CỘT GỘP "NHÂN SỰ" (STICKY LEFT w-56):
-                              Dòng 1: Tên nhân viên (Chữ đậm, màu xanh đen/navy, hover gạch chân)
-                              Dòng 2: Mã NV • Nhóm (Chữ nhỏ text-xs, màu xám text-slate-500)
-                          */}
+                          {/* CỘT 1 (STICKY left-0, 208px): NHÂN SỰ */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -617,19 +628,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-2.5 py-1.5 w-56 min-w-[224px] max-w-[224px] bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(15,35,46,0.08)] cursor-pointer"
+                            className="px-2 py-1 w-[208px] min-w-[208px] max-w-[208px] bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-0 z-20 cursor-pointer"
                             title={`Xem chi tiết chấm công ${formattedMonthTitle} của ${emp.fullName}`}
                           >
-                            <div className="truncate font-bold text-[#0B224B] group-hover:underline leading-snug">
+                            <div className="truncate text-xs font-semibold text-[#0B224B] group-hover:underline leading-tight">
                               {emp.fullName}
                             </div>
-                            <div className="truncate text-xs text-slate-500 font-mono leading-tight mt-0.5">
+                            <div className="truncate text-[11px] text-slate-500 font-mono leading-tight mt-0.5">
                               {emp.employeeCode} • {shortGroup}
                             </div>
                           </td>
 
-                          {/* CÁC CỘT TỔNG HỢP (KHÔNG DÙNG MẢNG MÀU NỀN KHỐI LỚN, CHỈ ĐỔI MÀU CHỮ SỐ) */}
-                          {/* Tồn phép */}
+                          {/* CỘT 2 (STICKY left-[208px], 56px): TỒN PHÉP */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -638,7 +648,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className={`px-2 py-1.5 text-center font-mono font-bold border-r border-slate-200 cursor-pointer ${
+                            className={`px-1.5 py-1 w-[56px] min-w-[56px] max-w-[56px] text-center font-mono font-bold text-xs bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-[208px] z-20 cursor-pointer ${
                               row.remainingAnnualLeave <= 0
                                 ? 'text-red-600'
                                 : row.remainingAnnualLeave <= 2
@@ -649,7 +659,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             {row.remainingAnnualLeave}
                           </td>
 
-                          {/* PN / CĐ: PN (Xanh lá), CĐ (Xanh dương) */}
+                          {/* CỘT 3 (STICKY left-[264px], 64px): PN / CĐ */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -658,11 +668,11 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-2 py-1.5 text-center font-mono border-r border-slate-200 cursor-pointer whitespace-nowrap"
+                            className="px-1.5 py-1 w-[64px] min-w-[64px] max-w-[64px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-[264px] z-20 cursor-pointer whitespace-nowrap"
                           >
                             {row.monthAnnualDays > 0 ||
                             row.monthRegimeDays > 0 ? (
-                              <div className="inline-flex items-center justify-center gap-1 font-bold">
+                              <div className="inline-flex items-center justify-center gap-0.5 font-bold">
                                 {row.monthAnnualDays > 0 && (
                                   <span
                                     className="text-emerald-600"
@@ -685,11 +695,11 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 )}
                               </div>
                             ) : (
-                              <span className="text-slate-300">-</span>
+                              <span className="text-slate-300 text-[11px]">-</span>
                             )}
                           </td>
 
-                          {/* Không lương (Cam) */}
+                          {/* CỘT 4 (STICKY left-[328px], 56px): KHÔNG LƯƠNG */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -698,18 +708,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-2 py-1.5 text-center font-mono border-r border-slate-200 cursor-pointer"
+                            className="px-1.5 py-1 w-[56px] min-w-[56px] max-w-[56px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-[328px] z-20 cursor-pointer"
                           >
                             {row.monthUnpaidDays > 0 ? (
                               <span className="font-bold text-amber-600">
                                 {row.monthUnpaidDays}
                               </span>
                             ) : (
-                              <span className="text-slate-300">-</span>
+                              <span className="text-slate-300 text-[11px]">-</span>
                             )}
                           </td>
 
-                          {/* Đi muộn (Đỏ) */}
+                          {/* CỘT 5 (STICKY left-[384px], 60px + ĐỔ BÓNG CẠNH PHẢI shadow-[4px_0_6px_rgba(0,0,0,0.05)]): ĐI MUỘN */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -718,18 +728,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-2 py-1.5 text-center font-mono border-r border-slate-300 cursor-pointer whitespace-nowrap"
+                            className="px-1.5 py-1 w-[60px] min-w-[60px] max-w-[60px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-300 sticky left-[384px] z-20 shadow-[4px_0_6px_rgba(0,0,0,0.05)] cursor-pointer whitespace-nowrap"
                           >
                             {row.monthLateHours > 0 ? (
                               <span className="font-bold text-red-600">
                                 {row.monthLateHours}h
                               </span>
                             ) : (
-                              <span className="text-slate-300">-</span>
+                              <span className="text-slate-300 text-[11px]">-</span>
                             )}
                           </td>
 
-                          {/* CÁC CỘT NGÀY 01 -> 31 (w-9, CĂN GIỮA) */}
+                          {/* CÁC CỘT NGÀY 01 -> 31 (w-8 = 32px, px-1 py-1, CĂN GIỮA, CUỘN NGẦM DƯỚI 5 CỘT ĐẦU) */}
                           {monthlyReport.dayColumns.map((col) => {
                             const badges = row.dayBadges[col.day] || [];
                             const hasBadges = badges.length > 0;
@@ -744,7 +754,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     year: parsedMonthYear,
                                   })
                                 }
-                                className={`px-1 py-1.5 w-9 min-w-[36px] max-w-[36px] text-center border-r border-slate-200/80 cursor-pointer transition-colors align-middle ${
+                                className={`px-1 py-1 w-8 min-w-[32px] max-w-[32px] text-center border-r border-slate-200/80 cursor-pointer transition-colors align-middle ${
                                   col.isToday
                                     ? 'bg-amber-50/60 hover:bg-amber-100/60'
                                     : col.isSunday
@@ -762,7 +772,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     {badges.map((b) => renderBadge(b))}
                                   </div>
                                 ) : (
-                                  <span className="text-slate-300 font-mono text-xs select-none">
+                                  <span className="text-slate-300 font-mono text-[11px] select-none">
                                     -
                                   </span>
                                 )}

@@ -34,9 +34,12 @@ export interface ThemePresetMeta {
   };
 }
 
+export type DisplayDensityMode = 'large' | 'standard' | 'small';
+
 export interface ThemeConfig {
   preset: ThemePresetId;
   autoDark: boolean;
+  density: DisplayDensityMode;
 }
 
 const THEME_STORAGE_KEY = 'hr_pro_theme_config_v1';
@@ -244,6 +247,12 @@ export const THEME_PRESETS: ThemePresetMeta[] = [
   },
 ];
 
+function normalizeDensityMode(raw: unknown): DisplayDensityMode {
+  if (raw === 'large') return 'large';
+  if (raw === 'small' || raw === 'compact') return 'small';
+  return 'standard';
+}
+
 export function loadSavedThemeConfig(): ThemeConfig {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -253,9 +262,11 @@ export function loadSavedThemeConfig(): ThemeConfig {
         const validPreset = THEME_PRESETS.some((p) => p.id === parsed?.preset)
           ? (parsed.preset as ThemePresetId)
           : 'teal';
+        const validDensity = normalizeDensityMode(parsed?.density);
         return {
           preset: validPreset,
           autoDark: Boolean(parsed?.autoDark),
+          density: validDensity,
         };
       }
     }
@@ -265,6 +276,7 @@ export function loadSavedThemeConfig(): ThemeConfig {
   return {
     preset: 'teal',
     autoDark: false,
+    density: 'standard',
   };
 }
 
@@ -292,9 +304,43 @@ export function applyThemeToDocument(config: ThemeConfig): void {
   const selectedMeta =
     THEME_PRESETS.find((p) => p.id === config.preset) || THEME_PRESETS[0];
 
+  const density = normalizeDensityMode(config.density);
+
   const root = document.documentElement;
   root.setAttribute('data-theme', config.preset);
   root.setAttribute('data-dark-mode', isDarkEffective ? 'true' : 'false');
+  root.setAttribute('data-density', density);
+
+  root.classList.remove(
+    'density-large',
+    'density-standard',
+    'density-small',
+    'theme-compact'
+  );
+  root.classList.add(`density-${density}`);
+  if (density === 'small') {
+    root.classList.add('theme-compact');
+  }
+
+  if (document.body) {
+    document.body.classList.remove(
+      'density-large',
+      'density-standard',
+      'density-small',
+      'theme-compact'
+    );
+    document.body.classList.add(`density-${density}`);
+    if (density === 'small') {
+      document.body.classList.add('theme-compact');
+    }
+    document.body.setAttribute('data-density', density);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('hr-theme-density-change', { detail: density })
+    );
+  }
 
   root.style.setProperty(
     '--theme-sidebar-bg',
