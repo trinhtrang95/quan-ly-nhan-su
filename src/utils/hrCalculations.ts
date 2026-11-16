@@ -719,6 +719,125 @@ export function saveLeavePolicyConfig(config: LeavePolicyConfig): void {
   }
 }
 
+function parseDatePartsYMD(
+  raw?: string | Date | null
+): { year: number; month: number; day: number } | null {
+  if (!raw) return null;
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return null;
+    return {
+      year: raw.getFullYear(),
+      month: raw.getMonth() + 1,
+      day: raw.getDate(),
+    };
+  }
+  const s = String(raw).trim();
+  if (!s || s === '-' || s === '—') return null;
+
+  const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (dmy) {
+    return {
+      day: Number(dmy[1]) || 1,
+      month: Number(dmy[2]) || 1,
+      year: Number(dmy[3]) || 2026,
+    };
+  }
+
+  const ymd = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (ymd) {
+    return {
+      year: Number(ymd[1]) || 2026,
+      month: Number(ymd[2]) || 1,
+      day: Number(ymd[3]) || 1,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Tính số năm và số tháng thâm niên làm việc trọn vẹn tính từ `join_date` đến `referenceDate` (mặc định 16/11/2026).
+ */
+export function calculateSeniorityBreakdown(
+  join_date?: string | Date | null,
+  referenceDate: string | Date = '2026-11-16'
+): {
+  years: number;
+  months: number;
+  totalMonths: number;
+  isValid: boolean;
+} {
+  const joinParts = parseDatePartsYMD(join_date);
+  const refParts = parseDatePartsYMD(referenceDate) || {
+    year: 2026,
+    month: 11,
+    day: 16,
+  };
+
+  if (!joinParts) {
+    return { years: 0, months: 0, totalMonths: 0, isValid: false };
+  }
+
+  let totalMonths =
+    (refParts.year - joinParts.year) * 12 + (refParts.month - joinParts.month);
+  if (refParts.day < joinParts.day) {
+    totalMonths -= 1;
+  }
+
+  if (totalMonths < 0) {
+    return { years: 0, months: 0, totalMonths: 0, isValid: true };
+  }
+
+  const years = Math.floor(totalMonths / 12);
+  const months = totalMonths % 12;
+
+  return { years, months, totalMonths, isValid: true };
+}
+
+/**
+ * Hàm 1: Tính Thâm niên hiển thị (`calculateSeniorityText`)
+ * - Dưới 1 năm trả về số tháng (VD: `5 tháng`)
+ * - Từ 1 năm trở lên trả về số năm và tháng (VD: `5 năm 2 tháng`)
+ */
+export function calculateSeniorityText(
+  join_date?: string | Date | null,
+  referenceDate: string | Date = '2026-11-16'
+): string {
+  const { years, months, isValid } = calculateSeniorityBreakdown(
+    join_date,
+    referenceDate
+  );
+  if (!isValid) return '-';
+
+  if (years < 1) {
+    return `${Math.max(1, months)} tháng`;
+  }
+
+  if (months === 0) {
+    return `${years} năm`;
+  }
+
+  return `${years} năm ${months} tháng`;
+}
+
+/**
+ * Hàm 2: Tính Phép định mức theo thâm niên (`calculateTotalQuota`)
+ * - Luật Lao động: Cứ đủ 5 năm làm việc cộng thêm 1 ngày phép (`bonus_leave = Math.floor(years / 5)`)
+ * - Output: `base_quota + bonus_leave`
+ */
+export function calculateTotalQuota(
+  join_date?: string | Date | null,
+  base_quota: number = 12,
+  referenceDate: string | Date = '2026-11-16'
+): number {
+  const { years, isValid } = calculateSeniorityBreakdown(
+    join_date,
+    referenceDate
+  );
+  const bonus_leave = isValid ? Math.floor(Math.max(0, years) / 5) : 0;
+  return base_quota + bonus_leave;
+}
+
 /**
  * Calculates Leave Accrual & Carryover breakdown for an employee:
  * Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]
@@ -733,7 +852,10 @@ export function calculateLeaveAccrualBreakdown(
   defaultQuotaFallback: number = 12,
   balancesMapOverride?: Record<string, LeaveBalanceRecord>
 ): {
+  baseQuota: number;
+  bonusLeave: number;
   annualQuota: number;
+  seniorityText: string;
   accruedLeaveDays: number;
   carriedOverLeaveDays: number;
   totalLeaveFund: number;
@@ -752,29 +874,37 @@ export function calculateLeaveAccrualBreakdown(
   const hasOpeningBalance =
     Boolean(balanceRec) || typeof employee.openingUsedLeave === 'number';
 
-  const quota = hasOpeningBalance
+  const baseQuota = hasOpeningBalance
     ? defaultQuotaFallback || 12
     : typeof employee.standardAnnualLeave === 'number' &&
         employee.standardAnnualLeave > 0
       ? employee.standardAnnualLeave
-      : defaultQuotaFallback;
+      : defaultQuotaFallback || 12;
+
+  const rawJoinDate =
+    employee.join_date || employee.joinDate || balanceRec?.join_date || '';
+  const referenceDateStr = `${year}-${String(clampedMonth).padStart(2, '0')}-16`;
+  const seniorityInfo = calculateSeniorityBreakdown(
+    rawJoinDate,
+    referenceDateStr
+  );
+  const bonusLeave = seniorityInfo.isValid
+    ? Math.floor(Math.max(0, seniorityInfo.years) / 5)
+    : 0;
+  const quota = calculateTotalQuota(rawJoinDate, baseQuota, referenceDateStr);
+  const seniorityText = calculateSeniorityText(rawJoinDate, referenceDateStr);
 
   // 1. Tính Phép tích lũy năm nay theo tháng hiện tại (hoặc Cấp 1 lần đầu năm)
   let accruedLeaveDays = quota;
   if (hasOpeningBalance || policy.accrualMode === 'monthly') {
     if (hasOpeningBalance) {
-      // Khi chốt số dư đầu kỳ ở tháng hiện tại (VD: tháng 11), hệ thống tự đếm theo tháng hiện tại (11 ngày cho định mức 12)
-      accruedLeaveDays = Number(((quota / 12) * clampedMonth).toFixed(2));
+      // Khi chốt số dư đầu kỳ ở tháng hiện tại (VD: tháng 11), tích lũy cơ bản theo tháng + ngày phép thâm niên
+      const baseAccrued = Number(((baseQuota / 12) * clampedMonth).toFixed(2));
+      accruedLeaveDays = Number((baseAccrued + bonusLeave).toFixed(2));
     } else {
       let workingMonthsInYear = clampedMonth;
-      if (
-        employee.joinDate &&
-        employee.joinDate.trim() &&
-        employee.joinDate.trim() !== '-'
-      ) {
-        const { year: joinYear, month: joinMonth } = getYearMonth(
-          employee.joinDate
-        );
+      if (rawJoinDate && rawJoinDate.trim() && rawJoinDate.trim() !== '-') {
+        const { year: joinYear, month: joinMonth } = getYearMonth(rawJoinDate);
         if (joinYear > year) {
           workingMonthsInYear = 0;
         } else if (joinYear === year) {
@@ -783,9 +913,13 @@ export function calculateLeaveAccrualBreakdown(
           workingMonthsInYear = clampedMonth;
         }
       }
-      accruedLeaveDays = Number(
-        ((quota / 12) * workingMonthsInYear).toFixed(2)
+      const baseAccrued = Number(
+        ((baseQuota / 12) * workingMonthsInYear).toFixed(2)
       );
+      accruedLeaveDays =
+        workingMonthsInYear > 0
+          ? Number((baseAccrued + bonusLeave).toFixed(2))
+          : 0;
     }
   }
 
@@ -872,7 +1006,10 @@ export function calculateLeaveAccrualBreakdown(
   );
 
   return {
+    baseQuota,
+    bonusLeave,
     annualQuota: quota,
+    seniorityText,
     accruedLeaveDays,
     carriedOverLeaveDays,
     totalLeaveFund,

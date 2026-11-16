@@ -48,6 +48,7 @@ export interface Employee {
   department: string;   // Nhóm/Bộ phận
   position?: string;    // Chức danh / Vị trí
   joinDate: string;     // Ngày vào làm (YYYY-MM-DD)
+  join_date?: string;   // Đồng bộ tên cột join_date từ bảng employees trên Supabase
   standardAnnualLeave: number; // Tổng phép năm tiêu chuẩn (mặc định 12)
   carriedOverLeave?: number;   // Phép năm cũ dồn sang (nếu có)
   openingUsedLeave?: number;   // Số ngày phép đã nghỉ chốt đầu kỳ (đến 31/10)
@@ -59,6 +60,7 @@ export interface LeaveBalanceRecord {
   employeeCode: string; // Mã NV (Khóa chính để map dữ liệu)
   employeeId?: string;
   fullName?: string;
+  join_date?: string;   // Ngày vào làm (YYYY-MM-DD)
   year: number;         // Năm áp dụng (VD: 2026)
   carried_over: number; // Tồn phép năm cũ (2025)
   used_leave: number;   // Đã nghỉ (đến 31/10)

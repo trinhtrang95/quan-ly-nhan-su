@@ -10,6 +10,9 @@ import {
 } from '../types/hr';
 import {
   calculateLeaveAccrualBreakdown,
+  calculateSeniorityText,
+  calculateTotalQuota,
+  formatDateVN,
   loadLeaveBalancesMap,
   loadLeavePolicyConfig,
   saveLeaveBalancesBatch,
@@ -135,10 +138,13 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
     );
 
     return filtered.map((emp) => {
+      const baseQuota = defaultAnnualLeaveQuota || emp.standardAnnualLeave || 12;
+      const effectiveJoinDate = emp.join_date || emp.joinDate || '';
       const effectiveEmp: Employee = {
         ...emp,
-        standardAnnualLeave:
-          defaultAnnualLeaveQuota || emp.standardAnnualLeave || 12,
+        joinDate: effectiveJoinDate,
+        join_date: effectiveJoinDate,
+        standardAnnualLeave: baseQuota,
       };
 
       const breakdown = calculateLeaveAccrualBreakdown(
@@ -147,13 +153,23 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
         currentYear,
         currentMonth,
         leavePolicy,
-        defaultAnnualLeaveQuota,
+        baseQuota,
         leaveBalancesMap
       );
 
+      const joinDateFormatted = formatDateVN(effectiveJoinDate) || '-';
+      const seniorityText =
+        breakdown.seniorityText || calculateSeniorityText(effectiveJoinDate);
+      const totalQuota =
+        breakdown.annualQuota || calculateTotalQuota(effectiveJoinDate, baseQuota);
+
       return {
-        employee: emp,
-        annualQuota: breakdown.annualQuota,
+        employee: effectiveEmp,
+        joinDateFormatted,
+        seniorityText,
+        baseQuota: breakdown.baseQuota,
+        bonusLeave: breakdown.bonusLeave,
+        annualQuota: totalQuota,
         accruedThisYear: breakdown.accruedLeaveDays,
         carriedOverLastYear: breakdown.carriedOverLeaveDays,
         totalFund: breakdown.totalLeaveFund,
@@ -300,28 +316,34 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
           >
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
-                <th className="px-2 py-1.5 border-r border-slate-100 whitespace-nowrap w-24">
+                <th className="px-2 py-1.5 border-r border-slate-200 whitespace-nowrap w-24">
                   Mã NV
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 whitespace-nowrap">
+                <th className="px-2 py-1.5 border-r border-slate-200 whitespace-nowrap">
                   Họ tên
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 whitespace-nowrap">
+                <th className="px-2 py-1.5 border-r border-slate-200 whitespace-nowrap">
                   Nhóm
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 text-right whitespace-nowrap w-28">
+                <th className="px-2 py-1.5 border-r border-slate-200 text-center whitespace-nowrap w-28">
+                  Ngày vào làm
+                </th>
+                <th className="px-2 py-1.5 border-r border-slate-200 text-center whitespace-nowrap w-32">
+                  Thâm niên
+                </th>
+                <th className="px-2 py-1.5 border-r border-slate-200 text-right whitespace-nowrap w-28">
                   Định mức/năm
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 text-right whitespace-nowrap w-32">
+                <th className="px-2 py-1.5 border-r border-slate-200 text-right whitespace-nowrap w-32">
                   Tích lũy năm nay
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 text-right whitespace-nowrap w-28">
+                <th className="px-2 py-1.5 border-r border-slate-200 text-right whitespace-nowrap w-28">
                   Tồn năm trước
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 text-right whitespace-nowrap w-32 text-slate-700 font-bold">
+                <th className="px-2 py-1.5 border-r border-slate-200 text-right whitespace-nowrap w-32 text-slate-700 font-bold">
                   Tổng quỹ phép
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-100 text-right whitespace-nowrap w-24">
+                <th className="px-2 py-1.5 border-r border-slate-200 text-right whitespace-nowrap w-24">
                   Đã nghỉ
                 </th>
                 <th className="px-2 py-1.5 text-right whitespace-nowrap w-28 text-[#14539E] font-bold">
@@ -329,11 +351,11 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
+            <tbody className="divide-y divide-slate-200 text-xs">
               {fundRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={11}
                     className="py-8 px-4 text-center text-slate-400 text-xs"
                   >
                     Không tìm thấy nhân sự phù hợp với bộ lọc hiện tại.
@@ -342,52 +364,81 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
               ) : (
                 fundRows.map((row) => {
                   const emp = row.employee;
+                  const bonusTooltip =
+                    row.bonusLeave > 0
+                      ? `${row.baseQuota} ngày cơ bản + ${row.bonusLeave} ngày thâm niên`
+                      : undefined;
                   return (
                     <tr
                       key={emp.id}
                       className="hover:bg-slate-50/80 transition-colors"
                     >
                       {/* 1. Mã NV */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 font-mono font-semibold text-slate-700 align-middle whitespace-nowrap">
+                      <td className="px-2 py-1.5 border-r border-slate-200 font-mono font-semibold text-slate-700 align-middle whitespace-nowrap">
                         {emp.employeeCode}
                       </td>
 
                       {/* 2. Họ tên */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 font-medium text-slate-800 align-middle whitespace-nowrap">
+                      <td className="px-2 py-1.5 border-r border-slate-200 font-medium text-slate-800 align-middle whitespace-nowrap">
                         {emp.fullName}
                       </td>
 
                       {/* 3. Nhóm */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 text-slate-600 align-middle whitespace-nowrap">
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-slate-600 align-middle whitespace-nowrap">
                         {emp.department || '-'}
                       </td>
 
-                      {/* 4. Định mức/năm */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap">
-                        {fmtZero(row.annualQuota)}
+                      {/* 4. Ngày vào làm (DD/MM/YYYY) */}
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-center font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap">
+                        {row.joinDateFormatted}
                       </td>
 
-                      {/* 5. Tích lũy năm nay */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-700 align-middle whitespace-nowrap">
+                      {/* 5. Thâm niên */}
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-center text-slate-600 align-middle whitespace-nowrap">
+                        {row.seniorityText}
+                      </td>
+
+                      {/* 6. Định mức/năm (kèm Tooltip giải thích nếu > 12) */}
+                      <td
+                        title={bonusTooltip}
+                        className="px-2 py-1.5 border-r border-slate-200 text-right font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap relative group"
+                      >
+                        {row.bonusLeave > 0 ? (
+                          <span className="inline-flex items-center justify-end gap-1 font-semibold text-[#14539E] cursor-help underline decoration-dotted underline-offset-2">
+                            {fmtZero(row.annualQuota)}
+                            <span
+                              role="tooltip"
+                              className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full right-2 mb-1 z-20 px-2 py-1 rounded bg-slate-800 text-white text-[11px] font-sans font-medium whitespace-nowrap shadow-md"
+                            >
+                              {bonusTooltip}
+                            </span>
+                          </span>
+                        ) : (
+                          fmtZero(row.annualQuota)
+                        )}
+                      </td>
+
+                      {/* 7. Tích lũy năm nay */}
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-right font-mono tabular-nums text-slate-700 align-middle whitespace-nowrap">
                         {fmtZero(row.accruedThisYear)}
                       </td>
 
-                      {/* 6. Tồn năm trước */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap">
+                      {/* 8. Tồn năm trước */}
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-right font-mono tabular-nums text-slate-600 align-middle whitespace-nowrap">
                         {fmtZero(row.carriedOverLastYear)}
                       </td>
 
-                      {/* 7. Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước] */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums font-bold text-slate-800 bg-slate-50/50 align-middle whitespace-nowrap">
+                      {/* 9. Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước] */}
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-right font-mono tabular-nums font-bold text-slate-800 bg-slate-50/50 align-middle whitespace-nowrap">
                         {fmtZero(row.totalFund)}
                       </td>
 
-                      {/* 8. Đã nghỉ */}
-                      <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono tabular-nums text-slate-700 align-middle whitespace-nowrap">
+                      {/* 10. Đã nghỉ */}
+                      <td className="px-2 py-1.5 border-r border-slate-200 text-right font-mono tabular-nums text-slate-700 align-middle whitespace-nowrap">
                         {fmtZero(row.usedLeave)}
                       </td>
 
-                      {/* 9. Còn lại = [Tổng quỹ phép] - [Đã nghỉ] */}
+                      {/* 11. Còn lại = [Tổng quỹ phép] - [Đã nghỉ] */}
                       <td
                         className={`px-2 py-1.5 text-right font-mono tabular-nums font-bold align-middle whitespace-nowrap ${
                           row.remainingLeave >= 0

@@ -478,10 +478,14 @@ test('Go-Live Tháng 11/2026: Chốt số dư phép đầu kỳ (Tồn 2025 = 2,
     2026
   );
 
-  // Verify November (month 11) equation for NV001:
+  // Verify November (month 11) equation for NV001 (with <5 years seniority):
   // Tích lũy năm nay = 11, Tồn năm trước = 2, Tổng quỹ phép = 13, Đã nghỉ = 5, Còn lại = 8
+  const nv001Under5Y: Employee = {
+    ...INITIAL_EMPLOYEES[0],
+    joinDate: '2023-01-10',
+  };
   const nv001Breakdown = calculateLeaveAccrualBreakdown(
-    INITIAL_EMPLOYEES[0],
+    nv001Under5Y,
     INITIAL_LEAVE_RECORDS,
     2026,
     11,
@@ -501,7 +505,7 @@ test('Go-Live Tháng 11/2026: Chốt số dư phép đầu kỳ (Tồn 2025 = 2,
     ...INITIAL_LEAVE_RECORDS,
     {
       id: 'rec-new-nov-2026',
-      employeeId: INITIAL_EMPLOYEES[0].id,
+      employeeId: nv001Under5Y.id,
       type: 'annual_leave' as const,
       startDate: '2026-11-20',
       endDate: '2026-11-21',
@@ -513,7 +517,7 @@ test('Go-Live Tháng 11/2026: Chốt số dư phép đầu kỳ (Tồn 2025 = 2,
   ];
 
   const afterNewNovLeave = calculateLeaveAccrualBreakdown(
-    INITIAL_EMPLOYEES[0],
+    nv001Under5Y,
     recordsWithNewNovLeave,
     2026,
     11,
@@ -572,8 +576,6 @@ test('Kịch bản kiểm thử (Acceptance Criteria): Nguyễn Thị Mai (Tồn
     },
   ];
 
-  // Kết quả mong đợi 1 (Quỹ phép năm) ở tháng 11: Tổng = 1 (Tích lũy 11 tháng cho định mức 12 là 11? Ah, nếu nhân viên mới join tháng 1 thì tích lũy đến tháng 11 là 11. Nhưng theo kịch bản kiểm thử của user: "Tổng quỹ phép = 1, Đã nghỉ = 1 -> Còn lại = 0").
-  // Để Tổng quỹ phép = 1, ta có thể test với nhân sự join tháng 11 (joinDate: '2026-11-01'), thì tích lũy đến tháng 11 là (12/12) * 1 = 1 ngày!
   const maiJoinNov: Employee = {
     ...maiEmp,
     joinDate: '2026-11-01',
@@ -666,5 +668,98 @@ test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ng
 
   clearLeaveBalancesStorage();
 });
+
+test('calculateSeniorityText & calculateTotalQuota: Luật Lao động 5 năm + 1 ngày phép và Cascading Calculation sang Tích lũy, Tổng quỹ phép, Còn lại', async () => {
+  const {
+    calculateSeniorityText,
+    calculateTotalQuota,
+    calculateLeaveAccrualBreakdown,
+  } = await import('./hrCalculations');
+
+  // 1. Dưới 1 năm -> hiển thị số tháng (VD: 5 tháng)
+  assert.equal(
+    calculateSeniorityText('2026-06-10', '2026-11-16'),
+    '5 tháng'
+  );
+  assert.equal(calculateTotalQuota('2026-06-10', 12, '2026-11-16'), 12);
+
+  // 2. Từ 1 năm trở lên (< 5 năm) -> hiển thị năm và tháng, định mức = 12
+  assert.equal(
+    calculateSeniorityText('2023-04-10', '2026-11-16'),
+    '3 năm 7 tháng'
+  );
+  assert.equal(calculateTotalQuota('2023-04-10', 12, '2026-11-16'), 12);
+
+  // 3. Đủ 5 năm trở lên (VD: 5 năm 2 tháng) -> bonus_leave = 1 -> định mức = 13
+  assert.equal(
+    calculateSeniorityText('2021-09-10', '2026-11-16'),
+    '5 năm 2 tháng'
+  );
+  assert.equal(calculateTotalQuota('2021-09-10', 12, '2026-11-16'), 13);
+
+  // 4. Đủ 10 năm trở lên (VD: Đoàn Văn Chiến 2013-01-06 -> 13 năm 10 tháng) -> bonus_leave = 2 -> định mức = 14
+  assert.equal(
+    calculateSeniorityText('2013-01-06', '2026-11-16'),
+    '13 năm 10 tháng'
+  );
+  assert.equal(calculateTotalQuota('2013-01-06', 12, '2026-11-16'), 14);
+
+  // 5. Cascading Calculation: Nhân sự có thâm niên 13 năm (Định mức = 14)
+  const seniorEmp: Employee = {
+    ...INITIAL_EMPLOYEES[0],
+    id: 'emp-senior-10y',
+    employeeCode: '13010601',
+    fullName: 'Đoàn Văn Chiến',
+    joinDate: '2013-01-06',
+    join_date: '2013-01-06',
+    standardAnnualLeave: 12,
+    carriedOverLeave: 1,
+  };
+
+  // Upfront mode: Tích lũy năm nay = 14, Tồn = 1 -> Tổng = 15, Đã nghỉ = 4 -> Còn lại = 11
+  const upfrontSenior = calculateLeaveAccrualBreakdown(
+    seniorEmp,
+    [
+      {
+        id: 'rec-senior-1',
+        employeeId: 'emp-senior-10y',
+        type: 'annual_leave',
+        startDate: '2026-08-10',
+        endDate: '2026-08-13',
+        amount: 4,
+        reason: 'Nghỉ phép năm',
+        createdAt: '2026-08-10',
+        approvedBy: 'HR',
+      },
+    ],
+    2026,
+    11,
+    { accrualMode: 'upfront', allowCarryOver: true },
+    12
+  );
+
+  assert.equal(upfrontSenior.baseQuota, 12);
+  assert.equal(upfrontSenior.bonusLeave, 2);
+  assert.equal(upfrontSenior.annualQuota, 14);
+  assert.equal(upfrontSenior.accruedLeaveDays, 14);
+  assert.equal(upfrontSenior.carriedOverLeaveDays, 1);
+  assert.equal(upfrontSenior.totalLeaveFund, 15);
+  assert.equal(upfrontSenior.usedAnnualLeaveDays, 4);
+  assert.equal(upfrontSenior.remainingAnnualLeave, 11);
+
+  // Monthly mode at month 11: 11 base months + 2 seniority bonus days = 13 accrued days
+  const monthlySenior = calculateLeaveAccrualBreakdown(
+    seniorEmp,
+    [],
+    2026,
+    11,
+    { accrualMode: 'monthly', allowCarryOver: true },
+    12
+  );
+  assert.equal(monthlySenior.annualQuota, 14);
+  assert.equal(monthlySenior.accruedLeaveDays, 13);
+  assert.equal(monthlySenior.totalLeaveFund, 14); // 13 + 1 carried over
+});
+
 
 

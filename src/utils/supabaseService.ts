@@ -163,7 +163,7 @@ export interface SupabaseLeaveLogRow {
 }
 
 /**
- * Helper for Supabase PostgREST API calls using pure native fetch
+ * Helper for Supabase PostgREST API calls using pure native fetch with automatic retry
  */
 async function supabaseRestFetch<T>(
   path: string,
@@ -176,23 +176,35 @@ async function supabaseRestFetch<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    cache: 'no-store',
-    ...options,
-    headers,
-  });
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        cache: 'no-store',
+        ...options,
+        headers,
+      });
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText);
-    throw new Error(`Supabase REST error (${res.status}): ${errText}`);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.statusText);
+        throw new Error(`Supabase REST error (${res.status}): ${errText}`);
+      }
+
+      if (res.status === 204) {
+        return undefined as unknown as T;
+      }
+
+      const text = await res.text();
+      return text ? (JSON.parse(text) as T) : (undefined as unknown as T);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+      }
+    }
   }
 
-  if (res.status === 204) {
-    return undefined as unknown as T;
-  }
-
-  const text = await res.text();
-  return text ? (JSON.parse(text) as T) : (undefined as unknown as T);
+  throw lastErr;
 }
 
 /**
@@ -363,6 +375,7 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
     department: row.department || '',
     position: row.position || '',
     joinDate: row.join_date || '',
+    join_date: row.join_date || '',
     standardAnnualLeave:
       row.annual_leave_quota !== null && row.annual_leave_quota !== undefined
         ? Number(row.annual_leave_quota)
@@ -736,8 +749,8 @@ export async function uploadImageToHrBucket(
     }
 
     return `${SUPABASE_URL}/storage/v1/object/public/${HR_IMAGES_BUCKET}/${safeName}`;
-  } catch (err) {
-    console.warn('Fallback to compressed Data URI for image upload:', err);
+  } catch {
+    // Fallback to compressed Data URI for image upload
   }
 
   if (fallbackDataUrl) {
@@ -978,8 +991,7 @@ export async function loadOrSeedSupabaseData(
         isInitialized: true,
         connected: true,
       };
-    } catch (error) {
-      console.error('Supabase sync error:', error);
+    } catch {
       return {
         companies: INITIAL_COMPANY_UNITS,
         departments: [],

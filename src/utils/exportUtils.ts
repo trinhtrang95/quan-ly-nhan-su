@@ -986,6 +986,8 @@ export async function parseOpeningLeaveBalanceFile(
 export function exportAnnualLeaveFundToExcel(
   fundRows: Array<{
     employee: Employee;
+    joinDateFormatted?: string;
+    seniorityText?: string;
     annualQuota: number;
     accruedThisYear: number;
     carriedOverLastYear: number;
@@ -999,12 +1001,17 @@ export function exportAnnualLeaveFundToExcel(
     .map((row, idx) => {
       const emp = row.employee;
       const fmt = (val: number) => (val === 0 ? '-' : val);
+      const joinDateStr =
+        row.joinDateFormatted || formatDateVN(emp.join_date || emp.joinDate) || '-';
+      const seniorityStr = row.seniorityText || '-';
       return `
         <tr>
           <td style="text-align:center;">${idx + 1}</td>
           <td style="text-align:center;font-weight:bold;color:#14539E;mso-number-format:'\\@';">${escapeHtml(emp.employeeCode)}</td>
           <td style="font-weight:bold;">${escapeHtml(emp.fullName)}</td>
           <td>${escapeHtml(emp.department || '-')}</td>
+          <td style="text-align:center;">${escapeHtml(joinDateStr)}</td>
+          <td style="text-align:center;">${escapeHtml(seniorityStr)}</td>
           <td style="text-align:center;">${fmt(row.annualQuota)}</td>
           <td style="text-align:center;">${fmt(row.accruedThisYear)}</td>
           <td style="text-align:center;">${fmt(row.carriedOverLastYear)}</td>
@@ -1030,7 +1037,7 @@ export function exportAnnualLeaveFundToExcel(
       <table>
         <thead>
           <tr>
-            <th colspan="10" style="background-color:#FFFFFF;color:#14539E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
+            <th colspan="12" style="background-color:#FFFFFF;color:#14539E;font-size:14pt;font-weight:bold;text-align:center;padding:12px;border:none;">
               BÁO CÁO QUỸ PHÉP NĂM (${year})
             </th>
           </tr>
@@ -1039,6 +1046,8 @@ export function exportAnnualLeaveFundToExcel(
             <th>Mã NV</th>
             <th>Họ và tên</th>
             <th>Nhóm / Bộ phận</th>
+            <th>Ngày vào làm</th>
+            <th>Thâm niên</th>
             <th>Định mức/năm</th>
             <th>Tích lũy năm nay</th>
             <th>Tồn năm trước</th>
