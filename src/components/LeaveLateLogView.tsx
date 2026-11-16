@@ -112,6 +112,10 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
     if (initialTypeFilter === 'PAPER_MISSING') {
       setPaperFilter('Chưa có');
       setTypeFilter('ALL');
+      setStartDateFilter('');
+      setEndDateFilter('');
+      setDepartmentFilter('ALL');
+      setSearchQuery('');
     } else if (initialTypeFilter === 'PAPER_READY') {
       setPaperFilter('Đã có');
       setTypeFilter('ALL');

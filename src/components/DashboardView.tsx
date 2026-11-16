@@ -13,6 +13,7 @@ import {
   Settings,
   ClipboardList,
   ChevronRight,
+  Gift,
 } from 'lucide-react';
 import {
   ActiveModule,
@@ -596,22 +597,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          {/* Thẻ 4 — Cần bổ sung giấy phép */}
+          {/* Thẻ 4 — Cần bổ sung giấy phép (Clickable KPI Card -> Lọc Trạng thái giấy phép: "Chưa có") */}
           <button
             type="button"
+            data-testid="kpi-card-missing-paper"
             onClick={handleOpenMissingPaper}
-            className="text-left bg-white hover:bg-rose-50/40 rounded-xl p-3 border border-slate-200/80 hover:border-rose-200 shadow-sm flex items-center gap-3 transition-colors cursor-pointer"
+            title="Nhấn để xem danh sách các bản ghi Chưa có giấy phép"
+            className="group text-left bg-white hover:bg-rose-50/60 active:scale-[0.99] rounded-xl p-3 border border-rose-200/90 hover:border-rose-300 shadow-sm hover:shadow-md flex items-center gap-3 transition-all cursor-pointer"
           >
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 group-hover:bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 transition-colors">
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-xs text-slate-500 font-medium truncate">
-                Cần bổ sung giấy phép
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-xs text-slate-600 group-hover:text-rose-700 font-semibold truncate transition-colors">
+                  Cần bổ sung giấy phép
+                </span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-rose-400 group-hover:text-rose-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
               </div>
               <div
                 data-testid="kpi-missing-paper"
-                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 tracking-tight leading-tight mt-0.5"
+                className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-rose-600 tracking-tight leading-tight mt-0.5"
               >
                 {missingPaperCount}
               </div>
@@ -725,7 +731,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {/* Nội dung danh sách sinh nhật (flex-1 min-h-0 overflow-y-auto) */}
             <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-1.5">
               {upcomingBirthdays.length === 0 ? (
-                <div className="h-full min-h-[100px] flex flex-col items-center justify-center text-center p-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/50">
+                <div
+                  data-testid="empty-upcoming-birthdays"
+                  className="h-full min-h-[100px] flex flex-col items-center justify-center text-center p-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/50"
+                >
+                  <Gift
+                    className="w-7 h-7 text-slate-300 mb-1.5 stroke-[1.5]"
+                    aria-hidden="true"
+                  />
                   <div className="text-xs font-medium text-slate-400">
                     {birthdayFilter === 'next_30_days'
                       ? 'Không có nhân sự nào có sinh nhật trong 30 ngày tới'
@@ -791,11 +804,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* ================= CỘT 2 (Ở GIỮA - NHÓM THỐNG KÊ NGHỈ & ĐI MUỘN): XẾP CHỒNG 2 KHỐI ================= */}
         <div className="flex flex-col gap-3 h-full min-h-0">
-          {/* Khối trên (flex-1 min-h-0): Thống kê loại hình nghỉ trong tháng */}
+          {/* Khối trên (flex-1 min-h-0): Thống kê Nghỉ phép & Đi muộn trong tháng */}
           <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1.5 shrink-0">
-              <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                Thống kê loại hình nghỉ trong tháng
+              <h2
+                data-testid="dashboard-bar-chart-title"
+                className="text-xs sm:text-sm font-bold text-slate-900 truncate"
+              >
+                Thống kê Nghỉ phép &amp; Đi muộn trong tháng
               </h2>
               <button
                 type="button"
@@ -938,24 +954,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ) : (
                 topRankingList.map((item, idx) => {
                   const rank = idx + 1;
+                  // Sử dụng màu trung tính chuẩn ERP cho tất cả các thứ hạng (#1, #2, #3...)
                   const rankBadgeClass =
-                    rank === 1
-                      ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs'
-                      : rank === 2
-                        ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                        : rank === 3
-                          ? 'bg-orange-100 text-orange-800 border border-orange-200'
-                          : 'bg-slate-100 text-slate-500 border border-slate-200/80';
+                    'bg-slate-100 text-slate-700 border border-slate-200/90';
 
                   return (
                     <div
                       key={item.employeeId}
                       className="flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl border border-slate-200/70 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-50 transition-colors"
                     >
-                      {/* Left: Rank Badge + Họ và tên nhân viên */}
+                      {/* Left: Rank Badge trung tính + Họ và tên nhân viên */}
                       <div className="flex items-center gap-2 min-w-0">
                         <div
-                          className={`w-6 h-6 rounded-lg font-mono text-[11px] font-extrabold flex items-center justify-center shrink-0 ${rankBadgeClass}`}
+                          data-testid={`top-rank-badge-${rank}`}
+                          className={`w-6 h-6 rounded-lg font-mono text-[11px] font-bold flex items-center justify-center shrink-0 ${rankBadgeClass}`}
                         >
                           #{rank}
                         </div>
@@ -967,15 +979,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Right: Chỉ hiển thị duy nhất badge số ngày hoặc số lượt */}
+                      {/* Right: Đơn vị tự động đổi giữa "ngày" (Nghỉ phép) và "lượt" / "giờ" (Đi muộn) */}
                       <div className="text-right shrink-0 font-mono tabular-nums">
                         {topTab === 'leave' ? (
                           <span className="text-xs font-extrabold text-teal-700 bg-teal-50 border border-teal-200/70 px-2 py-0.5 rounded-md inline-block">
                             {item.totalAmount} ngày
                           </span>
                         ) : (
-                          <span className="text-xs font-extrabold text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md inline-block">
-                            {item.recordCount} lượt
+                          <span
+                            title={`${item.recordCount} lượt (${item.totalAmount} giờ)`}
+                            className="text-xs font-extrabold text-amber-700 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md inline-block"
+                          >
+                            {item.recordCount} lượt ({item.totalAmount} giờ)
                           </span>
                         )}
                       </div>
@@ -1016,8 +1031,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <tr>
                     <th className="py-2 px-2.5 bg-[#0F232E]">Thời gian</th>
                     <th className="py-2 px-2.5 bg-[#0F232E]">Nhân sự</th>
-                    <th className="py-2 px-2 bg-[#0F232E]">Loại giấy phép</th>
-                    <th className="py-2 px-2.5 text-center bg-[#0F232E]">Giấy phép</th>
+                    <th className="py-2 px-2 bg-[#0F232E]">Loại hình</th>
+                    <th className="py-2 px-2.5 text-center bg-[#0F232E]">Trạng thái</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
