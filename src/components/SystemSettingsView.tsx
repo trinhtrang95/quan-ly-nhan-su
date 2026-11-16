@@ -32,10 +32,16 @@ import {
   DepartmentGroup,
   Employee,
   HRBackupPayload,
+  LeaveAccrualMode,
+  LeavePolicyConfig,
   PositionItem,
   UserAccount,
   UserRole,
 } from '../types/hr';
+import {
+  loadLeavePolicyConfig,
+  saveLeavePolicyConfig,
+} from '../utils/hrCalculations';
 import {
   SUPABASE_LEAVE_LOGS_SQL,
   uploadImageToHrBucket,
@@ -155,8 +161,31 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const { isInstalled, promptInstall } = usePWAInstall();
   const [showInstallGuide, setShowInstallGuide] = useState(false);
 
-  // Theme Customization State ("Màu giao diện")
+  // Theme Customization State ("Màu giao diện" & "Mật độ dữ liệu")
   const [themeConfig, setThemeConfig] = useState(() => loadSavedThemeConfig());
+
+  // Leave Accrual Policy State ("Quy tắc cấp phép" & "Cho phép dồn phép năm cũ")
+  const [leavePolicy, setLeavePolicy] = useState<LeavePolicyConfig>(() =>
+    loadLeavePolicyConfig()
+  );
+
+  const handleSelectAccrualMode = (accrualMode: LeaveAccrualMode) => {
+    const nextPolicy: LeavePolicyConfig = {
+      ...leavePolicy,
+      accrualMode,
+    };
+    setLeavePolicy(nextPolicy);
+    saveLeavePolicyConfig(nextPolicy);
+  };
+
+  const handleToggleCarryOver = (allowCarryOver: boolean) => {
+    const nextPolicy: LeavePolicyConfig = {
+      ...leavePolicy,
+      allowCarryOver,
+    };
+    setLeavePolicy(nextPolicy);
+    saveLeavePolicyConfig(nextPolicy);
+  };
 
   const handleSelectThemePreset = (presetId: ThemePresetId) => {
     const nextConfig = {
@@ -662,7 +691,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               </label>
             </div>
 
-            {/* Mục 1: Mật độ dữ liệu (Data Density) - 3 Thẻ chọn */}
+            {/* Mục 1: Mật độ dữ liệu (Data Density) - 3 Tùy chọn */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800">
@@ -670,12 +699,12 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                 </span>
                 <span className="text-[11px] font-medium text-slate-500">
                   Đang dùng:{' '}
-                  <strong className="text-[#0D9488]">
+                  <strong className="text-blue-600">
                     {themeConfig.density === 'large'
-                      ? 'Lớn (14px)'
+                      ? 'Rộng rãi (14px)'
                       : themeConfig.density === 'small'
-                      ? 'Nhỏ (10px)'
-                      : 'Tiêu chuẩn (12px) - Mặc định'}
+                      ? 'Thu gọn (10px)'
+                      : 'Tiêu chuẩn (12px) - [MẶC ĐỊNH]'}
                   </strong>
                 </span>
               </div>
@@ -685,14 +714,14 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                 aria-label="Mật độ dữ liệu (Data Density)"
                 className="grid grid-cols-1 md:grid-cols-3 gap-3"
               >
-                {/* Thẻ 1: Lớn (14px) */}
+                {/* Tùy chọn 1: Rộng rãi (14px) */}
                 <label
                   data-testid="density-option-large"
                   onClick={() => handleSelectDensityMode('large')}
                   className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all cursor-pointer select-none ${
                     themeConfig.density === 'large'
-                      ? 'bg-white border-2 border-[#0D9488] shadow-xs'
-                      : 'bg-white/80 border-slate-200/90 hover:bg-white hover:border-slate-300'
+                      ? 'bg-white border-2 border-blue-600 shadow-sm'
+                      : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
                   }`}
                 >
                   <input
@@ -701,31 +730,31 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                     value="large"
                     checked={themeConfig.density === 'large'}
                     onChange={() => handleSelectDensityMode('large')}
-                    className="mt-0.5 w-4 h-4 accent-[#0D9488] cursor-pointer shrink-0"
+                    className="mt-0.5 w-4 h-4 accent-blue-600 cursor-pointer shrink-0"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-900">
-                        Lớn (14px)
+                      <span className="text-xs font-bold text-slate-800">
+                        Rộng rãi (14px)
                       </span>
                       <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono font-semibold">
                         text-sm
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                      Dùng font gốc <code className="font-mono text-slate-700">text-sm</code>. Khoảng cách ô (padding) rộng rãi. Phù hợp xem trên màn hình lớn.
+                      Font Base <code className="font-mono text-slate-700">text-sm</code>, padding/margins tiêu chuẩn.
                     </p>
                   </div>
                 </label>
 
-                {/* Thẻ 2: Tiêu chuẩn (12px) - [MẶC ĐỊNH] */}
+                {/* Tùy chọn 2: Tiêu chuẩn (12px) - [MẶC ĐỊNH] */}
                 <label
                   data-testid="density-option-standard"
                   onClick={() => handleSelectDensityMode('standard')}
                   className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all cursor-pointer select-none ${
                     themeConfig.density === 'standard'
-                      ? 'bg-white border-2 border-[#0D9488] shadow-xs'
-                      : 'bg-white/80 border-slate-200/90 hover:bg-white hover:border-slate-300'
+                      ? 'bg-white border-2 border-blue-600 shadow-sm'
+                      : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
                   }`}
                 >
                   <input
@@ -734,31 +763,31 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                     value="standard"
                     checked={themeConfig.density === 'standard'}
                     onChange={() => handleSelectDensityMode('standard')}
-                    className="mt-0.5 w-4 h-4 accent-[#0D9488] cursor-pointer shrink-0"
+                    className="mt-0.5 w-4 h-4 accent-blue-600 cursor-pointer shrink-0"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-900">
+                      <span className="text-xs font-bold text-slate-800">
                         Tiêu chuẩn (12px)
                       </span>
-                      <span className="px-1.5 py-0.5 rounded bg-teal-50 text-[#0D9488] border border-teal-200 text-[10px] font-bold">
+                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">
                         MẶC ĐỊNH
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                      Dùng font <code className="font-mono text-slate-700">text-xs</code>. Padding vừa phải. Đây là giao diện chuẩn mực cho hệ thống phần mềm, cân bằng giữa khả năng đọc và không gian.
+                      Font Base <code className="font-mono text-slate-700">text-xs</code>, padding gọn gàng (Chuẩn ERP cao cấp).
                     </p>
                   </div>
                 </label>
 
-                {/* Thẻ 3: Nhỏ (10px) */}
+                {/* Tùy chọn 3: Thu gọn (10px) */}
                 <label
                   data-testid="density-option-small"
                   onClick={() => handleSelectDensityMode('small')}
                   className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all cursor-pointer select-none ${
                     themeConfig.density === 'small'
-                      ? 'bg-white border-2 border-[#0D9488] shadow-xs'
-                      : 'bg-white/80 border-slate-200/90 hover:bg-white hover:border-slate-300'
+                      ? 'bg-white border-2 border-blue-600 shadow-sm'
+                      : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
                   }`}
                 >
                   <input
@@ -767,27 +796,115 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                     value="small"
                     checked={themeConfig.density === 'small'}
                     onChange={() => handleSelectDensityMode('small')}
-                    className="mt-0.5 w-4 h-4 accent-[#0D9488] cursor-pointer shrink-0"
+                    className="mt-0.5 w-4 h-4 accent-blue-600 cursor-pointer shrink-0"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-900">
-                        Nhỏ (10px)
+                      <span className="text-xs font-bold text-slate-800">
+                        Thu gọn (10px)
                       </span>
-                      <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-mono font-bold">
+                      <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-mono font-bold">
                         text-[10px]
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                      Dùng font siêu nhỏ <code className="font-mono text-slate-700">text-[10px]</code>. Padding bị ép xuống mức tối thiểu (VD: <code className="font-mono text-slate-700">px-1 py-0.5</code>). Dành riêng cho người quản lý cần nén tối đa dữ liệu ma trận trên màn hình laptop nhỏ.
+                      Font Base <code className="font-mono text-slate-700">text-[10px]</code>, ép padding bảng biểu và input xuống mức tối thiểu (VD: <code className="font-mono text-slate-700">h-7</code>, <code className="font-mono text-slate-700">px-1</code>).
                     </p>
                   </div>
                 </label>
               </div>
             </div>
 
-            {/* Mục 2: Danh sách 8 màu chủ đạo (Theme Presets) */}
-            <div className="space-y-2 pt-1">
+            {/* Mục 2: Quy tắc cấp phép & Quỹ phép (Leave Accrual Policy) */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-200/70">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <span className="text-xs font-bold text-slate-800">
+                    Quy tắc cấp phép &amp; Dồn phép năm cũ (Leave Accrual)
+                  </span>
+                  <span className="text-[11px] text-slate-500 ml-1.5">
+                    (Công thức Tồn phép = [Phép tích lũy] + [Phép năm cũ dồn sang] - [Đã nghỉ])
+                  </span>
+                </div>
+
+                {/* Checkbox: Cho phép dồn phép năm cũ */}
+                <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer select-none bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-2xs">
+                  <input
+                    type="checkbox"
+                    data-testid="leave-policy-carryover-checkbox"
+                    checked={leavePolicy.allowCarryOver}
+                    onChange={(e) => handleToggleCarryOver(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-blue-600 cursor-pointer"
+                  />
+                  <span>Cho phép dồn phép năm cũ</span>
+                </label>
+              </div>
+
+              <div
+                role="radiogroup"
+                aria-label="Quy tắc cấp phép"
+                className="grid grid-cols-1 md:grid-cols-2 gap-3"
+              >
+                {/* Quy tắc 1: Cấp 1 lần đầu năm */}
+                <label
+                  data-testid="leave-policy-upfront"
+                  onClick={() => handleSelectAccrualMode('upfront')}
+                  className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                    leavePolicy.accrualMode === 'upfront'
+                      ? 'bg-white border-2 border-blue-600 shadow-sm'
+                      : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="leave-accrual-mode"
+                    value="upfront"
+                    checked={leavePolicy.accrualMode === 'upfront'}
+                    onChange={() => handleSelectAccrualMode('upfront')}
+                    className="mt-0.5 w-4 h-4 accent-blue-600 cursor-pointer shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-slate-800">
+                      Cấp 1 lần đầu năm
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                      Cấp toàn bộ quỹ phép tiêu chuẩn (VD: 12 ngày) ngay từ đầu năm cho nhân sự.
+                    </p>
+                  </div>
+                </label>
+
+                {/* Quy tắc 2: Tích lũy theo tháng */}
+                <label
+                  data-testid="leave-policy-monthly"
+                  onClick={() => handleSelectAccrualMode('monthly')}
+                  className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                    leavePolicy.accrualMode === 'monthly'
+                      ? 'bg-white border-2 border-blue-600 shadow-sm'
+                      : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="leave-accrual-mode"
+                    value="monthly"
+                    checked={leavePolicy.accrualMode === 'monthly'}
+                    onChange={() => handleSelectAccrualMode('monthly')}
+                    className="mt-0.5 w-4 h-4 accent-blue-600 cursor-pointer shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-slate-800">
+                      Tích lũy theo tháng
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                      Mỗi tháng làm việc tích lũy thêm phép theo tỷ lệ (VD: 1 ngày/tháng), cộng phép tồn năm cũ (nếu bật) trừ đi số ngày đã nghỉ.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Mục 3: Danh sách 8 màu chủ đạo (Theme Presets) */}
+            <div className="space-y-2 pt-2 border-t border-slate-200/70">
               <div className="text-xs font-bold text-slate-800">
                 Màu giao diện chủ đạo
               </div>

@@ -6,13 +6,13 @@
 }
 
 :root {
-  --theme-sidebar-bg: #0F232E;
-  --theme-sidebar-darker: #0B1B24;
-  --theme-sidebar-active: #163C45;
-  --theme-primary: #0D9488;
-  --theme-primary-hover: #0F766E;
-  --theme-accent-light: #2DD4BF;
-  --theme-page-bg: #EEF3F6;
+  --theme-sidebar-bg: #1E293B;
+  --theme-sidebar-darker: #0F172A;
+  --theme-sidebar-active: #334155;
+  --theme-primary: #2563EB;
+  --theme-primary-hover: #1D4ED8;
+  --theme-accent-light: #93C5FD;
+  --theme-page-bg: #F8FAFC;
 }
 
 @layer base {
@@ -29,9 +29,10 @@
 }
 
 /* ==========================================================================
-   DYNAMIC THEME ENGINE: Maps brand hex utilities to runtime CSS variables
+   DYNAMIC THEME ENGINE: Dark Slate (#1E293B) & Blue Accent (#2563EB / #1D4ED8)
    ========================================================================== */
-.bg-\[\#0F232E\] {
+.bg-\[\#0F232E\],
+.bg-\[\#0B224B\] {
   background-color: var(--theme-sidebar-bg) !important;
 }
 .bg-\[\#0B1B24\] {
@@ -45,7 +46,7 @@
   --tw-gradient-from: var(--theme-sidebar-bg) !important;
 }
 .to-\[\#163546\] {
-  --tw-gradient-to: var(--theme-sidebar-active) !important;
+  --tw-gradient-to: var(--theme-sidebar-darker) !important;
 }
 .bg-\[\#0D9488\],
 .hover\:bg-\[\#0D9488\]:hover {

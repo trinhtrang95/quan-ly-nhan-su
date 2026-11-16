@@ -49,8 +49,16 @@ export interface Employee {
   position?: string;    // Chức danh / Vị trí
   joinDate: string;     // Ngày vào làm (YYYY-MM-DD)
   standardAnnualLeave: number; // Tổng phép năm tiêu chuẩn (mặc định 12)
+  carriedOverLeave?: number;   // Phép năm cũ dồn sang (nếu có)
   status: WorkStatus;
   avatarUrl: string;
+}
+
+export type LeaveAccrualMode = 'upfront' | 'monthly';
+
+export interface LeavePolicyConfig {
+  accrualMode: LeaveAccrualMode; // 'upfront': Cấp 1 lần đầu năm | 'monthly': Tích lũy theo tháng
+  allowCarryOver: boolean;       // Cho phép dồn phép năm cũ sang năm mới
 }
 
 export interface LeaveRecord {
@@ -101,8 +109,10 @@ export interface MonthCellData {
 export interface EmployeeAnnualMatrixRow {
   employee: Employee;
   months: Record<number, MonthCellData>; // 1..12
-  totalAnnualUsed: number;
-  remainingAnnualLeave: number;
+  accruedLeaveDays: number;      // Phép tích lũy theo tháng làm việc hiện tại
+  carriedOverLeaveDays: number;  // Phép năm cũ dồn sang
+  totalAnnualUsed: number;       // Số đã nghỉ
+  remainingAnnualLeave: number;  // = accruedLeaveDays + carriedOverLeaveDays - totalAnnualUsed
   totalUnpaidDays: number;
   totalRegimeDays: number;
   totalLateHours: number;

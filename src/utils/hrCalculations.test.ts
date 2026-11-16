@@ -373,4 +373,71 @@ test('calculateMonthlyAttendanceMatrix generates accurate 30/31 day columns, tod
   }
 });
 
+test('calculateLeaveAccrualBreakdown accurately computes [Phép tích lũy] + [Phép năm cũ dồn sang] - [Đã nghỉ]', async () => {
+  const { calculateLeaveAccrualBreakdown } = await import('./hrCalculations');
+
+  const emp: Employee = {
+    ...INITIAL_EMPLOYEES[0],
+    id: 'emp-accrual-1',
+    joinDate: '2024-01-01',
+    standardAnnualLeave: 12,
+    carriedOverLeave: 2,
+  };
+
+  // Monthly accrual up to November (month 11) with carryover enabled:
+  // Accrued = 11, Carryover = 2, Used = 3 -> Remaining = 11 + 2 - 3 = 10
+  const monthlyWithCarry = calculateLeaveAccrualBreakdown(
+    emp,
+    [
+      {
+        id: 'rec-1',
+        employeeId: 'emp-accrual-1',
+        type: 'annual_leave',
+        startDate: '2026-05-10',
+        endDate: '2026-05-12',
+        amount: 3,
+        reason: 'Nghỉ phép năm',
+        createdAt: '2026-05-01',
+        approvedBy: 'Admin',
+      },
+    ],
+    2026,
+    11,
+    { accrualMode: 'monthly', allowCarryOver: true }
+  );
+
+  assert.equal(monthlyWithCarry.accruedLeaveDays, 11);
+  assert.equal(monthlyWithCarry.carriedOverLeaveDays, 2);
+  assert.equal(monthlyWithCarry.usedAnnualLeaveDays, 3);
+  assert.equal(monthlyWithCarry.remainingAnnualLeave, 10);
+
+  // Upfront accrual without carryover:
+  // Accrued = 12, Carryover = 0, Used = 3 -> Remaining = 12 + 0 - 3 = 9
+  const upfrontNoCarry = calculateLeaveAccrualBreakdown(
+    emp,
+    [
+      {
+        id: 'rec-1',
+        employeeId: 'emp-accrual-1',
+        type: 'annual_leave',
+        startDate: '2026-05-10',
+        endDate: '2026-05-12',
+        amount: 3,
+        reason: 'Nghỉ phép năm',
+        createdAt: '2026-05-01',
+        approvedBy: 'Admin',
+      },
+    ],
+    2026,
+    11,
+    { accrualMode: 'upfront', allowCarryOver: false }
+  );
+
+  assert.equal(upfrontNoCarry.accruedLeaveDays, 12);
+  assert.equal(upfrontNoCarry.carriedOverLeaveDays, 0);
+  assert.equal(upfrontNoCarry.usedAnnualLeaveDays, 3);
+  assert.equal(upfrontNoCarry.remainingAnnualLeave, 9);
+});
+
+
 

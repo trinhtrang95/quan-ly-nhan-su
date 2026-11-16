@@ -1462,7 +1462,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-[#EEF3F6] text-slate-800">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-800">
       {/* Left Fixed Sidebar (PC) & Bottom Navigation Bar (Mobile) */}
       <Sidebar
         activeModule={activeModule}

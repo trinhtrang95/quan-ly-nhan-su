@@ -4,6 +4,8 @@ import {
   DistributionItem,
   Employee,
   EmployeeAnnualMatrixRow,
+  LeaveAccrualMode,
+  LeavePolicyConfig,
   LeaveRecord,
   LeaveRecordType,
   MonthCellData,
@@ -428,6 +430,139 @@ export function isDateInRange(targetDate: string, startDate: string, endDate: st
   return targetDate >= startDate && targetDate <= endDate;
 }
 
+const LEAVE_POLICY_STORAGE_KEY = 'hr_pro_leave_policy_v1';
+
+export function loadLeavePolicyConfig(): LeavePolicyConfig {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(LEAVE_POLICY_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const accrualMode: LeaveAccrualMode =
+          parsed?.accrualMode === 'monthly' ? 'monthly' : 'upfront';
+        const allowCarryOver =
+          typeof parsed?.allowCarryOver === 'boolean'
+            ? parsed.allowCarryOver
+            : true;
+        return { accrualMode, allowCarryOver };
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return {
+    accrualMode: 'upfront',
+    allowCarryOver: true,
+  };
+}
+
+export function saveLeavePolicyConfig(config: LeavePolicyConfig): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(
+        LEAVE_POLICY_STORAGE_KEY,
+        JSON.stringify(config)
+      );
+      window.dispatchEvent(
+        new CustomEvent('hr-leave-policy-change', { detail: config })
+      );
+    }
+  } catch {
+    // Ignore storage write errors
+  }
+}
+
+/**
+ * Calculates Leave Accrual & Carryover breakdown for an employee:
+ * Tồn phép = [Phép tích lũy theo tháng làm việc hiện tại] + [Phép năm cũ dồn sang] - [Đã nghỉ]
+ */
+export function calculateLeaveAccrualBreakdown(
+  employee: Employee,
+  records: LeaveRecord[],
+  year: number,
+  upToMonth: number = 12,
+  policyOverride?: LeavePolicyConfig
+): {
+  accruedLeaveDays: number;
+  carriedOverLeaveDays: number;
+  usedAnnualLeaveDays: number;
+  remainingAnnualLeave: number;
+} {
+  const policy = policyOverride || loadLeavePolicyConfig();
+  const clampedMonth = Math.max(1, Math.min(12, upToMonth || 12));
+  const quota = Number(employee.standardAnnualLeave) || 12;
+
+  // 1. Tính Phép tích lũy theo tháng làm việc hiện tại (hoặc Cấp 1 lần đầu năm)
+  let accruedLeaveDays = quota;
+  if (policy.accrualMode === 'monthly') {
+    let workingMonthsInYear = clampedMonth;
+    if (employee.joinDate && employee.joinDate.trim() && employee.joinDate.trim() !== '-') {
+      const { year: joinYear, month: joinMonth } = getYearMonth(employee.joinDate);
+      if (joinYear > year) {
+        workingMonthsInYear = 0;
+      } else if (joinYear === year) {
+        workingMonthsInYear = Math.max(0, clampedMonth - joinMonth + 1);
+      } else {
+        workingMonthsInYear = clampedMonth;
+      }
+    }
+    accruedLeaveDays = Number(((quota / 12) * workingMonthsInYear).toFixed(2));
+  }
+
+  // 2. Tính Phép năm cũ dồn sang (Carried Over Leave)
+  let carriedOverLeaveDays = 0;
+  if (policy.allowCarryOver) {
+    if (
+      typeof employee.carriedOverLeave === 'number' &&
+      !Number.isNaN(employee.carriedOverLeave)
+    ) {
+      carriedOverLeaveDays = Number(employee.carriedOverLeave.toFixed(2));
+    } else {
+      // Nếu có dữ liệu chấm phép của năm trước (year - 1), tự động dồn phần dư (nếu nhân viên vào làm từ năm trước)
+      const prevYear = year - 1;
+      const prevYearRecords = records.filter((r) => {
+        if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+          return false;
+        }
+        return getYearMonth(r.startDate).year === prevYear;
+      });
+      if (prevYearRecords.length > 0) {
+        const usedPrevYear = prevYearRecords.reduce(
+          (sum, r) => Number((sum + r.amount).toFixed(2)),
+          0
+        );
+        carriedOverLeaveDays = Math.max(
+          0,
+          Number((quota - usedPrevYear).toFixed(2))
+        );
+      }
+    }
+  }
+
+  // 3. Tính Số đã nghỉ (Phép năm đã sử dụng trong năm `year` tính đến `clampedMonth`)
+  const usedAnnualLeaveDays = records
+    .filter((r) => {
+      if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+        return false;
+      }
+      const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
+      return rYear === year && rMonth <= clampedMonth;
+    })
+    .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+
+  // Công thức: [Phép tích lũy theo tháng làm việc hiện tại] + [Phép năm cũ dồn sang] - [Đã nghỉ]
+  const remainingAnnualLeave = Number(
+    (accruedLeaveDays + carriedOverLeaveDays - usedAnnualLeaveDays).toFixed(2)
+  );
+
+  return {
+    accruedLeaveDays,
+    carriedOverLeaveDays,
+    usedAnnualLeaveDays,
+    remainingAnnualLeave,
+  };
+}
+
 /**
  * Builds the 12-month Annual Matrix Report rows for a given year and optional department filter
  */
@@ -435,8 +570,11 @@ export function calculateAnnualMatrixReport(
   employees: Employee[],
   records: LeaveRecord[],
   year: number,
-  departmentFilter: string = 'ALL'
+  departmentFilter: string = 'ALL',
+  policyOverride?: LeavePolicyConfig,
+  upToMonth: number = 12
 ): EmployeeAnnualMatrixRow[] {
+  const policy = policyOverride || loadLeavePolicyConfig();
   const filteredEmployees =
     departmentFilter === 'ALL'
       ? employees
@@ -492,15 +630,21 @@ export function calculateAnnualMatrixReport(
       }
     }
 
-    const remainingAnnualLeave = Number(
-      (employee.standardAnnualLeave - totalAnnualUsed).toFixed(2)
+    const breakdown = calculateLeaveAccrualBreakdown(
+      employee,
+      records,
+      year,
+      upToMonth,
+      policy
     );
 
     return {
       employee,
       months,
-      totalAnnualUsed,
-      remainingAnnualLeave,
+      accruedLeaveDays: breakdown.accruedLeaveDays,
+      carriedOverLeaveDays: breakdown.carriedOverLeaveDays,
+      totalAnnualUsed: breakdown.usedAnnualLeaveDays,
+      remainingAnnualLeave: breakdown.remainingAnnualLeave,
       totalUnpaidDays,
       totalRegimeDays,
       totalLateHours,
@@ -530,7 +674,10 @@ export interface MonthlyDayBadge {
 
 export interface EmployeeMonthlyAttendanceRow {
   employee: Employee;
-  remainingAnnualLeave: number;
+  accruedLeaveDays: number;      // Phép tích lũy theo tháng làm việc hiện tại
+  carriedOverLeaveDays: number;  // Phép năm cũ dồn sang
+  usedAnnualLeaveDays: number;   // Số đã nghỉ
+  remainingAnnualLeave: number;  // = accruedLeaveDays + carriedOverLeaveDays - usedAnnualLeaveDays
   monthAnnualDays: number;
   monthRegimeDays: number;
   monthAnnualAndRegimeDays: number;
@@ -622,8 +769,10 @@ export function calculateMonthlyAttendanceMatrix(
   month: number,
   departmentFilter: string = 'ALL',
   searchQuery: string = '',
-  todayDateStr?: string
+  todayDateStr?: string,
+  policyOverride?: LeavePolicyConfig
 ): MonthlyAttendanceSummaryReport {
+  const policy = policyOverride || loadLeavePolicyConfig();
   const resolvedToday =
     todayDateStr ||
     (() => {
@@ -673,17 +822,6 @@ export function calculateMonthlyAttendanceMatrix(
     null
   );
 
-  // Also compute annual matrix for `year` to get accurate `remainingAnnualLeave`
-  const annualMatrixRows = calculateAnnualMatrixReport(
-    filteredEmployees,
-    records,
-    year,
-    'ALL'
-  );
-  const annualRowMap = new Map<string, EmployeeAnnualMatrixRow>(
-    annualMatrixRows.map((r) => [r.employee.id, r])
-  );
-
   const monthStartStr = `${year}-${monthPadded}-01`;
   const monthEndStr = `${year}-${monthPadded}-${String(daysInMonth).padStart(2, '0')}`;
 
@@ -696,10 +834,13 @@ export function calculateMonthlyAttendanceMatrix(
   let employeesWithActivityCount = 0;
 
   const rows: EmployeeMonthlyAttendanceRow[] = filteredEmployees.map((employee) => {
-    const annualRow = annualRowMap.get(employee.id);
-    const remainingAnnualLeave = annualRow
-      ? annualRow.remainingAnnualLeave
-      : employee.standardAnnualLeave;
+    const breakdown = calculateLeaveAccrualBreakdown(
+      employee,
+      records,
+      year,
+      policy.accrualMode === 'monthly' ? month : 12,
+      policy
+    );
 
     const dayBadges: Record<number, MonthlyDayBadge[]> = {};
     for (let d = 1; d <= daysInMonth; d++) {
@@ -801,7 +942,10 @@ export function calculateMonthlyAttendanceMatrix(
 
     return {
       employee,
-      remainingAnnualLeave,
+      accruedLeaveDays: breakdown.accruedLeaveDays,
+      carriedOverLeaveDays: breakdown.carriedOverLeaveDays,
+      usedAnnualLeaveDays: breakdown.usedAnnualLeaveDays,
+      remainingAnnualLeave: breakdown.remainingAnnualLeave,
       monthAnnualDays,
       monthRegimeDays,
       monthAnnualAndRegimeDays,
