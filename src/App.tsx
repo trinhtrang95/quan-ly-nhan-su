@@ -1756,6 +1756,7 @@ export default function App() {
         }
         onClose={() => setIsEmpModalOpen(false)}
         onSave={handleSaveEmployee}
+        onDelete={isAdmin ? handleDeleteSingleEmployee : undefined}
       />
 
       <GroupManageModal

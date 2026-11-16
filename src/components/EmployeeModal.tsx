@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Upload, Check, Loader2, ChevronDown } from 'lucide-react';
+import {
+  X,
+  Upload,
+  Check,
+  Loader2,
+  ChevronDown,
+  Trash2,
+  AlertTriangle,
+} from 'lucide-react';
 import {
   DepartmentGroup,
   Employee,
@@ -27,6 +35,7 @@ interface EmployeeModalProps {
   defaultAnnualLeaveQuota?: number;
   onClose: () => void;
   onSave: (employeeData: Omit<Employee, 'id'>, existingId?: string) => void;
+  onDelete?: (emp: Employee) => void;
 }
 
 export const EmployeeModal: React.FC<EmployeeModalProps> = ({
@@ -39,6 +48,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   defaultAnnualLeaveQuota = 12,
   onClose,
   onSave,
+  onDelete,
 }) => {
   const effectivePositions =
     positions && positions.length > 0 ? positions : INITIAL_POSITIONS;
@@ -71,6 +81,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+  const cancelDeleteBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (isConfirmDeleteOpen) {
+      setTimeout(() => {
+        cancelDeleteBtnRef.current?.focus();
+      }, 20);
+    }
+  }, [isConfirmDeleteOpen]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -94,6 +114,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     setErrorMsg('');
+    setIsConfirmDeleteOpen(false);
     setIsUploadingAvatar(false);
     setIsProvinceDropdownOpen(false);
     setIsCommuneDropdownOpen(false);
@@ -744,25 +765,103 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             </div>
           </div>
 
-          {/* Modal Footer */}
-          <div className="pt-2.5 border-t border-slate-200 flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
-            >
-              Hủy
-            </button>
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>{editingEmployee ? 'Lưu thay đổi' : 'Thêm nhân sự'}</span>
-            </button>
+          {/* Modal Footer: Nút Xóa nhân sự cách ly ở góc trái, nút Hủy & Lưu thay đổi ở góc phải */}
+          <div className="pt-2.5 border-t border-slate-200 flex items-center justify-between gap-2.5">
+            <div>
+              {editingEmployee && onDelete && (
+                <button
+                  type="button"
+                  data-testid="btn-modal-delete-employee"
+                  onClick={() => setIsConfirmDeleteOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-300 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa nhân sự</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{editingEmployee ? 'Lưu thay đổi' : 'Thêm nhân sự'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>
+
+      {/* Popup Xác nhận 2 lớp (Double Confirmation Dialog) */}
+      {isConfirmDeleteOpen && editingEmployee && onDelete && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="modal-confirm-delete-emp-title"
+          data-testid="modal-confirm-delete-employee"
+          className="fixed inset-0 z-60 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsConfirmDeleteOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-red-200 shadow-2xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 bg-red-50/70 border-b border-red-100 flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <h4
+                id="modal-confirm-delete-emp-title"
+                className="text-sm sm:text-base font-bold text-slate-900"
+              >
+                ⚠️ Xác nhận xóa dữ liệu
+              </h4>
+            </div>
+
+            <div className="p-5 text-xs sm:text-sm text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa toàn bộ hồ sơ của nhân sự{' '}
+              <strong className="font-bold text-slate-900">
+                {editingEmployee.fullName}
+              </strong>
+              ? Thao tác này là vĩnh viễn và không thể hoàn tác.
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+              <button
+                ref={cancelDeleteBtnRef}
+                type="button"
+                data-testid="btn-modal-cancel-delete"
+                onClick={() => setIsConfirmDeleteOpen(false)}
+                className="px-4 py-2 rounded-lg border-2 border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-xs"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                data-testid="btn-modal-confirm-delete"
+                onClick={() => {
+                  setIsConfirmDeleteOpen(false);
+                  onClose();
+                  onDelete(editingEmployee);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xác nhận xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

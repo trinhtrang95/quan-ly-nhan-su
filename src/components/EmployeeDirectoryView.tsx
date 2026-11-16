@@ -6,7 +6,6 @@ import {
   Download,
   Upload,
   UserPlus,
-  Trash2,
   Search,
   Pencil,
   RotateCcw,
@@ -74,10 +73,8 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   groups,
   isAdmin = true,
   currentUsername,
-  selectedIds,
   importErrorMsg,
   onClearImportError,
-  onDeleteSelected,
   onDeleteSingle,
   onOpenAddEmployee,
   onOpenEditEmployee,
@@ -421,19 +418,6 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
 
           {/* Right Toolbar Buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Conditional "Xóa đã chọn" button */}
-            {isAdmin && selectedIds.length > 0 && (
-              <button
-                type="button"
-                data-testid="btn-delete-selected"
-                onClick={onDeleteSelected}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 bg-[#FEF2F2] hover:bg-red-100 text-[#EF4444] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs animate-pulse"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Xóa đã chọn ({selectedIds.length})</span>
-              </button>
-            )}
-
             {/* Dropdown Menu "Xuất / Nhập dữ liệu ▾" */}
             <div className="relative" ref={exportDropdownRef}>
               <button
@@ -798,13 +782,13 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                         )
                       )}
 
-                      {/* Cột cố định cuối: Thao tác */}
+                      {/* Cột cố định cuối: Thao tác (Đã gỡ bỏ nút Xóa nhanh, chỉ giữ nút Sửa) */}
                       <td
                         className="py-1.5 px-3 text-center whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {isAdmin ? (
-                          <div className="inline-flex items-center gap-1">
+                          <div className="inline-flex items-center justify-center">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -816,18 +800,6 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                               className="p-1.5 rounded-md text-slate-600 hover:text-[#0D9488] hover:bg-teal-50 transition-colors cursor-pointer"
                             >
                               <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteSingle(emp);
-                              }}
-                              aria-label={`Xóa nhân sự ${emp.fullName}`}
-                              title="Xóa nhân sự"
-                              className="p-1.5 rounded-md text-[#EF4444] hover:bg-[#FEF2F2] transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ) : (
@@ -858,6 +830,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         isAdmin={isAdmin}
         onClose={() => setDrawerEmployeeId(null)}
         onEditEmployee={onOpenEditEmployee}
+        onDeleteEmployee={onDeleteSingle}
         onInspectAttachment={onInspectAttachment}
       />
     </div>
