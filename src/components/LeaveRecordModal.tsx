@@ -20,7 +20,10 @@ import {
   RegimeSubtype,
   UserAccount,
 } from '../types/hr';
-import { calculateAnnualMatrixReport, sortEmployees } from '../utils/hrCalculations';
+import {
+  calculateLeaveAccrualBreakdown,
+  sortEmployees,
+} from '../utils/hrCalculations';
 import {
   compressImageClientSide,
   deleteImageFromHrBucket,
@@ -130,9 +133,17 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   const remainingLeaveMap = useMemo(() => {
     const map = new Map<string, number>();
     if (employees.length === 0) return map;
-    const rows = calculateAnnualMatrixReport(employees, leaveRecords, targetYear);
-    for (const r of rows) {
-      map.set(r.employee.id, r.remainingAnnualLeave);
+    const currentMonth = targetYear === 2026 ? 11 : new Date().getMonth() + 1;
+    for (const emp of employees) {
+      const breakdown = calculateLeaveAccrualBreakdown(
+        emp,
+        leaveRecords,
+        targetYear,
+        currentMonth,
+        undefined,
+        12
+      );
+      map.set(emp.id, breakdown.remainingAnnualLeave);
     }
     return map;
   }, [employees, leaveRecords, targetYear]);
@@ -451,7 +462,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                       <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
                     )}
                     <span>
-                      Tồn phép năm ({targetYear}): {selectedEmpRemaining} ngày
+                      Phép còn lại: {selectedEmpRemaining} ngày
                     </span>
                   </span>
                 )}
@@ -552,7 +563,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                                   : 'bg-red-50 text-red-600'
                               }`}
                             >
-                              Tồn: {rem} ngày
+                              Còn lại: {rem} ngày
                             </span>
                           </button>
                         );
