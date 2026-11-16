@@ -77,8 +77,6 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
   selectedIds,
   importErrorMsg,
   onClearImportError,
-  onToggleSelect,
-  onToggleSelectAll,
   onDeleteSelected,
   onDeleteSingle,
   onOpenAddEmployee,
@@ -209,10 +207,6 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
         : null,
     [drawerEmployeeId, normalizedEmployees]
   );
-
-  const allFilteredSelected =
-    sortedEmployees.length > 0 &&
-    sortedEmployees.every((emp) => selectedIds.includes(emp.id));
 
   const handleSortClick = (field: EmployeeSortField) => {
     if (!field) return;
@@ -377,7 +371,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
     );
   };
 
-  const totalTableColumns = 5 + visibleColumnDefs.length;
+  const totalTableColumns = 4 + visibleColumnDefs.length;
 
   return (
     <div className="space-y-4">
@@ -650,23 +644,11 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
           >
             <thead>
               <tr className="sticky top-0 z-30 bg-[#0F232E] text-white text-[11px] font-semibold tracking-wider uppercase select-none shadow-sm">
-                {/* 1. Checkbox chọn (Cố định) */}
-                <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-3 w-10 text-center whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={allFilteredSelected}
-                    onChange={() =>
-                      onToggleSelectAll(sortedEmployees.map((emp) => emp.id))
-                    }
-                    aria-label="Chọn tất cả nhân sự hiển thị"
-                    className="w-3.5 h-3.5 rounded accent-[#0D9488] cursor-pointer"
-                  />
-                </th>
-                {/* 2. STT (Cố định) */}
+                {/* 1. STT (Cố định) */}
                 <th className="sticky top-0 z-30 bg-[#0F232E] py-2.5 px-2.5 w-12 text-center whitespace-nowrap">
                   STT
                 </th>
-                {/* 3. Mã nhân viên (Cố định - Sortable) */}
+                {/* 2. Mã nhân viên (Cố định - Sortable) */}
                 <th
                   data-testid="th-sort-code"
                   onClick={() => handleSortClick('employeeCode')}
@@ -677,7 +659,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                     {renderSortIndicator('employeeCode')}
                   </div>
                 </th>
-                {/* 4. Họ tên (Cố định - Sortable, tự giãn rộng khi không có cột động) */}
+                {/* 3. Họ tên (Cố định - Sortable, tự giãn rộng khi không có cột động) */}
                 <th
                   data-testid="th-sort-name"
                   onClick={() => handleSortClick('fullName')}
@@ -766,50 +748,31 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                 </tr>
               ) : (
                 sortedEmployees.map((emp, idx) => {
-                  const isSelected = selectedIds.includes(emp.id);
                   const isDrawerOpen = drawerEmployeeId === emp.id;
 
                   return (
                     <tr
                       key={emp.id}
-                      onClick={() => setDrawerEmployeeId(emp.id)}
-                      className={`transition-colors group cursor-pointer ${
+                      className={`transition-colors group ${
                         isDrawerOpen
                           ? 'bg-teal-50/90'
-                          : isSelected
-                          ? 'bg-teal-50/60 hover:bg-teal-50'
                           : 'hover:bg-slate-50/90'
                       }`}
                     >
-                      {/* 1. Checkbox chọn */}
-                      <td
-                        className="py-1.5 px-3 text-center whitespace-nowrap"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => onToggleSelect(emp.id)}
-                          aria-label={`Chọn nhân sự ${emp.fullName}`}
-                          className="w-3.5 h-3.5 rounded accent-[#0D9488] cursor-pointer"
-                        />
-                      </td>
-                      {/* 2. STT */}
+                      {/* 1. STT */}
                       <td className="py-1.5 px-2.5 text-center font-mono tabular-nums text-slate-500 whitespace-nowrap">
                         {idx + 1}
                       </td>
-                      {/* 3. Mã nhân viên */}
-                      <td className="py-1.5 px-3 font-mono tabular-nums font-bold text-[#0D9488] whitespace-nowrap">
+                      {/* 2. Mã nhân viên */}
+                      <td className="py-1.5 px-3 font-mono tabular-nums font-bold text-slate-800 whitespace-nowrap">
                         {emp.employeeCode || '-'}
                       </td>
-                      {/* 4. Họ tên (Avatar w-7 h-7 + Họ tên trên 1 dòng) */}
+                      {/* 3. Họ tên (Vị trí duy nhất click mở Chi tiết nhân sự: text-teal-600 cursor-pointer hover:underline) */}
                       <td className="py-1.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDrawerEmployeeId(emp.id);
-                          }}
+                          data-testid={`btn-open-emp-detail-${emp.employeeCode}`}
+                          onClick={() => setDrawerEmployeeId(emp.id)}
                           className="inline-flex items-center gap-2 text-left group/name cursor-pointer"
                         >
                           {emp.avatarUrl && (
@@ -820,7 +783,7 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
                               className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0 text-xs"
                             />
                           )}
-                          <span className="font-bold text-slate-900 group-hover/name:text-[#0D9488] group-hover/name:underline transition-colors">
+                          <span className="font-bold text-teal-600 group-hover/name:text-teal-700 hover:underline group-hover/name:underline transition-colors cursor-pointer">
                             {emp.fullName || '-'}
                           </span>
                         </button>

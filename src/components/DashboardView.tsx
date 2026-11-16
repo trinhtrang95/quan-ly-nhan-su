@@ -191,7 +191,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     },
     {
       id: 'employees',
-      title: 'Danh sách nhân sự',
+      title: 'Nhân sự',
       subtitle: 'Danh sách hồ sơ, phòng ban & xuất nhập Excel',
       icon: Users,
       iconColor: 'text-emerald-600 bg-emerald-50',

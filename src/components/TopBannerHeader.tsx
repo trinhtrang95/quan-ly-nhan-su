@@ -17,7 +17,7 @@ interface TopBannerHeaderProps {
 
 const MODULE_TITLES: Record<ActiveModule, string> = {
   dashboard: 'Bảng điều khiển Tổng quan',
-  employees: 'Hồ sơ & Danh bạ Nhân sự',
+  employees: 'Nhân sự',
   leave_logs: 'Nhật ký Nghỉ phép & Đi muộn',
   annual_report: 'Báo cáo tổng hợp',
   settings: 'Cài đặt Đơn vị & Hệ thống',
@@ -112,7 +112,7 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
               : ''
           }`}
         >
-          Danh sách Nhân sự
+          Nhân sự
         </button>
         <button
           type="button"

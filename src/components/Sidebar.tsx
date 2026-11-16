@@ -45,7 +45,7 @@ const NAV_ITEMS: {
   },
   {
     id: 'employees',
-    label: 'Danh sách nhân sự',
+    label: 'Nhân sự',
     shortLabel: 'Nhân sự',
     icon: Users,
     iconColor: 'text-emerald-400',
