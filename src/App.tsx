@@ -64,13 +64,15 @@ import {
   updatePositionInSupabase,
 } from './utils/supabaseService';
 import { LoginView } from './components/LoginView';
-import { Sidebar, ReportSubTab } from './components/Sidebar';
+import { Sidebar, LeaveSubTab, ReportSubTab } from './components/Sidebar';
 import { TopBannerHeader } from './components/TopBannerHeader';
 import { DashboardView } from './components/DashboardView';
 import { EmployeeDirectoryView } from './components/EmployeeDirectoryView';
 import { EmployeeModal } from './components/EmployeeModal';
 import { GroupManageModal } from './components/GroupManageModal';
 import { LeaveLateLogView } from './components/LeaveLateLogView';
+import { AnnualLeaveFundView } from './components/AnnualLeaveFundView';
+import { AnnualLeaveRulesView } from './components/AnnualLeaveRulesView';
 import { LeaveRecordModal } from './components/LeaveRecordModal';
 import { BulkLeaveRecordModal } from './components/BulkLeaveRecordModal';
 import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
@@ -138,6 +140,8 @@ export default function App() {
   enforceCloudStrictCacheVersion();
 
   const [activeModule, setActiveModule] = useState<ActiveModule>('dashboard');
+  const [leaveSubTab, setLeaveSubTab] =
+    useState<LeaveSubTab>('leave_requests');
   const [reportSubTab, setReportSubTab] =
     useState<ReportSubTab>('monthly_summary');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
@@ -1471,6 +1475,8 @@ export default function App() {
           setLeaveInitialTypeFilter('ALL');
           setActiveModule(mod);
         }}
+        leaveSubTab={leaveSubTab}
+        onSelectLeaveSubTab={(subTab) => setLeaveSubTab(subTab)}
         reportSubTab={reportSubTab}
         onSelectReportSubTab={(subTab) => setReportSubTab(subTab)}
         collapsed={sidebarCollapsed}
@@ -1500,7 +1506,8 @@ export default function App() {
       {/* Right Main Content Viewport */}
       <div
         className={`flex-1 min-w-0 flex flex-col h-screen ${
-          activeModule === 'dashboard' || activeModule === 'leave_logs'
+          activeModule === 'dashboard' ||
+          (activeModule === 'leave_logs' && leaveSubTab === 'leave_requests')
             ? 'overflow-y-auto lg:overflow-hidden pb-20 md:pb-8 lg:pb-0'
             : 'overflow-y-auto pb-20 md:pb-8'
         }`}
@@ -1509,7 +1516,8 @@ export default function App() {
           className={`w-full max-w-[1600px] mx-auto flex-1 ${
             activeModule === 'dashboard'
               ? 'px-0 pt-0 min-h-0'
-              : activeModule === 'leave_logs'
+              : activeModule === 'leave_logs' &&
+                  leaveSubTab === 'leave_requests'
                 ? 'px-3 sm:px-5 md:px-6 pt-3 pb-3 min-h-0 flex flex-col'
                 : 'px-3 sm:px-5 md:px-6 pt-4 md:pt-5'
           }`}
@@ -1518,7 +1526,9 @@ export default function App() {
           <main
             aria-label="Nội dung phân hệ chính"
             className={
-              activeModule === 'dashboard' || activeModule === 'leave_logs'
+              activeModule === 'dashboard' ||
+              (activeModule === 'leave_logs' &&
+                leaveSubTab === 'leave_requests')
                 ? 'h-full min-h-0 flex flex-col'
                 : ''
             }
@@ -1535,10 +1545,14 @@ export default function App() {
                 matrixRows={matrixRows2026}
                 onNavigate={(mod) => {
                   setLeaveInitialTypeFilter('ALL');
+                  if (mod === 'leave_logs') {
+                    setLeaveSubTab('leave_requests');
+                  }
                   setActiveModule(mod);
                 }}
                 onFilterMissingPaper={() => {
                   setLeaveInitialTypeFilter('PAPER_MISSING');
+                  setLeaveSubTab('leave_requests');
                   setActiveModule('leave_logs');
                 }}
                 onOpenAddLeave={() => {
@@ -1624,42 +1638,108 @@ export default function App() {
               />
             )}
 
-            {activeModule === 'leave_logs' && (
-              <LeaveLateLogView
-                records={companyRecords}
+            {activeModule === 'leave_logs' &&
+              leaveSubTab === 'leave_requests' && (
+                <LeaveLateLogView
+                  records={companyRecords}
+                  employees={companyEmployees}
+                  groups={effectiveGroups}
+                  isAdmin={isAdmin}
+                  initialTypeFilter={leaveInitialTypeFilter}
+                  onOpenAddRecord={() => {
+                    setEditingRecord(null);
+                    setLeaveDefaultEmpId(undefined);
+                    setLeaveDefaultMonth(undefined);
+                    setLeaveDefaultYear(undefined);
+                    setIsLeaveModalOpen(true);
+                  }}
+                  onOpenBulkRecord={() => {
+                    setIsBulkLeaveModalOpen(true);
+                  }}
+                  onOpenEditRecord={(rec) => {
+                    if (!isAdmin) return;
+                    setEditingRecord(rec);
+                    setIsLeaveModalOpen(true);
+                  }}
+                  onQuickUpdateRecord={(rec, patch) => {
+                    const { id, ...rest } = rec;
+                    handleSaveLeaveRecord({ ...rest, ...patch }, id);
+                  }}
+                  onDeleteRecord={handleDeleteLeaveRecord}
+                  onInspectAttachment={(url, title) =>
+                    setLightboxImage({ url, title })
+                  }
+                  onExportExcel={(filteredList) => {
+                    exportLeaveRecordsToExcel(filteredList, companyEmployees);
+                    showToast(
+                      `Đã xuất tệp Excel nhật ký (${filteredList.length} bản ghi).`
+                    );
+                  }}
+                />
+              )}
+
+            {activeModule === 'leave_logs' && leaveSubTab === 'leave_fund' && (
+              <AnnualLeaveFundView
                 employees={companyEmployees}
+                records={companyRecords}
                 groups={effectiveGroups}
-                isAdmin={isAdmin}
-                initialTypeFilter={leaveInitialTypeFilter}
-                onOpenAddRecord={() => {
-                  setEditingRecord(null);
-                  setLeaveDefaultEmpId(undefined);
-                  setLeaveDefaultMonth(undefined);
-                  setLeaveDefaultYear(undefined);
-                  setIsLeaveModalOpen(true);
-                }}
-                onOpenBulkRecord={() => {
-                  setIsBulkLeaveModalOpen(true);
-                }}
-                onOpenEditRecord={(rec) => {
-                  if (!isAdmin) return;
-                  setEditingRecord(rec);
-                  setIsLeaveModalOpen(true);
-                }}
-                onQuickUpdateRecord={(rec, patch) => {
-                  const { id, ...rest } = rec;
-                  handleSaveLeaveRecord({ ...rest, ...patch }, id);
-                }}
-                onDeleteRecord={handleDeleteLeaveRecord}
-                onInspectAttachment={(url, title) =>
-                  setLightboxImage({ url, title })
+                defaultAnnualLeaveQuota={
+                  activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
                 }
-                onExportExcel={(filteredList) => {
-                  exportLeaveRecordsToExcel(filteredList, companyEmployees);
-                  showToast(
-                    `Đã xuất tệp Excel nhật ký (${filteredList.length} bản ghi).`
+                isAdmin={isAdmin}
+                onUpdateEmployeeQuota={(emp, newQuota) => {
+                  const { id, ...rest } = emp;
+                  handleSaveEmployee(
+                    { ...rest, standardAnnualLeave: newQuota },
+                    id
                   );
                 }}
+                onImportOpeningBalances={(importedRows) => {
+                  const rowByCode = new Map(
+                    importedRows.map((r) => [
+                      r.employeeCode.trim().toUpperCase(),
+                      r,
+                    ])
+                  );
+                  setEmployees((prev) =>
+                    prev.map((emp) => {
+                      const matched = rowByCode.get(
+                        emp.employeeCode.trim().toUpperCase()
+                      );
+                      if (!matched) return emp;
+                      return {
+                        ...emp,
+                        carriedOverLeave: matched.carried_over,
+                        openingUsedLeave: matched.used_leave,
+                      };
+                    })
+                  );
+                  showToast(
+                    `Đã chốt số dư phép đầu kỳ (đến 31/10/2026) cho ${importedRows.length} nhân sự vào bảng Quỹ phép năm.`
+                  );
+                }}
+              />
+            )}
+
+            {activeModule === 'leave_logs' && leaveSubTab === 'leave_rules' && (
+              <AnnualLeaveRulesView
+                companyUnits={companyUnits}
+                activeCompanyId={activeCompany.id}
+                defaultAnnualLeaveQuota={
+                  activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
+                }
+                isAdmin={isAdmin}
+                onUpdateCompanyQuota={(compId, newQuota) => {
+                  const targetComp = companyUnits.find((c) => c.id === compId);
+                  if (targetComp) {
+                    const { id, ...rest } = targetComp;
+                    handleUpdateCompany(id, {
+                      ...rest,
+                      defaultLeaveQuota: newQuota,
+                    });
+                  }
+                }}
+                onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
               />
             )}
 

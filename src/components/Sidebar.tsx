@@ -13,14 +13,20 @@ import {
   UserCheck,
   CalendarRange,
   Layers,
+  FileText,
+  Wallet,
+  BookOpenCheck,
 } from 'lucide-react';
 import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
+export type LeaveSubTab = 'leave_requests' | 'leave_fund' | 'leave_rules';
 export type ReportSubTab = 'monthly_summary' | 'annual_matrix';
 
 interface SidebarProps {
   activeModule: ActiveModule;
   onSelectModule: (mod: ActiveModule) => void;
+  leaveSubTab?: LeaveSubTab;
+  onSelectLeaveSubTab?: (subTab: LeaveSubTab) => void;
   reportSubTab?: ReportSubTab;
   onSelectReportSubTab?: (subTab: ReportSubTab) => void;
   collapsed: boolean;
@@ -57,9 +63,10 @@ const NAV_ITEMS: {
   },
   {
     id: 'leave_logs',
-    label: 'Nghỉ phép & Đi muộn',
-    shortLabel: 'Chấm phép',
+    label: 'Nghỉ phép',
+    shortLabel: 'Nghỉ phép',
     icon: CalendarClock,
+    hasSubmenu: true,
   },
   {
     id: 'annual_report',
@@ -80,6 +87,8 @@ const NAV_ITEMS: {
 export const Sidebar: React.FC<SidebarProps> = ({
   activeModule,
   onSelectModule,
+  leaveSubTab = 'leave_requests',
+  onSelectLeaveSubTab,
   reportSubTab = 'monthly_summary',
   onSelectReportSubTab,
   collapsed,
@@ -90,7 +99,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCloudConnected = true,
   onLogoutClick,
 }) => {
-  // Mặc định mở rộng menu cha "Báo cáo tổng hợp"
+  // Mặc định mở rộng menu cha "Nghỉ phép" và "Báo cáo tổng hợp"
+  const [isLeaveExpanded, setIsLeaveExpanded] = useState<boolean>(true);
   const [isReportsExpanded, setIsReportsExpanded] = useState<boolean>(true);
 
   const isAdmin = currentUser.role === 'admin';
@@ -104,6 +114,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
       : currentUser.fullName.slice(0, 2).toUpperCase();
   })();
+
+  const handleSelectLeaveChild = (subTab: LeaveSubTab) => {
+    onSelectModule('leave_logs');
+    if (onSelectLeaveSubTab) {
+      onSelectLeaveSubTab(subTab);
+    }
+  };
 
   const handleSelectReportChild = (subTab: ReportSubTab) => {
     onSelectModule('annual_report');
@@ -164,8 +181,143 @@ export const Sidebar: React.FC<SidebarProps> = ({
             const Icon = item.icon;
             const isActive = activeModule === item.id;
 
-            // Menu đa cấp: "Báo cáo tổng hợp"
-            if (item.hasSubmenu) {
+            // Menu đa cấp 1: "Nghỉ phép" (Đơn nghỉ | Quỹ phép năm | Quy định phép năm)
+            if (item.id === 'leave_logs') {
+              const isParentHighlighted = isActive;
+              const isRequestsActive =
+                isActive && leaveSubTab === 'leave_requests';
+              const isFundActive = isActive && leaveSubTab === 'leave_fund';
+              const isRulesActive = isActive && leaveSubTab === 'leave_rules';
+
+              return (
+                <div key={item.id} className="space-y-1">
+                  {/* Menu cha: Nghỉ phép */}
+                  <button
+                    type="button"
+                    data-testid="sidebar-nav-leave-parent"
+                    onClick={() => {
+                      if (collapsed) {
+                        onSelectModule('leave_logs');
+                      } else if (!isActive) {
+                        setIsLeaveExpanded(true);
+                        onSelectModule('leave_logs');
+                      } else {
+                        setIsLeaveExpanded((prev) => !prev);
+                      }
+                    }}
+                    title={collapsed ? item.label : undefined}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
+                      collapsed && isActive
+                        ? 'bg-white text-[#14539E] font-bold shadow-xs'
+                        : isParentHighlighted
+                        ? 'bg-white/15 text-white font-semibold'
+                        : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                    } ${collapsed ? 'justify-center' : 'justify-between'}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Icon
+                        className={`w-5 h-5 shrink-0 ${
+                          collapsed && isActive
+                            ? 'text-[#14539E]'
+                            : isParentHighlighted
+                            ? 'text-white'
+                            : 'text-blue-100'
+                        }`}
+                      />
+                      {!collapsed && (
+                        <span className="truncate whitespace-nowrap">
+                          {item.label}
+                        </span>
+                      )}
+                    </div>
+
+                    {!collapsed && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md text-blue-100">
+                          {recordCount}
+                        </span>
+                        <span className="text-blue-100">
+                          {isLeaveExpanded ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </button>
+
+                  {/* 3 Menu con dưới "Nghỉ phép": Đơn nghỉ | Quỹ phép năm | Quy định phép năm */}
+                  {!collapsed && isLeaveExpanded && (
+                    <div className="ml-5 pl-3 border-l border-white/30 space-y-1 py-0.5">
+                      {/* Sub-menu 1: Đơn nghỉ */}
+                      <button
+                        type="button"
+                        data-testid="sidebar-subnav-leave-requests"
+                        onClick={() =>
+                          handleSelectLeaveChild('leave_requests')
+                        }
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
+                          isRequestsActive
+                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
+                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                        }`}
+                      >
+                        <FileText
+                          className={`w-4 h-4 shrink-0 ${
+                            isRequestsActive
+                              ? 'text-[#14539E]'
+                              : 'text-blue-100'
+                          }`}
+                        />
+                        <span className="leading-snug">Đơn nghỉ</span>
+                      </button>
+
+                      {/* Sub-menu 2: Quỹ phép năm */}
+                      <button
+                        type="button"
+                        data-testid="sidebar-subnav-leave-fund"
+                        onClick={() => handleSelectLeaveChild('leave_fund')}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
+                          isFundActive
+                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
+                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                        }`}
+                      >
+                        <Wallet
+                          className={`w-4 h-4 shrink-0 ${
+                            isFundActive ? 'text-[#14539E]' : 'text-blue-100'
+                          }`}
+                        />
+                        <span className="leading-snug">Quỹ phép năm</span>
+                      </button>
+
+                      {/* Sub-menu 3: Quy định phép năm */}
+                      <button
+                        type="button"
+                        data-testid="sidebar-subnav-leave-rules"
+                        onClick={() => handleSelectLeaveChild('leave_rules')}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
+                          isRulesActive
+                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
+                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                        }`}
+                      >
+                        <BookOpenCheck
+                          className={`w-4 h-4 shrink-0 ${
+                            isRulesActive ? 'text-[#14539E]' : 'text-blue-100'
+                          }`}
+                        />
+                        <span className="leading-snug">Quy định phép năm</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // Menu đa cấp 2: "Báo cáo tổng hợp"
+            if (item.id === 'annual_report') {
               const isParentHighlighted = isActive;
               const isMonthlyActive =
                 isActive && reportSubTab === 'monthly_summary';
@@ -307,17 +459,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }`}
                   >
                     {employeeCount}
-                  </span>
-                )}
-                {!collapsed && item.id === 'leave_logs' && (
-                  <span
-                    className={`text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md ${
-                      isActive
-                        ? 'bg-blue-50 text-[#14539E] font-bold'
-                        : 'text-blue-100'
-                    }`}
-                  >
-                    {recordCount}
                   </span>
                 )}
               </button>

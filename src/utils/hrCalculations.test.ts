@@ -439,5 +439,91 @@ test('calculateLeaveAccrualBreakdown accurately computes [Phép tích lũy] + [P
   assert.equal(upfrontNoCarry.remainingAnnualLeave, 9);
 });
 
+test('Go-Live Tháng 11/2026: Chốt số dư phép đầu kỳ (Tồn 2025 = 2, Đã nghỉ đến 31/10 = 5) hoàn thiện phương trình 11 + 2 = 13, Còn lại = 13 - 5 = 8 và cộng dồn đơn mới từ tháng 11', async () => {
+  const {
+    calculateLeaveAccrualBreakdown,
+    saveLeaveBalancesBatch,
+    clearLeaveBalancesStorage,
+  } = await import('./hrCalculations');
+  const { parseOpeningLeaveBalanceText } = await import('./exportUtils');
 
+  clearLeaveBalancesStorage();
 
+  const csvTemplateContent = [
+    'Mã NV,Họ và tên,Tồn phép năm cũ (2025),Đã nghỉ (đến 31/10)',
+    'NV001,Trịnh Quốc Khánh,2,5',
+    'NV002,Lương Thị Mai Hương,1.5,4',
+  ].join('\n');
+
+  const parsed = parseOpeningLeaveBalanceText(
+    csvTemplateContent,
+    INITIAL_EMPLOYEES
+  );
+  assert.equal(parsed.matchedRows.length, 2);
+  assert.equal(parsed.matchedRows[0].employeeCode, 'NV001');
+  assert.equal(parsed.matchedRows[0].carried_over, 2);
+  assert.equal(parsed.matchedRows[0].used_leave, 5);
+
+  // Overwrite balances in leave_balances without creating any fake leave_logs
+  const balancesMap = saveLeaveBalancesBatch(
+    parsed.matchedRows.map((r) => ({
+      employeeCode: r.employeeCode,
+      employeeId: r.employee.id,
+      fullName: r.fullName,
+      carried_over: r.carried_over,
+      used_leave: r.used_leave,
+      cutoffDate: '2026-10-31',
+    })),
+    INITIAL_LEAVE_RECORDS,
+    2026
+  );
+
+  // Verify November (month 11) equation for NV001:
+  // Tích lũy năm nay = 11, Tồn năm trước = 2, Tổng quỹ phép = 13, Đã nghỉ = 5, Còn lại = 8
+  const nv001Breakdown = calculateLeaveAccrualBreakdown(
+    INITIAL_EMPLOYEES[0],
+    INITIAL_LEAVE_RECORDS,
+    2026,
+    11,
+    { accrualMode: 'monthly', allowCarryOver: true },
+    12,
+    balancesMap
+  );
+
+  assert.equal(nv001Breakdown.accruedLeaveDays, 11);
+  assert.equal(nv001Breakdown.carriedOverLeaveDays, 2);
+  assert.equal(nv001Breakdown.totalLeaveFund, 13);
+  assert.equal(nv001Breakdown.usedAnnualLeaveDays, 5);
+  assert.equal(nv001Breakdown.remainingAnnualLeave, 8);
+
+  // Now simulate a new leave record arising in November 2026 (after the 31/10 cutoff)
+  const recordsWithNewNovLeave = [
+    ...INITIAL_LEAVE_RECORDS,
+    {
+      id: 'rec-new-nov-2026',
+      employeeId: INITIAL_EMPLOYEES[0].id,
+      type: 'annual_leave' as const,
+      startDate: '2026-11-20',
+      endDate: '2026-11-21',
+      amount: 2,
+      reason: 'Nghỉ phép phát sinh mới tháng 11',
+      createdAt: '2026-11-20',
+      approvedBy: 'HR',
+    },
+  ];
+
+  const afterNewNovLeave = calculateLeaveAccrualBreakdown(
+    INITIAL_EMPLOYEES[0],
+    recordsWithNewNovLeave,
+    2026,
+    11,
+    { accrualMode: 'monthly', allowCarryOver: true },
+    12,
+    balancesMap
+  );
+
+  assert.equal(afterNewNovLeave.usedAnnualLeaveDays, 7); // 5 + 2
+  assert.equal(afterNewNovLeave.remainingAnnualLeave, 6); // 13 - 7
+
+  clearLeaveBalancesStorage();
+});

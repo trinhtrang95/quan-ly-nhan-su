@@ -50,8 +50,21 @@ export interface Employee {
   joinDate: string;     // Ngày vào làm (YYYY-MM-DD)
   standardAnnualLeave: number; // Tổng phép năm tiêu chuẩn (mặc định 12)
   carriedOverLeave?: number;   // Phép năm cũ dồn sang (nếu có)
+  openingUsedLeave?: number;   // Số ngày phép đã nghỉ chốt đầu kỳ (đến 31/10)
   status: WorkStatus;
   avatarUrl: string;
+}
+
+export interface LeaveBalanceRecord {
+  employeeCode: string; // Mã NV (Khóa chính để map dữ liệu)
+  employeeId?: string;
+  fullName?: string;
+  year: number;         // Năm áp dụng (VD: 2026)
+  carried_over: number; // Tồn phép năm cũ (2025)
+  used_leave: number;   // Đã nghỉ (đến 31/10)
+  cutoffDate: string;   // Mặc định '2026-10-31'
+  baselineNovRecordIds?: string[]; // ID các bản ghi tháng 11 tồn tại trước thời điểm chốt sổ (nếu có)
+  updatedAt: string;
 }
 
 export type LeaveAccrualMode = 'upfront' | 'monthly';
@@ -60,6 +73,8 @@ export interface LeavePolicyConfig {
   accrualMode: LeaveAccrualMode; // 'upfront': Cấp 1 lần đầu năm | 'monthly': Tích lũy theo tháng
   allowCarryOver: boolean;       // Cho phép dồn phép năm cũ sang năm mới
 }
+
+export type LeaveApprovalStatus = 'Đã duyệt' | 'Chờ duyệt';
 
 export interface LeaveRecord {
   id: string;
@@ -73,6 +88,7 @@ export interface LeaveRecord {
   attachmentUrl?: string; // Ảnh chụp giấy phép / viện phí (Data URI hoặc URL)
   attachmentTitle?: string;
   paperStatus?: 'Chưa có' | 'Đã có'; // Hiện trạng giấy phép
+  approvalStatus?: LeaveApprovalStatus; // Trạng thái duyệt đơn ('Đã duyệt' | 'Chờ duyệt')
   createdAt: string;
   approvedBy: string;
 }

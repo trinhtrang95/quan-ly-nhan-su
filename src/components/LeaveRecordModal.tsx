@@ -961,10 +961,11 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             </button>
             <button
               type="submit"
+              data-testid="leave-modal-save-btn"
               className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>{editingRecord ? 'Lưu thay đổi' : 'Xác nhận ghi chép'}</span>
+              <span>{editingRecord ? 'Lưu thay đổi' : 'Lưu'}</span>
             </button>
           </div>
         </form>

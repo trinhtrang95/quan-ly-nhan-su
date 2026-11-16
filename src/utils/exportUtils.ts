@@ -754,3 +754,230 @@ export function exportMonthlyAttendanceMatrixToExcel(
   );
 }
 
+export interface OpeningBalanceImportRow {
+  employee: Employee;
+  employeeCode: string;
+  fullName: string;
+  carried_over: number; // Tồn phép năm cũ (2025)
+  used_leave: number; // Đã nghỉ (đến 31/10)
+}
+
+export interface OpeningBalanceImportParseResult {
+  matchedRows: OpeningBalanceImportRow[];
+  unmatchedCodes: string[];
+  invalidRows: number[];
+}
+
+/**
+ * Downloads the minimal 4-column Excel/CSV template for "Chốt số dư phép đầu kỳ" (Go-Live Tháng 11/2026):
+ * 1. Mã NV
+ * 2. Họ và tên
+ * 3. Tồn phép năm cũ (2025)
+ * 4. Đã nghỉ (đến 31/10)
+ */
+export function downloadOpeningLeaveBalanceTemplate(
+  employees: Employee[] = []
+): void {
+  const headers = [
+    'Mã NV',
+    'Họ và tên',
+    'Tồn phép năm cũ (2025)',
+    'Đã nghỉ (đến 31/10)',
+  ];
+
+  const sampleList =
+    employees.length > 0
+      ? employees
+      : [
+          {
+            employeeCode: 'NV001',
+            fullName: 'Trịnh Quốc Khánh',
+            carriedOverLeave: 2,
+            openingUsedLeave: 5,
+          } as Employee,
+          {
+            employeeCode: 'NV002',
+            fullName: 'Lương Thị Mai Hương',
+            carriedOverLeave: 2,
+            openingUsedLeave: 5,
+          } as Employee,
+        ];
+
+  const rows = sampleList.map((emp, idx) => {
+    const carried =
+      typeof emp.carriedOverLeave === 'number'
+        ? emp.carriedOverLeave
+        : idx === 0
+        ? 2
+        : 2;
+    const used =
+      typeof emp.openingUsedLeave === 'number'
+        ? emp.openingUsedLeave
+        : idx === 0
+        ? 5
+        : 5;
+    return [emp.employeeCode, emp.fullName, String(carried), String(used)];
+  });
+
+  const csvContent = [
+    headers.join(','),
+    ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
+  ].join('\r\n');
+
+  const blob = new Blob(['\uFEFF' + csvContent], {
+    type: 'text/csv;charset=utf-8;',
+  });
+  triggerBlobDownload(blob, 'Mau_Chot_So_Du_Phep_Dau_Ky_2026.csv');
+}
+
+function parseNumericCell(raw: string | undefined, fallback = 0): number {
+  const cleaned = cleanCsvCell(raw).replace(',', '.');
+  if (!cleaned) return fallback;
+  const num = Number(cleaned);
+  return Number.isFinite(num) && num >= 0 ? Number(num.toFixed(2)) : fallback;
+}
+
+/**
+ * Pure parser for "Chốt số dư phép đầu kỳ" file content (supports CSV, TSV, or HTML table .xls).
+ * Strictly maps by `Mã NV` without generating any fake leave request rows.
+ */
+export function parseOpeningLeaveBalanceText(
+  text: string,
+  existingEmployees: Employee[]
+): OpeningBalanceImportParseResult {
+  const empByCode = new Map<string, Employee>();
+  for (const emp of existingEmployees) {
+    const code = (emp.employeeCode || '').trim().toUpperCase();
+    if (code) {
+      empByCode.set(code, emp);
+    }
+  }
+
+  const trimmedText = (text || '').replace(/^\uFEFF/, '').trim();
+  if (!trimmedText) {
+    return { matchedRows: [], unmatchedCodes: [], invalidRows: [] };
+  }
+
+  let tableRows: string[][] = [];
+
+  // Support HTML table-based .xls files if uploaded
+  if (/<table[\s>]/i.test(trimmedText) && /<tr[\s>]/i.test(trimmedText)) {
+    const trMatches = trimmedText.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+    for (const tr of trMatches) {
+      const cellMatches = tr.match(/<(?:td|th)[^>]*>([\s\S]*?)<\/(?:td|th)>/gi) || [];
+      if (cellMatches.length > 0) {
+        const cols = cellMatches.map((c) =>
+          c
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/\s+/g, ' ')
+            .trim()
+        );
+        tableRows.push(cols);
+      }
+    }
+  } else {
+    const lines = trimmedText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    tableRows = lines.map((line) => {
+      if (line.includes('\t')) {
+        return line.split('\t').map((c) => cleanCsvCell(c));
+      }
+      if (line.includes(';') && !line.includes(',')) {
+        return line.split(';').map((c) => cleanCsvCell(c));
+      }
+      return line
+        .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+        .map((c) => cleanCsvCell(c));
+    });
+  }
+
+  if (tableRows.length <= 1) {
+    return { matchedRows: [], unmatchedCodes: [], invalidRows: [] };
+  }
+
+  // Locate header row
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(5, tableRows.length); i++) {
+    const joined = tableRows[i].join(' ').toLowerCase();
+    if (joined.includes('mã nv') || joined.includes('ma nv') || joined.includes('mã nhân viên')) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+
+  const headerCols = tableRows[headerRowIdx].map((h) => h.toLowerCase().trim());
+  const hasStt = headerCols[0] === 'stt' || headerCols[0] === 'số thứ tự';
+  const offset = hasStt ? 1 : 0;
+
+  const findIdx = (keywords: string[], fallback: number): number => {
+    const idx = headerCols.findIndex((h) => keywords.some((kw) => h.includes(kw)));
+    return idx !== -1 ? idx : fallback;
+  };
+
+  const codeIdx = findIdx(['mã nv', 'ma nv', 'mã nhân viên', 'ma nhan vien'], offset + 0);
+  const nameIdx = findIdx(['họ và tên', 'họ tên', 'ho va ten', 'ho ten'], offset + 1);
+  const carriedIdx = findIdx(
+    ['tồn phép', 'ton phep', 'tồn năm', 'năm cũ', '2025', 'carried_over'],
+    offset + 2
+  );
+  const usedIdx = findIdx(
+    ['đã nghỉ', 'da nghi', '31/10', 'đầu kỳ', 'used_leave'],
+    offset + 3
+  );
+
+  const matchedMap = new Map<string, OpeningBalanceImportRow>();
+  const unmatchedCodes: string[] = [];
+  const invalidRows: number[] = [];
+
+  for (let i = headerRowIdx + 1; i < tableRows.length; i++) {
+    const row = tableRows[i];
+    if (!row || row.every((c) => !cleanCsvCell(c))) continue;
+
+    const rawCode = cleanCsvCell(row[codeIdx]).toUpperCase();
+    const rawName = cleanCsvCell(row[nameIdx]);
+    if (!rawCode) {
+      invalidRows.push(i + 1);
+      continue;
+    }
+
+    const carriedOver = parseNumericCell(row[carriedIdx], 0);
+    const usedLeave = parseNumericCell(row[usedIdx], 0);
+
+    const matchedEmp = empByCode.get(rawCode);
+    if (!matchedEmp) {
+      if (!unmatchedCodes.includes(rawCode)) {
+        unmatchedCodes.push(rawCode);
+      }
+      continue;
+    }
+
+    matchedMap.set(rawCode, {
+      employee: matchedEmp,
+      employeeCode: matchedEmp.employeeCode,
+      fullName: rawName || matchedEmp.fullName,
+      carried_over: carriedOver,
+      used_leave: usedLeave,
+    });
+  }
+
+  return {
+    matchedRows: Array.from(matchedMap.values()),
+    unmatchedCodes,
+    invalidRows,
+  };
+}
+
+export async function parseOpeningLeaveBalanceFile(
+  file: File,
+  existingEmployees: Employee[]
+): Promise<OpeningBalanceImportParseResult> {
+  const text = await file.text();
+  return parseOpeningLeaveBalanceText(text, existingEmployees);
+}
+
+

@@ -447,13 +447,13 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
 
           {/* 3 NÚT TRÊN HEADER TRÊN CÙNG 1 DÒNG NGANG DUY NHẤT */}
           <div className="flex items-center gap-2.5 flex-nowrap shrink-0">
-            {/* 1. + Ghi nhận mới (Mở Modal nhập 1 người) */}
+            {/* 1. + Tạo đơn nghỉ (Mở Modal ghi nhận trực tiếp) */}
             <button
               type="button"
               onClick={onOpenAddRecord}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-bold transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <span>+ Ghi nhận mới</span>
+              <span>+ Tạo đơn nghỉ</span>
             </button>
 
             {/* 2. 👥 + Ghi nhận hàng loạt (Mở Modal nhập nhiều người) */}

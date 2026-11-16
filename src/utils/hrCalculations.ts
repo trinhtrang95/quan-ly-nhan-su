@@ -5,6 +5,7 @@ import {
   Employee,
   EmployeeAnnualMatrixRow,
   LeaveAccrualMode,
+  LeaveBalanceRecord,
   LeavePolicyConfig,
   LeaveRecord,
   LeaveRecordType,
@@ -431,6 +432,148 @@ export function isDateInRange(targetDate: string, startDate: string, endDate: st
 }
 
 const LEAVE_POLICY_STORAGE_KEY = 'hr_pro_leave_policy_v1';
+const LEAVE_BALANCES_STORAGE_KEY = 'hr_pro_leave_balances_v1';
+
+// In-memory fallback so unit tests in Node (without window.localStorage) work seamlessly
+let inMemoryLeaveBalances: Record<string, LeaveBalanceRecord> = {};
+
+export function loadLeaveBalancesMap(
+  year: number = 2026
+): Record<string, LeaveBalanceRecord> {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(LEAVE_BALANCES_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, LeaveBalanceRecord>;
+        if (parsed && typeof parsed === 'object') {
+          inMemoryLeaveBalances = parsed;
+        }
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+
+  const result: Record<string, LeaveBalanceRecord> = {};
+  for (const [k, v] of Object.entries(inMemoryLeaveBalances)) {
+    if (v && v.year === year && v.employeeCode) {
+      result[v.employeeCode.trim().toUpperCase()] = v;
+    } else if (k.startsWith(`${year}_`) && v) {
+      result[k.slice(`${year}_`.length).toUpperCase()] = v;
+    }
+  }
+  return result;
+}
+
+export function saveLeaveBalancesBatch(
+  entries: Array<{
+    employeeCode: string;
+    employeeId?: string;
+    fullName: string;
+    carried_over: number;
+    used_leave: number;
+    cutoffDate?: string;
+  }>,
+  existingRecords: LeaveRecord[] = [],
+  year: number = 2026
+): Record<string, LeaveBalanceRecord> {
+  const currentAll: Record<string, LeaveBalanceRecord> = {
+    ...inMemoryLeaveBalances,
+  };
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(LEAVE_BALANCES_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          Object.assign(currentAll, parsed);
+        }
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+
+  const nowIso = new Date().toISOString();
+
+  for (const item of entries) {
+    const code = item.employeeCode.trim().toUpperCase();
+    if (!code) continue;
+    const cutoffDate = item.cutoffDate || `${year}-10-31`;
+
+    // Snapshot any pre-existing annual_leave records after cutoffDate at the moment of import
+    // so that immediately after import, "Đã nghỉ" equals the exact imported `used_leave`,
+    // and only newly created leave records after import are added on top.
+    const baselineNovRecordIds = existingRecords
+      .filter((r) => {
+        if (r.type !== 'annual_leave') return false;
+        if (item.employeeId && r.employeeId !== item.employeeId) return false;
+        return r.startDate > cutoffDate && getYearMonth(r.startDate).year === year;
+      })
+      .map((r) => r.id);
+
+    const record: LeaveBalanceRecord = {
+      employeeCode: code,
+      employeeId: item.employeeId,
+      fullName: item.fullName,
+      year,
+      carried_over: Number(Number(item.carried_over || 0).toFixed(2)),
+      used_leave: Number(Number(item.used_leave || 0).toFixed(2)),
+      cutoffDate,
+      baselineNovRecordIds,
+      updatedAt: nowIso,
+    };
+
+    currentAll[`${year}_${code}`] = record;
+  }
+
+  inMemoryLeaveBalances = currentAll;
+
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(
+        LEAVE_BALANCES_STORAGE_KEY,
+        JSON.stringify(currentAll)
+      );
+    }
+  } catch {
+    // Ignore storage write errors
+  }
+
+  // Ensure monthly accrual + allowCarryOver is active for Go-Live mid/late year equation
+  saveLeavePolicyConfig({
+    accrualMode: 'monthly',
+    allowCarryOver: true,
+  });
+
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('hr-leave-balances-change', {
+          detail: loadLeaveBalancesMap(year),
+        })
+      );
+    }
+  } catch {
+    // Ignore event errors
+  }
+
+  return loadLeaveBalancesMap(year);
+}
+
+export function clearLeaveBalancesStorage(): void {
+  inMemoryLeaveBalances = {};
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(LEAVE_BALANCES_STORAGE_KEY);
+      window.dispatchEvent(
+        new CustomEvent('hr-leave-balances-change', { detail: {} })
+      );
+    }
+  } catch {
+    // Ignore errors
+  }
+}
 
 export function loadLeavePolicyConfig(): LeavePolicyConfig {
   try {
@@ -451,7 +594,7 @@ export function loadLeavePolicyConfig(): LeavePolicyConfig {
     // Ignore storage read errors
   }
   return {
-    accrualMode: 'upfront',
+    accrualMode: 'monthly',
     allowCarryOver: true,
   };
 }
@@ -474,51 +617,84 @@ export function saveLeavePolicyConfig(config: LeavePolicyConfig): void {
 
 /**
  * Calculates Leave Accrual & Carryover breakdown for an employee:
- * Tồn phép = [Phép tích lũy theo tháng làm việc hiện tại] + [Phép năm cũ dồn sang] - [Đã nghỉ]
+ * Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]
+ * Còn lại = [Tổng quỹ phép] - [Đã nghỉ (Chốt đầu kỳ đến 31/10 + phát sinh mới từ tháng 11 trở đi)]
  */
 export function calculateLeaveAccrualBreakdown(
   employee: Employee,
   records: LeaveRecord[],
   year: number,
   upToMonth: number = 12,
-  policyOverride?: LeavePolicyConfig
+  policyOverride?: LeavePolicyConfig,
+  defaultQuotaFallback: number = 12,
+  balancesMapOverride?: Record<string, LeaveBalanceRecord>
 ): {
+  annualQuota: number;
   accruedLeaveDays: number;
   carriedOverLeaveDays: number;
+  totalLeaveFund: number;
   usedAnnualLeaveDays: number;
   remainingAnnualLeave: number;
+  hasOpeningBalance?: boolean;
 } {
   const policy = policyOverride || loadLeavePolicyConfig();
   const clampedMonth = Math.max(1, Math.min(12, upToMonth || 12));
-  const quota = Number(employee.standardAnnualLeave) || 12;
+  const balancesMap = balancesMapOverride || loadLeaveBalancesMap(year);
+  const empCodeKey = (employee.employeeCode || '').trim().toUpperCase();
+  const balanceRec = empCodeKey ? balancesMap[empCodeKey] : undefined;
+  const hasOpeningBalance =
+    Boolean(balanceRec) || typeof employee.openingUsedLeave === 'number';
 
-  // 1. Tính Phép tích lũy theo tháng làm việc hiện tại (hoặc Cấp 1 lần đầu năm)
+  const quota = hasOpeningBalance
+    ? defaultQuotaFallback || 12
+    : typeof employee.standardAnnualLeave === 'number' &&
+        employee.standardAnnualLeave > 0
+      ? employee.standardAnnualLeave
+      : defaultQuotaFallback;
+
+  // 1. Tính Phép tích lũy năm nay theo tháng hiện tại (hoặc Cấp 1 lần đầu năm)
   let accruedLeaveDays = quota;
-  if (policy.accrualMode === 'monthly') {
-    let workingMonthsInYear = clampedMonth;
-    if (employee.joinDate && employee.joinDate.trim() && employee.joinDate.trim() !== '-') {
-      const { year: joinYear, month: joinMonth } = getYearMonth(employee.joinDate);
-      if (joinYear > year) {
-        workingMonthsInYear = 0;
-      } else if (joinYear === year) {
-        workingMonthsInYear = Math.max(0, clampedMonth - joinMonth + 1);
-      } else {
-        workingMonthsInYear = clampedMonth;
+  if (hasOpeningBalance || policy.accrualMode === 'monthly') {
+    if (hasOpeningBalance) {
+      // Khi chốt số dư đầu kỳ ở tháng hiện tại (VD: tháng 11), hệ thống tự đếm theo tháng hiện tại (11 ngày cho định mức 12)
+      accruedLeaveDays = Number(((quota / 12) * clampedMonth).toFixed(2));
+    } else {
+      let workingMonthsInYear = clampedMonth;
+      if (
+        employee.joinDate &&
+        employee.joinDate.trim() &&
+        employee.joinDate.trim() !== '-'
+      ) {
+        const { year: joinYear, month: joinMonth } = getYearMonth(
+          employee.joinDate
+        );
+        if (joinYear > year) {
+          workingMonthsInYear = 0;
+        } else if (joinYear === year) {
+          workingMonthsInYear = Math.max(0, clampedMonth - joinMonth + 1);
+        } else {
+          workingMonthsInYear = clampedMonth;
+        }
       }
+      accruedLeaveDays = Number(
+        ((quota / 12) * workingMonthsInYear).toFixed(2)
+      );
     }
-    accruedLeaveDays = Number(((quota / 12) * workingMonthsInYear).toFixed(2));
   }
 
-  // 2. Tính Phép năm cũ dồn sang (Carried Over Leave)
+  // 2. Tính Phép năm cũ dồn sang (Tồn năm trước - carried_over)
   let carriedOverLeaveDays = 0;
-  if (policy.allowCarryOver) {
+  if (balanceRec) {
+    carriedOverLeaveDays = policy.allowCarryOver
+      ? Number(balanceRec.carried_over.toFixed(2))
+      : 0;
+  } else if (policy.allowCarryOver) {
     if (
       typeof employee.carriedOverLeave === 'number' &&
       !Number.isNaN(employee.carriedOverLeave)
     ) {
       carriedOverLeaveDays = Number(employee.carriedOverLeave.toFixed(2));
     } else {
-      // Nếu có dữ liệu chấm phép của năm trước (year - 1), tự động dồn phần dư (nếu nhân viên vào làm từ năm trước)
       const prevYear = year - 1;
       const prevYearRecords = records.filter((r) => {
         if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
@@ -539,27 +715,65 @@ export function calculateLeaveAccrualBreakdown(
     }
   }
 
-  // 3. Tính Số đã nghỉ (Phép năm đã sử dụng trong năm `year` tính đến `clampedMonth`)
-  const usedAnnualLeaveDays = records
-    .filter((r) => {
-      if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
-        return false;
-      }
-      const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
-      return rYear === year && rMonth <= clampedMonth;
-    })
-    .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+  // 3. Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]
+  const totalLeaveFund = Number(
+    (accruedLeaveDays + carriedOverLeaveDays).toFixed(2)
+  );
 
-  // Công thức: [Phép tích lũy theo tháng làm việc hiện tại] + [Phép năm cũ dồn sang] - [Đã nghỉ]
+  // 4. Tính Số đã nghỉ (used_leave)
+  // - Nếu đã Chốt số dư đầu kỳ (đến 31/10): lấy số dư `used_leave` vừa import + các đơn nghỉ phép năm phát sinh MỚI từ tháng 11 trở đi
+  // - Nếu chưa Chốt số dư đầu kỳ: cộng từ bảng `records` trong năm `year` tính đến `clampedMonth`
+  let usedAnnualLeaveDays = 0;
+  if (balanceRec || typeof employee.openingUsedLeave === 'number') {
+    const baseUsed = balanceRec
+      ? balanceRec.used_leave
+      : Number(employee.openingUsedLeave || 0);
+    const cutoffDate = balanceRec?.cutoffDate || `${year}-10-31`;
+    const baselineIds = new Set(balanceRec?.baselineNovRecordIds || []);
+
+    const postCutoffUsed = records
+      .filter((r) => {
+        if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+          return false;
+        }
+        if (baselineIds.has(r.id)) {
+          return false;
+        }
+        const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
+        return (
+          rYear === year &&
+          rMonth <= clampedMonth &&
+          r.startDate > cutoffDate
+        );
+      })
+      .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+
+    usedAnnualLeaveDays = Number((baseUsed + postCutoffUsed).toFixed(2));
+  } else {
+    usedAnnualLeaveDays = records
+      .filter((r) => {
+        if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+          return false;
+        }
+        const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
+        return rYear === year && rMonth <= clampedMonth;
+      })
+      .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+  }
+
+  // 5. Còn lại = [Tổng quỹ phép] - [Đã nghỉ]
   const remainingAnnualLeave = Number(
-    (accruedLeaveDays + carriedOverLeaveDays - usedAnnualLeaveDays).toFixed(2)
+    (totalLeaveFund - usedAnnualLeaveDays).toFixed(2)
   );
 
   return {
+    annualQuota: quota,
     accruedLeaveDays,
     carriedOverLeaveDays,
+    totalLeaveFund,
     usedAnnualLeaveDays,
     remainingAnnualLeave,
+    hasOpeningBalance,
   };
 }
 
