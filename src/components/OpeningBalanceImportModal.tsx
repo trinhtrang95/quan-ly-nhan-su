@@ -9,16 +9,18 @@ import {
   X,
   AlertTriangle,
 } from 'lucide-react';
-import { Employee } from '../types/hr';
+import { Employee, LeaveRecord } from '../types/hr';
 import {
   downloadOpeningLeaveBalanceTemplate,
   OpeningBalanceImportRow,
   parseOpeningLeaveBalanceFile,
 } from '../utils/exportUtils';
+import { getYearMonth, parseComparableDate } from '../utils/hrCalculations';
 
 interface OpeningBalanceImportModalProps {
   isOpen: boolean;
   employees: Employee[];
+  records?: LeaveRecord[];
   defaultAnnualLeaveQuota?: number;
   currentMonth?: number;
   currentYear?: number;
@@ -31,6 +33,7 @@ export const OpeningBalanceImportModal: React.FC<
 > = ({
   isOpen,
   employees,
+  records = [],
   defaultAnnualLeaveQuota = 12,
   currentMonth = 11,
   currentYear = 2026,
@@ -283,6 +286,12 @@ export const OpeningBalanceImportModal: React.FC<
                         <th className="px-2 py-1.5 border-r border-slate-100 text-right bg-blue-50/60 text-[#14539E]">
                           Đã nghỉ (đến 31/10)
                         </th>
+                        <th className="px-2 py-1.5 border-r border-slate-100 text-right">
+                          Phát sinh (từ 01/11)
+                        </th>
+                        <th className="px-2 py-1.5 border-r border-slate-100 text-right font-bold">
+                          Tổng đã nghỉ
+                        </th>
                         <th className="px-2 py-1.5 text-right font-bold text-[#14539E]">
                           Còn lại
                         </th>
@@ -290,11 +299,40 @@ export const OpeningBalanceImportModal: React.FC<
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {parsedRows.map((row) => {
+                        const cutoffTs = parseComparableDate(`${currentYear}-10-31`);
+                        const postCutoffUsed = records
+                          .filter((r) => {
+                            if (r.type !== 'annual_leave') return false;
+                            const matchEmp =
+                              r.employeeId === row.employee.id ||
+                              r.employeeId.trim().toUpperCase() ===
+                                row.employeeCode.trim().toUpperCase();
+                            if (!matchEmp) return false;
+                            const { year: rYear, month: rMonth } = getYearMonth(
+                              r.startDate
+                            );
+                            if (rYear !== currentYear) return false;
+                            if (rMonth >= 11) return true;
+                            const recTs = parseComparableDate(r.startDate);
+                            return (
+                              recTs !== null &&
+                              cutoffTs !== null &&
+                              recTs > cutoffTs
+                            );
+                          })
+                          .reduce(
+                            (sum, r) =>
+                              Number((sum + Number(r.amount || 0)).toFixed(2)),
+                            0
+                          );
                         const totalFund = Number(
                           (accruedThisYear + row.carried_over).toFixed(2)
                         );
+                        const totalUsed = Number(
+                          (row.used_leave + postCutoffUsed).toFixed(2)
+                        );
                         const remaining = Number(
-                          (totalFund - row.used_leave).toFixed(2)
+                          (totalFund - totalUsed).toFixed(2)
                         );
                         return (
                           <tr
@@ -347,6 +385,12 @@ export const OpeningBalanceImportModal: React.FC<
                                 className="w-16 h-6 px-1.5 text-right font-mono font-semibold text-slate-800 bg-white border border-slate-200 rounded focus:outline-none focus:border-[#14539E]"
                               />
                             </td>
+                            <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono text-slate-600">
+                              {postCutoffUsed > 0 ? `+${postCutoffUsed}` : '-'}
+                            </td>
+                            <td className="px-2 py-1.5 border-r border-slate-100 text-right font-mono font-bold text-slate-800 bg-slate-50/60">
+                              {totalUsed === 0 ? '-' : totalUsed}
+                            </td>
                             <td
                               className={`px-2 py-1.5 text-right font-mono font-bold ${
                                 remaining >= 0
@@ -354,7 +398,7 @@ export const OpeningBalanceImportModal: React.FC<
                                   : 'text-red-600'
                               }`}
                             >
-                              {remaining}
+                              {remaining === 0 ? '-' : remaining}
                             </td>
                           </tr>
                         );

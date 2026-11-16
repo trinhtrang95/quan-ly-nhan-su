@@ -417,10 +417,19 @@ export function sortEmployees(
 }
 
 /**
- * Parses year and month (1..12) from YYYY-MM-DD
+ * Parses year and month (1..12) from YYYY-MM-DD or DD/MM/YYYY
  */
 export function getYearMonth(dateStr: string): { year: number; month: number } {
-  const [y, m] = dateStr.split('-').map(Number);
+  const s = (dateStr || '').trim();
+  const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (dmy) {
+    return { year: Number(dmy[3]) || 2026, month: Number(dmy[2]) || 1 };
+  }
+  const ymd = s.match(/^(\d{4})[/-](\d{1,2})/);
+  if (ymd) {
+    return { year: Number(ymd[1]) || 2026, month: Number(ymd[2]) || 1 };
+  }
+  const [y, m] = s.split('-').map(Number);
   return { year: y || 2026, month: m || 1 };
 }
 
@@ -446,6 +455,24 @@ export function loadLeaveBalancesMap(
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, LeaveBalanceRecord>;
         if (parsed && typeof parsed === 'object') {
+          let migrated = false;
+          for (const key of Object.keys(parsed)) {
+            const entry = parsed[key];
+            if (
+              entry &&
+              Array.isArray(entry.baselineNovRecordIds) &&
+              entry.baselineNovRecordIds.length > 0
+            ) {
+              entry.baselineNovRecordIds = [];
+              migrated = true;
+            }
+          }
+          if (migrated) {
+            window.localStorage.setItem(
+              LEAVE_BALANCES_STORAGE_KEY,
+              JSON.stringify(parsed)
+            );
+          }
           inMemoryLeaveBalances = parsed;
         }
       }
@@ -458,8 +485,14 @@ export function loadLeaveBalancesMap(
   for (const [k, v] of Object.entries(inMemoryLeaveBalances)) {
     if (v && v.year === year && v.employeeCode) {
       result[v.employeeCode.trim().toUpperCase()] = v;
+      if (v.employeeId) {
+        result[v.employeeId.trim()] = v;
+      }
     } else if (k.startsWith(`${year}_`) && v) {
       result[k.slice(`${year}_`.length).toUpperCase()] = v;
+      if (v.employeeId) {
+        result[v.employeeId.trim()] = v;
+      }
     }
   }
   return result;
@@ -474,7 +507,7 @@ export function saveLeaveBalancesBatch(
     used_leave: number;
     cutoffDate?: string;
   }>,
-  existingRecords: LeaveRecord[] = [],
+  _existingRecords: LeaveRecord[] = [],
   year: number = 2026
 ): Record<string, LeaveBalanceRecord> {
   const currentAll: Record<string, LeaveBalanceRecord> = {
@@ -501,17 +534,9 @@ export function saveLeaveBalancesBatch(
     if (!code) continue;
     const cutoffDate = item.cutoffDate || `${year}-10-31`;
 
-    // Snapshot any pre-existing annual_leave records after cutoffDate at the moment of import
-    // so that immediately after import, "Đã nghỉ" equals the exact imported `used_leave`,
-    // and only newly created leave records after import are added on top.
-    const baselineNovRecordIds = existingRecords
-      .filter((r) => {
-        if (r.type !== 'annual_leave') return false;
-        if (item.employeeId && r.employeeId !== item.employeeId) return false;
-        return r.startDate > cutoffDate && getYearMonth(r.startDate).year === year;
-      })
-      .map((r) => r.id);
-
+    // `used_leave` là số ngày đã nghỉ chốt đến 31/10.
+    // Tất cả các đơn nghỉ phép năm phát sinh từ 01/11 trở đi (dù nhập trước hay sau khi import file chốt)
+    // đều luôn được cộng dồn vào cột [Đã nghỉ].
     const record: LeaveBalanceRecord = {
       employeeCode: code,
       employeeId: item.employeeId,
@@ -520,7 +545,7 @@ export function saveLeaveBalancesBatch(
       carried_over: Number(Number(item.carried_over || 0).toFixed(2)),
       used_leave: Number(Number(item.used_leave || 0).toFixed(2)),
       cutoffDate,
-      baselineNovRecordIds,
+      baselineNovRecordIds: [],
       updatedAt: nowIso,
     };
 
@@ -575,12 +600,21 @@ export function clearLeaveBalancesStorage(): void {
   }
 }
 
-function matchesEmployee(rId?: string | null, emp?: Employee): boolean {
+function matchesEmployee(
+  rId?: string | null,
+  emp?: Employee,
+  balanceRec?: LeaveBalanceRecord
+): boolean {
   if (!rId || !emp) return false;
   const a = rId.trim();
   const id = (emp.id || '').trim();
   const code = (emp.employeeCode || '').trim();
-  return a === id || a.toUpperCase() === code.toUpperCase();
+  const balEmpId = (balanceRec?.employeeId || '').trim();
+  return (
+    a === id ||
+    a.toUpperCase() === code.toUpperCase() ||
+    (Boolean(balEmpId) && a === balEmpId)
+  );
 }
 
 function isAfterCutoff(startDateStr?: string | null, cutoffDateStr?: string | null): boolean {
@@ -608,29 +642,38 @@ export function performRetroactiveLeaveScanAndSync(
 
   for (const emp of employees) {
     const code = (emp.employeeCode || '').trim().toUpperCase();
-    if (!code) continue;
+    const empId = (emp.id || '').trim();
+    if (!code && !empId) continue;
 
-    const balanceRec = map[code];
+    const balanceRec = (code ? map[code] : undefined) || (empId ? map[empId] : undefined);
+    const hasOpening =
+      Boolean(balanceRec) || typeof emp.openingUsedLeave === 'number';
     const baseUsed = balanceRec
-      ? balanceRec.used_leave
+      ? Number(balanceRec.used_leave || 0)
       : typeof emp.openingUsedLeave === 'number'
-      ? emp.openingUsedLeave
+      ? Number(emp.openingUsedLeave || 0)
       : 0;
 
     const cutoffDate = balanceRec?.cutoffDate || `${year}-10-31`;
-    const baselineIds = new Set(balanceRec?.baselineNovRecordIds || []);
 
-    const postCutoffUsed = records
+    const scannedUsed = records
       .filter((r) => {
-        if (!matchesEmployee(r.employeeId, emp) || r.type !== 'annual_leave') return false;
-        if (baselineIds.has(r.id)) return false;
-        const { year: rYear } = getYearMonth(r.startDate);
-        return rYear === year && isAfterCutoff(r.startDate, cutoffDate);
+        if (
+          !matchesEmployee(r.employeeId, emp, balanceRec) ||
+          r.type !== 'annual_leave'
+        ) {
+          return false;
+        }
+        const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
+        if (rYear !== year) return false;
+        return hasOpening
+          ? rMonth >= 11 || isAfterCutoff(r.startDate, cutoffDate)
+          : true;
       })
-      .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+      .reduce((sum, r) => Number((sum + Number(r.amount || 0)).toFixed(2)), 0);
 
-    const totalUsed = Number((baseUsed + postCutoffUsed).toFixed(2));
-    result[code] = totalUsed;
+    const totalUsed = Number((baseUsed + scannedUsed).toFixed(2));
+    if (code) result[code] = totalUsed;
   }
 
   return result;
@@ -679,7 +722,7 @@ export function saveLeavePolicyConfig(config: LeavePolicyConfig): void {
 /**
  * Calculates Leave Accrual & Carryover breakdown for an employee:
  * Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]
- * Còn lại = [Tổng quỹ phép] - [Đã nghỉ (Chốt đầu kỳ đến 31/10 + phát sinh mới từ tháng 11 trở đi)]
+ * Còn lại = [Tổng quỹ phép] - [Đã nghỉ (Chốt đầu kỳ đến 31/10 + phát sinh mới từ 01/11 trở đi)]
  */
 export function calculateLeaveAccrualBreakdown(
   employee: Employee,
@@ -702,7 +745,10 @@ export function calculateLeaveAccrualBreakdown(
   const clampedMonth = Math.max(1, Math.min(12, upToMonth || 12));
   const balancesMap = balancesMapOverride || loadLeaveBalancesMap(year);
   const empCodeKey = (employee.employeeCode || '').trim().toUpperCase();
-  const balanceRec = empCodeKey ? balancesMap[empCodeKey] : undefined;
+  const empIdKey = (employee.id || '').trim();
+  const balanceRec =
+    (empCodeKey ? balancesMap[empCodeKey] : undefined) ||
+    (empIdKey ? balancesMap[empIdKey] : undefined);
   const hasOpeningBalance =
     Boolean(balanceRec) || typeof employee.openingUsedLeave === 'number';
 
@@ -758,7 +804,7 @@ export function calculateLeaveAccrualBreakdown(
     } else {
       const prevYear = year - 1;
       const prevYearRecords = records.filter((r) => {
-        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') {
+        if (!matchesEmployee(r.employeeId, employee, balanceRec) || r.type !== 'annual_leave') {
           return false;
         }
         return getYearMonth(r.startDate).year === prevYear;
@@ -781,33 +827,31 @@ export function calculateLeaveAccrualBreakdown(
     (accruedLeaveDays + carriedOverLeaveDays).toFixed(2)
   );
 
-  // 4. Tính Số đã nghỉ (used_leave)
-  // - Nếu đã Chốt số dư đầu kỳ (đến 31/10): lấy số dư `used_leave` vừa import + các đơn nghỉ phép năm phát sinh MỚI từ tháng 11 trở đi
-  // - Nếu chưa Chốt số dư đầu kỳ: cộng từ bảng `records` trong năm `year` tính đến `clampedMonth`
+  // 4. Tính Số đã nghỉ (used_leave) theo cơ chế Dynamic Aggregation:
+  // - Nếu đã Chốt số dư đầu kỳ (đến 31/10): lấy số dư `used_leave` chốt đến 31/10 + TẤT CẢ các đơn nghỉ phép năm từ 01/11 trở đi (không loại trừ đơn tháng 11 đã nhập trước đó!)
+  // - Nếu chưa Chốt số dư đầu kỳ: cộng toàn bộ đơn nghỉ phép năm từ bảng `records` trong năm `year`
   let usedAnnualLeaveDays = 0;
   if (balanceRec || typeof employee.openingUsedLeave === 'number') {
     const baseUsed = balanceRec
-      ? balanceRec.used_leave
+      ? Number(balanceRec.used_leave || 0)
       : Number(employee.openingUsedLeave || 0);
     const cutoffDate = balanceRec?.cutoffDate || `${year}-10-31`;
-    const baselineIds = new Set(balanceRec?.baselineNovRecordIds || []);
 
     const postCutoffUsed = records
       .filter((r) => {
-        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') {
-          return false;
-        }
-        if (baselineIds.has(r.id)) {
+        if (
+          !matchesEmployee(r.employeeId, employee, balanceRec) ||
+          r.type !== 'annual_leave'
+        ) {
           return false;
         }
         const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
         return (
           rYear === year &&
-          rMonth <= clampedMonth &&
-          isAfterCutoff(r.startDate, cutoffDate)
+          (rMonth >= 11 || isAfterCutoff(r.startDate, cutoffDate))
         );
       })
-      .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+      .reduce((sum, r) => Number((sum + Number(r.amount || 0)).toFixed(2)), 0);
 
     usedAnnualLeaveDays = Number((baseUsed + postCutoffUsed).toFixed(2));
   } else {
@@ -819,7 +863,7 @@ export function calculateLeaveAccrualBreakdown(
         const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
         return rYear === year && rMonth <= clampedMonth;
       })
-      .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+      .reduce((sum, r) => Number((sum + Number(r.amount || 0)).toFixed(2)), 0);
   }
 
   // 5. Còn lại = [Tổng quỹ phép] - [Đã nghỉ]
@@ -847,7 +891,7 @@ export function calculateAnnualMatrixReport(
   year: number,
   departmentFilter: string = 'ALL',
   policyOverride?: LeavePolicyConfig,
-  upToMonth: number = 12
+  upToMonth: number = year === 2026 ? 11 : 12
 ): EmployeeAnnualMatrixRow[] {
   const policy = policyOverride || loadLeavePolicyConfig();
   const filteredEmployees =

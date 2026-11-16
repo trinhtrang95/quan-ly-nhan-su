@@ -410,6 +410,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
       <OpeningBalanceImportModal
         isOpen={isOpeningBalanceModalOpen}
         employees={employees}
+        records={records}
         defaultAnnualLeaveQuota={defaultAnnualLeaveQuota}
         currentMonth={currentMonth}
         currentYear={currentYear}

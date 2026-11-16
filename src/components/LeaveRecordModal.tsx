@@ -127,6 +127,18 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const [balanceRev, setBalanceRev] = useState<number>(0);
+
+  useEffect(() => {
+    const bump = () => setBalanceRev((v) => v + 1);
+    window.addEventListener('hr-leave-balances-change', bump);
+    window.addEventListener('hr-leave-policy-change', bump);
+    return () => {
+      window.removeEventListener('hr-leave-balances-change', bump);
+      window.removeEventListener('hr-leave-policy-change', bump);
+    };
+  }, []);
+
   const targetYear =
     defaultYear || new Date(startDate || Date.now()).getFullYear() || 2026;
 
@@ -146,7 +158,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       map.set(emp.id, breakdown.remainingAnnualLeave);
     }
     return map;
-  }, [employees, leaveRecords, targetYear]);
+  }, [employees, leaveRecords, targetYear, isOpen, balanceRev]);
 
   const sortedEmployees = useMemo(() => {
     return sortEmployees(employees, null, null);

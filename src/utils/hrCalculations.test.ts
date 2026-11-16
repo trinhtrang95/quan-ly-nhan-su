@@ -595,9 +595,10 @@ test('Kịch bản kiểm thử (Acceptance Criteria): Nguyễn Thị Mai (Tồn
   assert.equal(breakdownAfter.remainingAnnualLeave, 0); // 1 - 1 = 0
 });
 
-test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ngày (đến 31/10) + 1 ngày nghỉ ngày 16/11 -> Tổng đã nghỉ = 11', async () => {
+test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ngày (đến 31/10) + 1 ngày nghỉ ngày 16/11 (kể cả khi đơn 16/11 đã tồn tại trước khi import) -> Tổng đã nghỉ = 11', async () => {
   const {
     calculateLeaveAccrualBreakdown,
+    performRetroactiveLeaveScanAndSync,
     saveLeaveBalancesBatch,
     clearLeaveBalancesStorage,
   } = await import('./hrCalculations');
@@ -606,32 +607,18 @@ test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ng
 
   const maiEmp: Employee = {
     ...INITIAL_EMPLOYEES[1],
-    id: 'emp-mai-10',
-    employeeCode: 'NV888',
+    id: '765601c8-65cd-46f5-b394-f1bb2bfe3259',
+    employeeCode: '23041003',
     fullName: 'Nguyễn Thị Mai',
-    joinDate: '2026-01-01',
+    joinDate: '2023-04-10',
     standardAnnualLeave: 12,
   };
 
-  const balancesMap = saveLeaveBalancesBatch(
-    [
-      {
-        employeeCode: 'NV888',
-        employeeId: 'emp-mai-10',
-        fullName: 'Nguyễn Thị Mai',
-        carried_over: 2,
-        used_leave: 10,
-        cutoffDate: '2026-10-31',
-      },
-    ],
-    [],
-    2026
-  );
-
+  // Đơn nghỉ phép ngày 16/11 đã tồn tại trong bảng Đơn nghỉ (leave_logs)
   const novRecords = [
     {
-      id: 'rec-mai-nov-16',
-      employeeId: 'emp-mai-10',
+      id: 'ae95161d-5030-492d-956a-797c5511ce45',
+      employeeId: '765601c8-65cd-46f5-b394-f1bb2bfe3259',
       type: 'annual_leave' as const,
       startDate: '2026-11-16',
       endDate: '2026-11-16',
@@ -641,6 +628,22 @@ test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ng
       approvedBy: 'HR',
     },
   ];
+
+  // Import file chốt số đầu kỳ đến 31/10 (với used_leave = 10) trong khi novRecords đã tồn tại
+  const balancesMap = saveLeaveBalancesBatch(
+    [
+      {
+        employeeCode: '23041003',
+        employeeId: '765601c8-65cd-46f5-b394-f1bb2bfe3259',
+        fullName: 'Nguyễn Thị Mai',
+        carried_over: 2,
+        used_leave: 10,
+        cutoffDate: '2026-10-31',
+      },
+    ],
+    novRecords,
+    2026
+  );
 
   const breakdown = calculateLeaveAccrualBreakdown(
     maiEmp,
@@ -658,6 +661,10 @@ test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ng
   assert.equal(breakdown.totalLeaveFund, 13); // 11 + 2 = 13
   assert.equal(breakdown.remainingAnnualLeave, 2); // 13 - 11 = 2
 
+  const scannedMap = performRetroactiveLeaveScanAndSync([maiEmp], novRecords, 2026);
+  assert.equal(scannedMap['23041003'], 11);
+
   clearLeaveBalancesStorage();
 });
+
 

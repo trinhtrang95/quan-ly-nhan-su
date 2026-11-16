@@ -94,6 +94,18 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
   const [rowConfigs, setRowConfigs] = useState<Record<string, BulkRowConfig>>({});
   const [errorMsg, setErrorMsg] = useState<string>('');
 
+  const [balanceRev, setBalanceRev] = useState<number>(0);
+
+  useEffect(() => {
+    const bump = () => setBalanceRev((v) => v + 1);
+    window.addEventListener('hr-leave-balances-change', bump);
+    window.addEventListener('hr-leave-policy-change', bump);
+    return () => {
+      window.removeEventListener('hr-leave-balances-change', bump);
+      window.removeEventListener('hr-leave-policy-change', bump);
+    };
+  }, []);
+
   const targetYear =
     defaultYear || new Date(commonDate || Date.now()).getFullYear() || 2026;
 
@@ -105,7 +117,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
       map.set(r.employee.id, r.remainingAnnualLeave);
     }
     return map;
-  }, [employees, leaveRecords, targetYear]);
+  }, [employees, leaveRecords, targetYear, isOpen, balanceRev]);
 
   const sortedEmployees = useMemo(() => {
     return sortEmployees(employees, null, null);
