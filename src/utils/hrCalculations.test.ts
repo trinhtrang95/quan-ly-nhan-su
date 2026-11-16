@@ -595,3 +595,69 @@ test('Kịch bản kiểm thử (Acceptance Criteria): Nguyễn Thị Mai (Tồn
   assert.equal(breakdownAfter.remainingAnnualLeave, 0); // 1 - 1 = 0
 });
 
+test('Kiểm thử Nguyễn Thị Mai: Chốt số đầu kỳ đã nghỉ 10 ngày (đến 31/10) + 1 ngày nghỉ ngày 16/11 -> Tổng đã nghỉ = 11', async () => {
+  const {
+    calculateLeaveAccrualBreakdown,
+    saveLeaveBalancesBatch,
+    clearLeaveBalancesStorage,
+  } = await import('./hrCalculations');
+
+  clearLeaveBalancesStorage();
+
+  const maiEmp: Employee = {
+    ...INITIAL_EMPLOYEES[1],
+    id: 'emp-mai-10',
+    employeeCode: 'NV888',
+    fullName: 'Nguyễn Thị Mai',
+    joinDate: '2026-01-01',
+    standardAnnualLeave: 12,
+  };
+
+  const balancesMap = saveLeaveBalancesBatch(
+    [
+      {
+        employeeCode: 'NV888',
+        employeeId: 'emp-mai-10',
+        fullName: 'Nguyễn Thị Mai',
+        carried_over: 2,
+        used_leave: 10,
+        cutoffDate: '2026-10-31',
+      },
+    ],
+    [],
+    2026
+  );
+
+  const novRecords = [
+    {
+      id: 'rec-mai-nov-16',
+      employeeId: 'emp-mai-10',
+      type: 'annual_leave' as const,
+      startDate: '2026-11-16',
+      endDate: '2026-11-16',
+      amount: 1,
+      reason: 'Nghỉ phép ngày 16/11',
+      createdAt: '2026-11-16',
+      approvedBy: 'HR',
+    },
+  ];
+
+  const breakdown = calculateLeaveAccrualBreakdown(
+    maiEmp,
+    novRecords,
+    2026,
+    11,
+    { accrualMode: 'monthly', allowCarryOver: true },
+    12,
+    balancesMap
+  );
+
+  assert.equal(breakdown.usedAnnualLeaveDays, 11); // 10 (chốt đến 31/10) + 1 (ngày 16/11) = 11
+  assert.equal(breakdown.accruedLeaveDays, 11); // Tích lũy tháng 11 cho định mức 12 = 11
+  assert.equal(breakdown.carriedOverLeaveDays, 2); // Tồn cũ = 2
+  assert.equal(breakdown.totalLeaveFund, 13); // 11 + 2 = 13
+  assert.equal(breakdown.remainingAnnualLeave, 2); // 13 - 11 = 2
+
+  clearLeaveBalancesStorage();
+});
+

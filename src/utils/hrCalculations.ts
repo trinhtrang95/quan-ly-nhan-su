@@ -575,6 +575,24 @@ export function clearLeaveBalancesStorage(): void {
   }
 }
 
+function matchesEmployee(rId?: string | null, emp?: Employee): boolean {
+  if (!rId || !emp) return false;
+  const a = rId.trim();
+  const id = (emp.id || '').trim();
+  const code = (emp.employeeCode || '').trim();
+  return a === id || a.toUpperCase() === code.toUpperCase();
+}
+
+function isAfterCutoff(startDateStr?: string | null, cutoffDateStr?: string | null): boolean {
+  if (!startDateStr || !cutoffDateStr) return false;
+  const t1 = parseComparableDate(startDateStr);
+  const t2 = parseComparableDate(cutoffDateStr);
+  if (t1 !== null && t2 !== null) {
+    return t1 > t2;
+  }
+  return startDateStr > cutoffDateStr;
+}
+
 /**
  * Quét và đồng bộ hồi tố (Retroactive Data Sync):
  * Tính TỔNG số ngày nghỉ phép năm (annual_leave) đã tồn tại từ cơ sở dữ liệu
@@ -604,10 +622,10 @@ export function performRetroactiveLeaveScanAndSync(
 
     const postCutoffUsed = records
       .filter((r) => {
-        if (r.employeeId !== emp.id || r.type !== 'annual_leave') return false;
+        if (!matchesEmployee(r.employeeId, emp) || r.type !== 'annual_leave') return false;
         if (baselineIds.has(r.id)) return false;
         const { year: rYear } = getYearMonth(r.startDate);
-        return rYear === year && r.startDate > cutoffDate;
+        return rYear === year && isAfterCutoff(r.startDate, cutoffDate);
       })
       .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
 
@@ -740,7 +758,7 @@ export function calculateLeaveAccrualBreakdown(
     } else {
       const prevYear = year - 1;
       const prevYearRecords = records.filter((r) => {
-        if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') {
           return false;
         }
         return getYearMonth(r.startDate).year === prevYear;
@@ -776,7 +794,7 @@ export function calculateLeaveAccrualBreakdown(
 
     const postCutoffUsed = records
       .filter((r) => {
-        if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') {
           return false;
         }
         if (baselineIds.has(r.id)) {
@@ -786,7 +804,7 @@ export function calculateLeaveAccrualBreakdown(
         return (
           rYear === year &&
           rMonth <= clampedMonth &&
-          r.startDate > cutoffDate
+          isAfterCutoff(r.startDate, cutoffDate)
         );
       })
       .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
@@ -795,7 +813,7 @@ export function calculateLeaveAccrualBreakdown(
   } else {
     usedAnnualLeaveDays = records
       .filter((r) => {
-        if (r.employeeId !== employee.id || r.type !== 'annual_leave') {
+        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') {
           return false;
         }
         const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
