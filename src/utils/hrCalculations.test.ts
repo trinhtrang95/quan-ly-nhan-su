@@ -527,3 +527,71 @@ test('Go-Live Tháng 11/2026: Chốt số dư phép đầu kỳ (Tồn 2025 = 2,
 
   clearLeaveBalancesStorage();
 });
+
+test('Kịch bản kiểm thử (Acceptance Criteria): Nguyễn Thị Mai (Tồn năm trước = 0, Tích lũy = 1 -> Tổng = 1). Tạo đơn nghỉ 1 ngày trong tháng 11 -> Đã nghỉ = 1, Còn lại = 0. Form Đơn nghỉ nhận giá trị Còn lại = 0', async () => {
+  const { calculateLeaveAccrualBreakdown } = await import('./hrCalculations');
+
+  const maiEmp: Employee = {
+    ...INITIAL_EMPLOYEES[1],
+    id: 'emp-mai-test',
+    employeeCode: 'NV999',
+    fullName: 'Nguyễn Thị Mai',
+    joinDate: '2026-01-01',
+    standardAnnualLeave: 12,
+    carriedOverLeave: 0,
+  };
+
+  // Up to month 1 with upfront quota 1 (or monthly with quota=12 in month 1: 12/12 * 1 = 1)
+  const breakdownBefore = calculateLeaveAccrualBreakdown(
+    maiEmp,
+    [],
+    2026,
+    1,
+    { accrualMode: 'monthly', allowCarryOver: false },
+    12
+  );
+
+  assert.equal(breakdownBefore.carriedOverLeaveDays, 0);
+  assert.equal(breakdownBefore.accruedLeaveDays, 1);
+  assert.equal(breakdownBefore.totalLeaveFund, 1);
+  assert.equal(breakdownBefore.usedAnnualLeaveDays, 0);
+  assert.equal(breakdownBefore.remainingAnnualLeave, 1);
+
+  // Thao tác 1: HR tạo 1 đơn nghỉ phép năm (Số ngày = 1) cho Mai vào tháng 11
+  const recordsWithMaiLeave = [
+    {
+      id: 'rec-mai-1',
+      employeeId: 'emp-mai-test',
+      type: 'annual_leave' as const,
+      startDate: '2026-11-15',
+      endDate: '2026-11-15',
+      amount: 1,
+      reason: 'Nghỉ phép năm',
+      createdAt: '2026-11-15',
+      approvedBy: 'Admin',
+    },
+  ];
+
+  // Kết quả mong đợi 1 (Quỹ phép năm) ở tháng 11: Tổng = 1 (Tích lũy 11 tháng cho định mức 12 là 11? Ah, nếu nhân viên mới join tháng 1 thì tích lũy đến tháng 11 là 11. Nhưng theo kịch bản kiểm thử của user: "Tổng quỹ phép = 1, Đã nghỉ = 1 -> Còn lại = 0").
+  // Để Tổng quỹ phép = 1, ta có thể test với nhân sự join tháng 11 (joinDate: '2026-11-01'), thì tích lũy đến tháng 11 là (12/12) * 1 = 1 ngày!
+  const maiJoinNov: Employee = {
+    ...maiEmp,
+    joinDate: '2026-11-01',
+  };
+
+  const breakdownAfter = calculateLeaveAccrualBreakdown(
+    maiJoinNov,
+    recordsWithMaiLeave,
+    2026,
+    11,
+    { accrualMode: 'monthly', allowCarryOver: true },
+    12
+  );
+
+  assert.equal(breakdownAfter.carriedOverLeaveDays, 0);
+  assert.equal(breakdownAfter.accruedLeaveDays, 1); // 12/12 * 1 tháng = 1
+  assert.equal(breakdownAfter.totalLeaveFund, 1); // 1 + 0 = 1
+  assert.equal(breakdownAfter.usedAnnualLeaveDays, 1); // Đã nghỉ = 1
+  assert.equal(breakdownAfter.remainingAnnualLeave, 0); // 1 - 1 = 0
+});
+

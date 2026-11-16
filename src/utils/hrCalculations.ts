@@ -575,6 +575,49 @@ export function clearLeaveBalancesStorage(): void {
   }
 }
 
+/**
+ * Quét và đồng bộ hồi tố (Retroactive Data Sync):
+ * Tính TỔNG số ngày nghỉ phép năm (annual_leave) đã tồn tại từ cơ sở dữ liệu
+ * cộng với số chốt đầu kỳ (đến 31/10) để cho ra số [Đã nghỉ] chính xác tuyệt đối.
+ */
+export function performRetroactiveLeaveScanAndSync(
+  employees: Employee[],
+  records: LeaveRecord[],
+  year: number = 2026
+): Record<string, number> {
+  const map = loadLeaveBalancesMap(year);
+  const result: Record<string, number> = {};
+
+  for (const emp of employees) {
+    const code = (emp.employeeCode || '').trim().toUpperCase();
+    if (!code) continue;
+
+    const balanceRec = map[code];
+    const baseUsed = balanceRec
+      ? balanceRec.used_leave
+      : typeof emp.openingUsedLeave === 'number'
+      ? emp.openingUsedLeave
+      : 0;
+
+    const cutoffDate = balanceRec?.cutoffDate || `${year}-10-31`;
+    const baselineIds = new Set(balanceRec?.baselineNovRecordIds || []);
+
+    const postCutoffUsed = records
+      .filter((r) => {
+        if (r.employeeId !== emp.id || r.type !== 'annual_leave') return false;
+        if (baselineIds.has(r.id)) return false;
+        const { year: rYear } = getYearMonth(r.startDate);
+        return rYear === year && r.startDate > cutoffDate;
+      })
+      .reduce((sum, r) => Number((sum + r.amount).toFixed(2)), 0);
+
+    const totalUsed = Number((baseUsed + postCutoffUsed).toFixed(2));
+    result[code] = totalUsed;
+  }
+
+  return result;
+}
+
 export function loadLeavePolicyConfig(): LeavePolicyConfig {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {

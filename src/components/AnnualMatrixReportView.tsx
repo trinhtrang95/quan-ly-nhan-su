@@ -562,12 +562,12 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                       Nhân sự
                     </th>
 
-                    {/* CỘT 2 (STICKY left-[224px], w-14 = 56px): TỒN PHÉP */}
+                    {/* CỘT 2 (STICKY left-[224px], w-14 = 56px): CÒN LẠI */}
                     <th
                       className="px-1.5 py-1.5 w-14 min-w-[56px] max-w-[56px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-100 whitespace-nowrap sticky left-[224px] z-40 align-middle"
-                      title="Tồn phép = [Phép tích lũy] + [Phép tồn năm cũ] - [Đã nghỉ] (Hover để xem giải trình)"
+                      title="Còn lại = [Tổng quỹ phép] - [Đã nghỉ] (Hover để xem giải trình)"
                     >
-                      Tồn phép
+                      Còn lại
                     </th>
 
                     {/* CỘT 3 (STICKY left-[280px], w-16 = 64px): PN / CĐ */}

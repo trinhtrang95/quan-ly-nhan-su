@@ -730,7 +730,7 @@ export function exportMonthlyAttendanceMatrixToExcel(
             <th>MÃ NV</th>
             <th>HỌ VÀ TÊN</th>
             <th>NHÓM / BỘ PHẬN</th>
-            <th>TỒN PHÉP NĂM</th>
+            <th>CÒN LẠI</th>
             <th>NGHỈ PHÉP NĂM / CHẾ ĐỘ</th>
             <th>NGHỈ KHÔNG LƯƠNG</th>
             <th>ĐI MUỘN</th>
