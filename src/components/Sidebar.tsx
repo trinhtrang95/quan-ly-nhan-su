@@ -15,8 +15,11 @@ import {
   Layers,
   FileText,
   Wallet,
+  Clock,
 } from 'lucide-react';
-import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
+import { ActiveModule as BaseActiveModule, CompanyUnit, UserAccount } from '../types/hr';
+
+export type ActiveModule = BaseActiveModule | 'overtime';
 
 export type LeaveSubTab = 'leave_requests' | 'leave_fund';
 export type ReportSubTab = 'monthly_summary' | 'annual_matrix';
@@ -37,7 +40,7 @@ export interface NavChildItem {
 }
 
 export interface NavParentItem {
-  id: 'dashboard' | 'hr_module' | 'settings';
+  id: 'dashboard' | 'hr_module' | 'settings' | 'overtime';
   label: string;
   shortLabel: string;
   path?: string;
@@ -53,6 +56,13 @@ export const NAVIGATION_DATA: NavParentItem[] = [
     shortLabel: 'Trang chủ',
     path: '/',
     icon: LayoutDashboard,
+  },
+  {
+    id: 'overtime',
+    label: 'Tăng ca',
+    shortLabel: 'Tăng ca',
+    path: '/tang-ca',
+    icon: Clock,
   },
   {
     id: 'hr_module',
@@ -427,9 +437,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               );
             }
 
-            // Các mục Menu cấp 1 đơn: "Trang chủ" và "Hệ thống / Cài đặt"
+            // Các mục Menu cấp 1 đơn: "Trang chủ", "Tăng ca" và "Hệ thống / Cài đặt"
             const isTopActive =
               (item.id === 'dashboard' && activeModule === 'dashboard') ||
+              (item.id === 'overtime' && activeModule === 'overtime') ||
               (item.id === 'settings' && activeModule === 'settings');
 
             return (
@@ -437,11 +448,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 key={item.id}
                 type="button"
                 data-testid={`sidebar-nav-${item.id}`}
-                onClick={() =>
-                  onSelectModule(
-                    item.id === 'dashboard' ? 'dashboard' : 'settings'
-                  )
-                }
+                onClick={() => {
+                  if (item.id === 'dashboard') onSelectModule('dashboard');
+                  else if (item.id === 'overtime') onSelectModule('overtime');
+                  else if (item.id === 'settings') onSelectModule('settings');
+                }}
                 title={collapsed ? item.label : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
                   isTopActive
@@ -572,7 +583,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </button>
 
-        {NAVIGATION_DATA[1].children?.map((child) => {
+        <button
+          type="button"
+          onClick={() => onSelectModule('overtime')}
+          className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
+            activeModule === 'overtime'
+              ? 'bg-white text-[#14539E] font-bold'
+              : 'text-white/80 hover:text-white'
+          }`}
+        >
+          <Clock
+            className={`w-4 h-4 ${
+              activeModule === 'overtime' ? 'text-[#14539E]' : 'text-blue-100'
+            }`}
+          />
+          <span className="text-[10px] leading-tight whitespace-nowrap">
+            Tăng ca
+          </span>
+        </button>
+
+        {NAVIGATION_DATA.find((i) => i.id === 'hr_module')?.children?.map((child) => {
           const ChildIcon = child.icon;
           const active = isChildActive(child.id);
           return (

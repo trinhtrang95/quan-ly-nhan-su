@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import {
-  ActiveModule,
+  ActiveModule as BaseActiveModule,
   CompanyUnit,
   DepartmentGroup,
   Employee,
@@ -13,6 +13,8 @@ import {
   UserAccount,
   UserRole,
 } from './types/hr';
+
+export type ActiveModule = BaseActiveModule | 'overtime';
 import {
   INITIAL_COMPANY_UNITS,
   INITIAL_DEPARTMENT_GROUPS,
@@ -79,6 +81,7 @@ import { ReportDashboard } from './components/ReportDashboard';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
+import { CreateOvertimeForm } from './components/overtime/CreateOvertimeForm';
 import { EmployeeColumnId } from './utils/employeeColumns';
 import {
   applyThemeToDocument,
@@ -1792,6 +1795,19 @@ export default function App() {
                   setLeaveDefaultMonth(month);
                   setLeaveDefaultYear(year);
                   setIsLeaveModalOpen(true);
+                }}
+              />
+            )}
+
+            {activeModule === 'overtime' && (
+              <CreateOvertimeForm
+                employees={companyEmployees}
+                groups={effectiveGroups}
+                onSaveAndExportPDF={(payload) => {
+                  showToast(`Đã tạo và xuất Phiếu Tăng Ca PDF cho bộ phận ${payload.department} (${payload.blocks.length} nội dung).`);
+                }}
+                onSaveAndExportExcel={(payload) => {
+                  showToast(`Đã tạo và xuất Phiếu Tăng Ca Excel cho bộ phận ${payload.department} (${payload.blocks.length} nội dung).`);
                 }}
               />
             )}

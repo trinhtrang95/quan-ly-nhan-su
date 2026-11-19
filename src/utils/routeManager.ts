@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
-import { ActiveModule } from '../types/hr';
+import { ActiveModule as BaseActiveModule } from '../types/hr';
 import { LeaveSubTab, ReportSubTab } from '../components/Sidebar';
+
+export type ActiveModule = BaseActiveModule | 'overtime';
 
 export interface RouteState {
   module: ActiveModule;
@@ -50,6 +52,13 @@ export class HRRouteManager {
         reportSubTab: 'annual_matrix',
       };
     }
+    if (clean === '/tang-ca') {
+      return {
+        module: 'overtime',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+      };
+    }
     if (clean === '/cai-dat' || clean === '/he-thong') {
       return {
         module: 'settings',
@@ -76,6 +85,7 @@ export class HRRouteManager {
     if (module === 'annual_report') {
       return '/bao-cao-tong-hop';
     }
+    if (module === 'overtime') return '/tang-ca';
     if (module === 'settings') return '/cai-dat';
     return '/';
   }
