@@ -25,8 +25,7 @@ export type HrChildMenuId =
   | 'employees_list'
   | 'leave_requests'
   | 'leave_fund'
-  | 'monthly_summary'
-  | 'annual_matrix';
+  | 'summary_report';
 
 export interface NavChildItem {
   id: HrChildMenuId;
@@ -86,20 +85,12 @@ export const NAVIGATION_DATA: NavParentItem[] = [
         testId: 'sidebar-subnav-leave-fund',
       },
       {
-        id: 'monthly_summary',
-        label: 'Báo cáo tháng',
-        shortLabel: 'BC tháng',
-        path: '/bao-cao-thang',
+        id: 'summary_report',
+        label: 'Báo cáo tổng hợp',
+        shortLabel: 'Báo cáo',
+        path: '/bao-cao-tong-hop',
         icon: CalendarRange,
-        testId: 'sidebar-subnav-monthly-report',
-      },
-      {
-        id: 'annual_matrix',
-        label: 'Báo cáo năm',
-        shortLabel: 'BC năm',
-        path: '/bao-cao-nam',
-        icon: Layers,
-        testId: 'sidebar-subnav-annual-report',
+        testId: 'sidebar-subnav-summary-report',
       },
     ],
   },
@@ -223,15 +214,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return activeModule === 'leave_logs' && leaveSubTab === 'leave_requests';
       case 'leave_fund':
         return activeModule === 'leave_logs' && leaveSubTab === 'leave_fund';
-      case 'monthly_summary':
-        return (
-          activeModule === 'annual_report' &&
-          reportSubTab === 'monthly_summary'
-        );
-      case 'annual_matrix':
-        return (
-          activeModule === 'annual_report' && reportSubTab === 'annual_matrix'
-        );
+      case 'summary_report':
+        return activeModule === 'annual_report';
       default:
         return false;
     }
@@ -257,13 +241,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onSelectModule('leave_logs');
         onSelectLeaveSubTab?.('leave_fund');
         break;
-      case 'monthly_summary':
+      case 'summary_report':
         onSelectModule('annual_report');
-        onSelectReportSubTab?.('monthly_summary');
-        break;
-      case 'annual_matrix':
-        onSelectModule('annual_report');
-        onSelectReportSubTab?.('annual_matrix');
+        onSelectReportSubTab?.(reportSubTab);
         break;
     }
   };

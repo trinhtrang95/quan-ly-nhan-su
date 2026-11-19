@@ -75,7 +75,7 @@ import { AnnualLeaveFundView } from './components/AnnualLeaveFundView';
 import { AnnualLeaveRulesView } from './components/AnnualLeaveRulesView';
 import { LeaveRecordModal } from './components/LeaveRecordModal';
 import { BulkLeaveRecordModal } from './components/BulkLeaveRecordModal';
-import { AnnualMatrixReportView } from './components/AnnualMatrixReportView';
+import { ReportDashboard } from './components/ReportDashboard';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
@@ -1763,11 +1763,12 @@ export default function App() {
             )}
 
             {activeModule === 'annual_report' && (
-              <AnnualMatrixReportView
+              <ReportDashboard
                 employees={companyEmployees}
                 records={companyRecords}
                 groups={effectiveGroups}
                 activeSubTab={reportSubTab}
+                onSubTabChange={(subTab) => setReportSubTab(subTab)}
                 onExportMatrixExcel={(rows, year, viewMode) => {
                   exportAnnualMatrixToExcel(rows, year, viewMode);
                   showToast(`Đã xuất tệp Excel Báo cáo Ma trận Tồn phép năm ${year}.`);

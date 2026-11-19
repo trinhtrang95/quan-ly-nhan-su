@@ -29,6 +29,7 @@ import {
   MonthlyDayBadge,
 } from '../utils/hrCalculations';
 import { exportMonthlyAttendanceMatrixToExcel } from '../utils/exportUtils';
+import { formatNumberVN } from '../utils/errorAndSecurityService';
 import { ReportSubTab } from './Sidebar';
 
 interface AnnualMatrixReportViewProps {
@@ -337,89 +338,70 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
     );
   };
 
+  const renderExportDropdown = () => (
+    <div className="relative" ref={exportDropdownRef}>
+      <button
+        type="button"
+        data-testid="report-export-dropdown-btn"
+        onClick={() => setIsExportDropdownOpen((prev) => !prev)}
+        className="h-8 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-[#14539E]/30"
+      >
+        <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
+        <span>Xuất Excel / PDF</span>
+        <ChevronDown className="w-3.5 h-3.5 text-blue-100" />
+      </button>
+
+      {isExportDropdownOpen && (
+        <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl border border-slate-200 shadow-lg py-1.5 z-50 text-xs font-medium text-slate-800">
+          <button
+            type="button"
+            onClick={() => {
+              setIsExportDropdownOpen(false);
+              if (activeSubTab === 'monthly_summary') {
+                exportMonthlyAttendanceMatrixToExcel(
+                  monthlyReport,
+                  groups
+                );
+              } else {
+                onExportMatrixExcel(matrixRows, reportYear, viewMode);
+              }
+            }}
+            className="w-full text-left px-3.5 py-2 hover:bg-blue-50 hover:text-[#14539E] flex items-center gap-2.5 cursor-pointer transition-colors"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-green-600 shrink-0" />
+            <span>
+              {activeSubTab === 'monthly_summary'
+                ? `Xuất Excel (${formattedMonthTitle})`
+                : `Xuất Excel Năm ${reportYear} (.xlsx)`}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setIsExportDropdownOpen(false);
+              if (activeSubTab === 'monthly_summary') {
+                setIsMonthlyPrintOpen(true);
+              } else {
+                onExportMatrixPDF(matrixRows, reportYear, viewMode);
+              }
+            }}
+            className="w-full text-left px-3.5 py-2 hover:bg-blue-50 hover:text-[#14539E] flex items-center gap-2.5 cursor-pointer transition-colors"
+          >
+            <FileText className="w-4 h-4 text-red-600 shrink-0" />
+            <span>
+              {activeSubTab === 'monthly_summary'
+                ? `Xuất PDF / In (${formattedMonthTitle})`
+                : `Xuất PDF Năm ${reportYear} (Khổ ngang A4)`}
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-2.5 text-slate-800">
-      {/* =====================================================================
-          TOP HEADER: NỀN TRẮNG TINH bg-white, VIỀN MỎNG border-slate-200, shadow-sm
-      ===================================================================== */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3.5 py-2.5 compact-toolbar">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            {activeSubTab === 'monthly_summary' ? (
-              <h2 className="text-sm md:text-base font-bold text-slate-800 tracking-tight">
-                Bảng tổng hợp Nghỉ phép &amp; Đi muộn - {formattedMonthTitle}
-              </h2>
-            ) : (
-              <h2 className="text-sm md:text-base font-bold text-slate-800 tracking-tight">
-                Báo cáo tổng hợp ({reportYear})
-              </h2>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Nút thao tác Xuất Excel / PDF ở góc phải (Primary Button: bg-[#14539E] hover:bg-blue-600) */}
-            <div className="relative" ref={exportDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setIsExportDropdownOpen((prev) => !prev)}
-                className="h-8 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#14539E] hover:bg-blue-600 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-[#14539E]/30"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
-                <span>Xuất Excel / PDF</span>
-                <ChevronDown className="w-3.5 h-3.5 text-blue-100" />
-              </button>
-
-              {isExportDropdownOpen && (
-                <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl border border-slate-200 shadow-lg py-1.5 z-50 text-xs font-medium text-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsExportDropdownOpen(false);
-                      if (activeSubTab === 'monthly_summary') {
-                        exportMonthlyAttendanceMatrixToExcel(
-                          monthlyReport,
-                          groups
-                        );
-                      } else {
-                        onExportMatrixExcel(matrixRows, reportYear, viewMode);
-                      }
-                    }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-blue-50 hover:text-[#14539E] flex items-center gap-2.5 cursor-pointer transition-colors"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-green-600 shrink-0" />
-                    <span>
-                      {activeSubTab === 'monthly_summary'
-                        ? `Xuất Excel (${formattedMonthTitle})`
-                        : `Xuất Excel Năm ${reportYear} (.xlsx)`}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsExportDropdownOpen(false);
-                      if (activeSubTab === 'monthly_summary') {
-                        setIsMonthlyPrintOpen(true);
-                      } else {
-                        onExportMatrixPDF(matrixRows, reportYear, viewMode);
-                      }
-                    }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-blue-50 hover:text-[#14539E] flex items-center gap-2.5 cursor-pointer transition-colors"
-                  >
-                    <FileText className="w-4 h-4 text-red-600 shrink-0" />
-                    <span>
-                      {activeSubTab === 'monthly_summary'
-                        ? `Xuất PDF / In (${formattedMonthTitle})`
-                        : `Xuất PDF Năm ${reportYear} (Khổ ngang A4)`}
-                    </span>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* =====================================================================
           CHẾ ĐỘ 1: BÁO CÁO THÁNG (HIGH DENSITY - ZERO VISUAL NOISE)
       ===================================================================== */}
@@ -427,81 +409,87 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
         <>
           {/* THANH CÔNG CỤ TÌM KIẾM & LỌC (bg-white border-slate-200 shadow-sm) */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3.5 py-2.5 compact-toolbar">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 items-end">
-              {/* 1. Tháng áp dụng (Dropdown Select: Tháng 11/2026) */}
-              <div>
-                <label
-                  htmlFor="monthly-report-select"
-                  className="block text-[11px] font-medium text-slate-500 mb-1"
-                >
-                  Tháng áp dụng
-                </label>
-                <select
-                  id="monthly-report-select"
-                  value={selectedYearMonth}
-                  onChange={(e) => setSelectedYearMonth(e.target.value)}
-                  className="w-full h-8 px-2.5 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
-                >
-                  {MONTH_DROPDOWN_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-2.5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 items-end flex-1">
+                {/* 1. Tháng áp dụng (Dropdown Select: Tháng 11/2026) */}
+                <div>
+                  <label
+                    htmlFor="monthly-report-select"
+                    className="block text-[11px] font-medium text-slate-500 mb-1"
+                  >
+                    Tháng áp dụng
+                  </label>
+                  <select
+                    id="monthly-report-select"
+                    value={selectedYearMonth}
+                    onChange={(e) => setSelectedYearMonth(e.target.value)}
+                    className="w-full h-8 px-2.5 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
+                  >
+                    {MONTH_DROPDOWN_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* 2. Tìm kiếm (Search Mã NV hoặc Họ tên) */}
-              <div>
-                <label
-                  htmlFor="monthly-report-search"
-                  className="block text-[11px] font-medium text-slate-500 mb-1"
-                >
-                  Tìm kiếm
-                </label>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="monthly-report-search"
-                    type="text"
-                    value={monthlySearchQuery}
-                    onChange={(e) => setMonthlySearchQuery(e.target.value)}
-                    placeholder="Gõ Mã NV hoặc Họ tên..."
-                    className="w-full h-8 pl-8 pr-7 py-1 text-xs font-medium text-slate-800 placeholder:text-slate-500 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
-                  />
-                  {monthlySearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setMonthlySearchQuery('')}
-                      aria-label="Xóa từ khóa tìm kiếm"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                {/* 2. Tìm kiếm (Search Mã NV hoặc Họ tên) */}
+                <div>
+                  <label
+                    htmlFor="monthly-report-search"
+                    className="block text-[11px] font-medium text-slate-500 mb-1"
+                  >
+                    Tìm kiếm
+                  </label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      id="monthly-report-search"
+                      type="text"
+                      value={monthlySearchQuery}
+                      onChange={(e) => setMonthlySearchQuery(e.target.value)}
+                      placeholder="Gõ Mã NV hoặc Họ tên..."
+                      className="w-full h-8 pl-8 pr-7 py-1 text-xs font-medium text-slate-800 placeholder:text-slate-500 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
+                    />
+                    {monthlySearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setMonthlySearchQuery('')}
+                        aria-label="Xóa từ khóa tìm kiếm"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Nhóm / Bộ phận (Department Dropdown) */}
+                <div>
+                  <label
+                    htmlFor="monthly-report-dept"
+                    className="block text-[11px] font-medium text-slate-500 mb-1"
+                  >
+                    Nhóm / Bộ phận
+                  </label>
+                  <select
+                    id="monthly-report-dept"
+                    value={monthlyDeptFilter}
+                    onChange={(e) => setMonthlyDeptFilter(e.target.value)}
+                    className="w-full h-8 px-2.5 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
+                  >
+                    <option value="ALL">Tất cả ({groups.length} nhóm)</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.name}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              {/* 3. Nhóm / Bộ phận (Department Dropdown) */}
-              <div>
-                <label
-                  htmlFor="monthly-report-dept"
-                  className="block text-[11px] font-medium text-slate-500 mb-1"
-                >
-                  Nhóm / Bộ phận
-                </label>
-                <select
-                  id="monthly-report-dept"
-                  value={monthlyDeptFilter}
-                  onChange={(e) => setMonthlyDeptFilter(e.target.value)}
-                  className="w-full h-8 px-2.5 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
-                >
-                  <option value="ALL">Tất cả ({groups.length} nhóm)</option>
-                  {groups.map((g) => (
-                    <option key={g.id} value={g.name}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
+              <div className="flex items-center justify-end shrink-0">
+                {renderExportDropdown()}
               </div>
             </div>
           </div>
@@ -553,7 +541,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
               - Cột ngày 01->31: w-8 (32px), px-1.5 py-1, border-slate-100, align-middle, ĐỂ KHOẢNG TRẮNG HOÀN TOÀN ở ngày đi làm bình thường (không có dấu '-')
           */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="max-h-[calc(100vh-195px)] overflow-y-auto overflow-x-auto">
+            <div className="max-h-[calc(100vh-220px)] overflow-y-auto overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs compact-matrix-table">
                 <thead className="sticky top-0 z-30 bg-slate-50 text-slate-500 select-none text-[11px] border-b border-slate-200">
                   <tr className="font-normal">
@@ -692,7 +680,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             }`}
                           >
                             <span className="underline decoration-dotted decoration-slate-300 underline-offset-2">
-                              {row.remainingAnnualLeave}
+                              {formatNumberVN(row.remainingAnnualLeave)}
                             </span>
 
                             {/* Tooltip phân rã chi tiết 3 dòng (Nền trắng tinh bg-white border-slate-200 shadow-lg) */}
@@ -708,7 +696,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                               <div className="font-semibold text-slate-800 pb-1.5 mb-1.5 border-b border-slate-100 flex items-center justify-between">
                                 <span>Chi tiết Tồn phép</span>
                                 <span className="font-mono font-bold text-[#14539E]">
-                                  {row.remainingAnnualLeave} ngày
+                                  {formatNumberVN(row.remainingAnnualLeave)} ngày
                                 </span>
                               </div>
                               <div className="space-y-1 text-[11px]">
@@ -717,7 +705,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     Phép tích lũy:
                                   </span>
                                   <span className="font-mono font-bold text-slate-800">
-                                    {row.accruedLeaveDays} ngày
+                                    {formatNumberVN(row.accruedLeaveDays)} ngày
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between">
@@ -725,7 +713,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     Phép tồn chuyển sang:
                                   </span>
                                   <span className="font-mono font-bold text-slate-800">
-                                    {row.carriedOverLeaveDays} ngày
+                                    {formatNumberVN(row.carriedOverLeaveDays)} ngày
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between">
@@ -733,7 +721,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     Số đã nghỉ:
                                   </span>
                                   <span className="font-mono font-bold text-orange-700">
-                                    {row.usedAnnualLeaveDays} ngày
+                                    {formatNumberVN(row.usedAnnualLeaveDays)} ngày
                                   </span>
                                 </div>
                               </div>
@@ -757,9 +745,9 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 {row.monthAnnualDays > 0 && (
                                   <span
                                     className="text-green-700"
-                                    title={`Nghỉ phép năm: ${row.monthAnnualDays} ngày`}
+                                    title={`Nghỉ phép năm: ${formatNumberVN(row.monthAnnualDays)} ngày`}
                                   >
-                                    {row.monthAnnualDays}
+                                    {formatNumberVN(row.monthAnnualDays)}
                                   </span>
                                 )}
                                 {row.monthAnnualDays > 0 &&
@@ -769,9 +757,9 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 {row.monthRegimeDays > 0 && (
                                   <span
                                     className="text-blue-700"
-                                    title={`Nghỉ chế độ: ${row.monthRegimeDays} ngày`}
+                                    title={`Nghỉ chế độ: ${formatNumberVN(row.monthRegimeDays)} ngày`}
                                   >
-                                    {row.monthRegimeDays}
+                                    {formatNumberVN(row.monthRegimeDays)}
                                   </span>
                                 )}
                               </div>
@@ -791,7 +779,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                           >
                             {row.monthUnpaidDays > 0 && (
                               <span className="font-semibold text-orange-700">
-                                {row.monthUnpaidDays}
+                                {formatNumberVN(row.monthUnpaidDays)}
                               </span>
                             )}
                           </td>
@@ -809,7 +797,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                           >
                             {row.monthLateHours > 0 && (
                               <span className="font-semibold text-red-700">
-                                {row.monthLateHours}h
+                                {formatNumberVN(row.monthLateHours)}h
                               </span>
                             )}
                           </td>
@@ -866,72 +854,78 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
         <>
           {/* Bộ lọc Báo cáo năm */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3.5">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
-                <label
-                  htmlFor="matrix-year-select"
-                  className="block text-xs font-medium text-slate-500 mb-1"
-                >
-                  Năm báo cáo:
-                </label>
-                <select
-                  id="matrix-year-select"
-                  value={reportYear}
-                  onChange={(e) => setReportYear(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 cursor-pointer"
-                >
-                  <option value={2026}>Năm 2026</option>
-                  <option value={2025}>Năm 2025</option>
-                  <option value={2027}>Năm 2027</option>
-                </select>
-              </div>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1">
+                <div>
+                  <label
+                    htmlFor="matrix-year-select"
+                    className="block text-xs font-medium text-slate-500 mb-1"
+                  >
+                    Năm báo cáo:
+                  </label>
+                  <select
+                    id="matrix-year-select"
+                    value={reportYear}
+                    onChange={(e) => setReportYear(Number(e.target.value))}
+                    className="w-full h-8 px-2.5 py-1 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 cursor-pointer"
+                  >
+                    <option value={2026}>Năm 2026</option>
+                    <option value={2025}>Năm 2025</option>
+                    <option value={2027}>Năm 2027</option>
+                  </select>
+                </div>
 
-              <div>
-                <label
-                  htmlFor="matrix-dept-select"
-                  className="block text-xs font-medium text-slate-500 mb-1"
-                >
-                  Nhóm / Bộ phận:
-                </label>
-                <select
-                  id="matrix-dept-select"
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 cursor-pointer"
-                >
-                  <option value="ALL">
-                    Tất cả Nhóm / Bộ phận ({groups.length})
-                  </option>
-                  {groups.map((g) => (
-                    <option key={g.id} value={g.name}>
-                      {g.name}
+                <div>
+                  <label
+                    htmlFor="matrix-dept-select"
+                    className="block text-xs font-medium text-slate-500 mb-1"
+                  >
+                    Nhóm / Bộ phận:
+                  </label>
+                  <select
+                    id="matrix-dept-select"
+                    value={departmentFilter}
+                    onChange={(e) => setDepartmentFilter(e.target.value)}
+                    className="w-full h-8 px-2.5 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 cursor-pointer"
+                  >
+                    <option value="ALL">
+                      Tất cả Nhóm / Bộ phận ({groups.length})
                     </option>
-                  ))}
-                </select>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.name}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="matrix-mode-select"
+                    className="block text-xs font-medium text-slate-500 mb-1"
+                  >
+                    Chế độ xem ma trận:
+                  </label>
+                  <select
+                    id="matrix-mode-select"
+                    value={viewMode}
+                    onChange={(e) => setViewMode(e.target.value as MatrixViewMode)}
+                    className="w-full h-8 px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 text-slate-800 cursor-pointer"
+                  >
+                    <option value="all">
+                      Tổng hợp tất cả (Phép + K.Lương + Đi muộn)
+                    </option>
+                    <option value="annual_leave">Thống kê Phép năm</option>
+                    <option value="unpaid_leave">
+                      Thống kê Nghỉ không lương
+                    </option>
+                    <option value="late_early">Thống kê Giờ đi muộn</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label
-                  htmlFor="matrix-mode-select"
-                  className="block text-xs font-medium text-slate-500 mb-1"
-                >
-                  Chế độ xem ma trận:
-                </label>
-                <select
-                  id="matrix-mode-select"
-                  value={viewMode}
-                  onChange={(e) => setViewMode(e.target.value as MatrixViewMode)}
-                  className="w-full px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 text-slate-800 cursor-pointer"
-                >
-                  <option value="all">
-                    Tổng hợp tất cả (Phép + K.Lương + Đi muộn)
-                  </option>
-                  <option value="annual_leave">Thống kê Phép năm</option>
-                  <option value="unpaid_leave">
-                    Thống kê Nghỉ không lương
-                  </option>
-                  <option value="late_early">Thống kê Giờ đi muộn</option>
-                </select>
+              <div className="flex items-center justify-end shrink-0">
+                {renderExportDropdown()}
               </div>
             </div>
 
@@ -1045,7 +1039,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             </div>
                           </td>
                           <td className="px-2 py-1.5 text-center font-mono font-semibold text-slate-800 border-r border-slate-200 shadow-[4px_0_12px_rgba(0,0,0,0.05)] align-middle">
-                            {emp.standardAnnualLeave}
+                            {formatNumberVN(emp.standardAnnualLeave)}
                           </td>
 
                           {/* 12 Month Cells (Zero Visual Noise - blank when 0) */}
@@ -1071,18 +1065,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     <>
                                       {cell.annualLeaveDays > 0 && (
                                         <span className="text-green-700 font-bold">
-                                          {cell.annualLeaveDays}
+                                          {formatNumberVN(cell.annualLeaveDays)}
                                         </span>
                                       )}
                                       <div className="flex items-center gap-0.5 text-[10px]">
                                         {cell.unpaidLeaveDays > 0 && (
                                           <span className="text-orange-700 font-bold">
-                                            {cell.unpaidLeaveDays}KL
+                                            {formatNumberVN(cell.unpaidLeaveDays)}KL
                                           </span>
                                         )}
                                         {cell.lateHours > 0 && (
                                           <span className="text-red-700 font-bold">
-                                            {cell.lateHours}h
+                                            {formatNumberVN(cell.lateHours)}h
                                           </span>
                                         )}
                                       </div>
@@ -1090,18 +1084,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                   ) : viewMode === 'annual_leave' ? (
                                     cell.annualLeaveDays > 0 ? (
                                       <span className="text-green-700 font-bold">
-                                        {cell.annualLeaveDays}
+                                        {formatNumberVN(cell.annualLeaveDays)}
                                       </span>
                                     ) : null
                                   ) : viewMode === 'unpaid_leave' ? (
                                     cell.unpaidLeaveDays > 0 ? (
                                       <span className="text-orange-700 font-bold">
-                                        {cell.unpaidLeaveDays}
+                                        {formatNumberVN(cell.unpaidLeaveDays)}
                                       </span>
                                     ) : null
                                   ) : cell.lateHours > 0 ? (
                                     <span className="text-red-700 font-bold">
-                                      {cell.lateHours}h
+                                      {formatNumberVN(cell.lateHours)}h
                                     </span>
                                   ) : null}
                                 </div>
@@ -1111,7 +1105,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
 
                           {/* Right Summary Totals */}
                           <td className="px-1.5 py-1 text-center font-mono font-semibold text-green-700 border-r border-slate-100 align-middle">
-                            {row.totalAnnualUsed > 0 ? row.totalAnnualUsed : null}
+                            {row.totalAnnualUsed > 0 ? formatNumberVN(row.totalAnnualUsed) : null}
                           </td>
                           <td
                             data-remaining-leave-cell="true"
@@ -1126,7 +1120,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             className="relative group/tonphep px-1.5 py-1 text-center font-mono font-semibold text-slate-800 border-r border-slate-100 cursor-pointer align-middle"
                           >
                             <span className="underline decoration-dotted decoration-slate-300 underline-offset-2">
-                              {row.remainingAnnualLeave}
+                              {formatNumberVN(row.remainingAnnualLeave)}
                             </span>
 
                             {/* Tooltip phân rã chi tiết 3 dòng */}
@@ -1142,7 +1136,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                               <div className="font-semibold text-slate-800 pb-1.5 mb-1.5 border-b border-slate-100 flex items-center justify-between">
                                 <span>Chi tiết Tồn phép</span>
                                 <span className="font-mono font-bold text-[#14539E]">
-                                  {row.remainingAnnualLeave} ngày
+                                  {formatNumberVN(row.remainingAnnualLeave)} ngày
                                 </span>
                               </div>
                               <div className="space-y-1 text-[11px]">
@@ -1151,7 +1145,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     Phép tích lũy:
                                   </span>
                                   <span className="font-mono font-bold text-slate-800">
-                                    {row.accruedLeaveDays} ngày
+                                    {formatNumberVN(row.accruedLeaveDays)} ngày
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between">
@@ -1159,7 +1153,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     Phép tồn chuyển sang:
                                   </span>
                                   <span className="font-mono font-bold text-slate-800">
-                                    {row.carriedOverLeaveDays} ngày
+                                    {formatNumberVN(row.carriedOverLeaveDays)} ngày
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between">
@@ -1167,18 +1161,18 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                     Số đã nghỉ:
                                   </span>
                                   <span className="font-mono font-bold text-orange-700">
-                                    {row.totalAnnualUsed} ngày
+                                    {formatNumberVN(row.totalAnnualUsed)} ngày
                                   </span>
                                 </div>
                               </div>
                             </div>
                           </td>
                           <td className="px-1.5 py-1 text-center font-mono font-semibold text-orange-700 border-r border-slate-100 align-middle">
-                            {row.totalUnpaidDays > 0 ? row.totalUnpaidDays : null}
+                            {row.totalUnpaidDays > 0 ? formatNumberVN(row.totalUnpaidDays) : null}
                           </td>
                           <td className="px-1.5 py-1 text-center font-mono font-semibold text-red-700 align-middle">
                             {row.totalLateHours > 0
-                              ? `${row.totalLateHours}h`
+                              ? `${formatNumberVN(row.totalLateHours)}h`
                               : null}
                           </td>
                         </tr>
@@ -1192,10 +1186,10 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   <tfoot className="bg-slate-50 text-slate-800 border-t border-slate-200 text-xs font-mono font-semibold">
                     <tr>
                       <td className="px-2.5 py-2 text-right uppercase tracking-wider border-r border-slate-200 text-slate-600">
-                        Tổng ({matrixRows.length} NS):
+                        Tổng ({formatNumberVN(matrixRows.length)} NS):
                       </td>
                       <td className="px-2 py-2 text-center border-r border-slate-200">
-                        {grandTotalStandard}d
+                        {formatNumberVN(grandTotalStandard)}d
                       </td>
                       {Array.from({ length: 12 }, (_, idx) => {
                         const mNum = idx + 1;
@@ -1211,21 +1205,21 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             key={mNum}
                             className="px-1.5 py-2 text-center border-r border-slate-100"
                           >
-                            {mUsed > 0 ? mUsed : null}
+                            {mUsed > 0 ? formatNumberVN(mUsed) : null}
                           </td>
                         );
                       })}
                       <td className="px-2 py-2 text-center border-r border-slate-100 text-green-700">
-                        {grandTotalUsed}d
+                        {formatNumberVN(grandTotalUsed)}d
                       </td>
                       <td className="px-2 py-2 text-center border-r border-slate-100 text-[#14539E]">
-                        {grandTotalRemaining}d
+                        {formatNumberVN(grandTotalRemaining)}d
                       </td>
                       <td className="px-2 py-2 text-center border-r border-slate-100 text-orange-700">
-                        {grandTotalUnpaid}d
+                        {formatNumberVN(grandTotalUnpaid)}d
                       </td>
                       <td className="px-2 py-2 text-center text-red-700">
-                        {grandTotalLateHours}h
+                        {formatNumberVN(grandTotalLateHours)}h
                       </td>
                     </tr>
                   </tfoot>

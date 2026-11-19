@@ -36,7 +36,7 @@ export class HRRouteManager {
         reportSubTab: 'monthly_summary',
       };
     }
-    if (clean === '/bao-cao-thang') {
+    if (clean === '/bao-cao-tong-hop' || clean === '/bao-cao-thang') {
       return {
         module: 'annual_report',
         leaveSubTab: 'leave_requests',
@@ -67,16 +67,14 @@ export class HRRouteManager {
   static getPathnameForState(
     module: ActiveModule,
     leaveSubTab: LeaveSubTab,
-    reportSubTab: ReportSubTab
+    _reportSubTab?: ReportSubTab
   ): string {
     if (module === 'employees') return '/danh-sach-nhan-su';
     if (module === 'leave_logs') {
       return leaveSubTab === 'leave_fund' ? '/quy-phep-nam' : '/don-nghi';
     }
     if (module === 'annual_report') {
-      return reportSubTab === 'annual_matrix'
-        ? '/bao-cao-nam'
-        : '/bao-cao-thang';
+      return '/bao-cao-tong-hop';
     }
     if (module === 'settings') return '/cai-dat';
     return '/';
