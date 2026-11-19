@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Users,
-  CalendarClock,
-  FileSpreadsheet,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -15,12 +13,103 @@ import {
   Layers,
   FileText,
   Wallet,
-  BookOpenCheck,
 } from 'lucide-react';
 import { ActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
 export type LeaveSubTab = 'leave_requests' | 'leave_fund';
 export type ReportSubTab = 'monthly_summary' | 'annual_matrix';
+
+export type HrChildMenuId =
+  | 'employees_list'
+  | 'leave_requests'
+  | 'leave_fund'
+  | 'monthly_summary'
+  | 'annual_matrix';
+
+export interface NavChildItem {
+  id: HrChildMenuId;
+  label: string;
+  shortLabel: string;
+  path: string;
+  icon: React.FC<{ className?: string }>;
+  testId: string;
+}
+
+export interface NavParentItem {
+  id: 'dashboard' | 'hr_module' | 'settings';
+  label: string;
+  shortLabel: string;
+  path?: string;
+  icon: React.FC<{ className?: string }>;
+  adminOnly?: boolean;
+  children?: NavChildItem[];
+}
+
+export const NAVIGATION_DATA: NavParentItem[] = [
+  {
+    id: 'dashboard',
+    label: 'Trang chủ',
+    shortLabel: 'Trang chủ',
+    path: '/',
+    icon: LayoutDashboard,
+  },
+  {
+    id: 'hr_module',
+    label: 'Nhân sự',
+    shortLabel: 'Nhân sự',
+    icon: Users,
+    children: [
+      {
+        id: 'employees_list',
+        label: 'Danh sách nhân sự',
+        shortLabel: 'Nhân sự',
+        path: '/danh-sach-nhan-su',
+        icon: Users,
+        testId: 'sidebar-subnav-employees-list',
+      },
+      {
+        id: 'leave_requests',
+        label: 'Đơn nghỉ',
+        shortLabel: 'Đơn nghỉ',
+        path: '/don-nghi',
+        icon: FileText,
+        testId: 'sidebar-subnav-leave-requests',
+      },
+      {
+        id: 'leave_fund',
+        label: 'Quỹ phép năm',
+        shortLabel: 'Quỹ phép',
+        path: '/quy-phep-nam',
+        icon: Wallet,
+        testId: 'sidebar-subnav-leave-fund',
+      },
+      {
+        id: 'monthly_summary',
+        label: 'Báo cáo tháng',
+        shortLabel: 'BC tháng',
+        path: '/bao-cao-thang',
+        icon: CalendarRange,
+        testId: 'sidebar-subnav-monthly-report',
+      },
+      {
+        id: 'annual_matrix',
+        label: 'Báo cáo năm',
+        shortLabel: 'BC năm',
+        path: '/bao-cao-nam',
+        icon: Layers,
+        testId: 'sidebar-subnav-annual-report',
+      },
+    ],
+  },
+  {
+    id: 'settings',
+    label: 'Hệ thống / Cài đặt',
+    shortLabel: 'Cài đặt',
+    path: '/cai-dat',
+    icon: Settings,
+    adminOnly: true,
+  },
+];
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -41,49 +130,6 @@ interface SidebarProps {
   onLogoutClick: () => void;
 }
 
-const NAV_ITEMS: {
-  id: ActiveModule;
-  label: string;
-  shortLabel: string;
-  icon: React.FC<{ className?: string }>;
-  adminOnly?: boolean;
-  hasSubmenu?: boolean;
-}[] = [
-  {
-    id: 'dashboard',
-    label: 'Trang chủ',
-    shortLabel: 'Trang chủ',
-    icon: LayoutDashboard,
-  },
-  {
-    id: 'employees',
-    label: 'Nhân sự',
-    shortLabel: 'Nhân sự',
-    icon: Users,
-  },
-  {
-    id: 'leave_logs',
-    label: 'Nghỉ phép',
-    shortLabel: 'Nghỉ phép',
-    icon: CalendarClock,
-    hasSubmenu: true,
-  },
-  {
-    id: 'annual_report',
-    label: 'Báo cáo tổng hợp',
-    shortLabel: 'Báo cáo',
-    icon: FileSpreadsheet,
-    hasSubmenu: true,
-  },
-  {
-    id: 'settings',
-    label: 'Hệ thống / Cài đặt',
-    shortLabel: 'Cài đặt',
-    icon: Settings,
-    adminOnly: true,
-  },
-];
-
 export const Sidebar: React.FC<SidebarProps> = ({
   activeModule,
   onSelectModule,
@@ -93,18 +139,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectReportSubTab,
   collapsed,
   onToggleCollapse,
-  employeeCount,
-  recordCount,
   currentUser,
   isCloudConnected = true,
   onLogoutClick,
 }) => {
-  // Mặc định mở rộng menu cha "Nghỉ phép" và "Báo cáo tổng hợp"
-  const [isLeaveExpanded, setIsLeaveExpanded] = useState<boolean>(true);
-  const [isReportsExpanded, setIsReportsExpanded] = useState<boolean>(true);
+  // Kiểm tra xem người dùng có đang đứng ở một trong 5 menu con của Module "Nhân sự" hay không
+  const isInsideHrModule =
+    activeModule === 'employees' ||
+    activeModule === 'leave_logs' ||
+    activeModule === 'annual_report';
+
+  // Mặc định mở rộng Module "Nhân sự" (Accordion)
+  const [isHrExpanded, setIsHrExpanded] = useState<boolean>(true);
+
+  // Đảm bảo khi đang đứng ở bất kỳ menu con nào của Module "Nhân sự", menu cha luôn ở trạng thái mở (Expanded)
+  useEffect(() => {
+    if (isInsideHrModule) {
+      setIsHrExpanded(true);
+    }
+  }, [isInsideHrModule, activeModule, leaveSubTab, reportSubTab]);
 
   const isAdmin = currentUser.role === 'admin';
-  const visibleNavItems = NAV_ITEMS.filter(
+  const visibleNavItems = NAVIGATION_DATA.filter(
     (item) => !item.adminOnly || isAdmin
   );
 
@@ -115,17 +171,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
       : currentUser.fullName.slice(0, 2).toUpperCase();
   })();
 
-  const handleSelectLeaveChild = (subTab: LeaveSubTab) => {
-    onSelectModule('leave_logs');
-    if (onSelectLeaveSubTab) {
-      onSelectLeaveSubTab(subTab);
+  const isChildActive = (childId: HrChildMenuId): boolean => {
+    switch (childId) {
+      case 'employees_list':
+        return activeModule === 'employees';
+      case 'leave_requests':
+        return activeModule === 'leave_logs' && leaveSubTab === 'leave_requests';
+      case 'leave_fund':
+        return activeModule === 'leave_logs' && leaveSubTab === 'leave_fund';
+      case 'monthly_summary':
+        return (
+          activeModule === 'annual_report' &&
+          reportSubTab === 'monthly_summary'
+        );
+      case 'annual_matrix':
+        return (
+          activeModule === 'annual_report' && reportSubTab === 'annual_matrix'
+        );
+      default:
+        return false;
     }
   };
 
-  const handleSelectReportChild = (subTab: ReportSubTab) => {
-    onSelectModule('annual_report');
-    if (onSelectReportSubTab) {
-      onSelectReportSubTab(subTab);
+  const handleSelectHrChild = (childId: HrChildMenuId) => {
+    setIsHrExpanded(true);
+    switch (childId) {
+      case 'employees_list':
+        onSelectModule('employees');
+        break;
+      case 'leave_requests':
+        onSelectModule('leave_logs');
+        onSelectLeaveSubTab?.('leave_requests');
+        break;
+      case 'leave_fund':
+        onSelectModule('leave_logs');
+        onSelectLeaveSubTab?.('leave_fund');
+        break;
+      case 'monthly_summary':
+        onSelectModule('annual_report');
+        onSelectReportSubTab?.('monthly_summary');
+        break;
+      case 'annual_matrix':
+        onSelectModule('annual_report');
+        onSelectReportSubTab?.('annual_matrix');
+        break;
     }
   };
 
@@ -169,159 +258,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Navigation Links (Multi-level Tree) */}
+        {/* Navigation Links (ERP Module Parent-Children Structure) */}
         <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
-          {!collapsed && (
-            <div className="px-3 pb-1.5 text-[11px] font-semibold text-blue-100/75 tracking-wider uppercase">
-              PHÂN HỆ QUẢN TRỊ
-            </div>
-          )}
-
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeModule === item.id;
 
-            // Menu đa cấp 1: "Nghỉ phép" (Đơn nghỉ | Quỹ phép năm | Quy định phép năm)
-            if (item.id === 'leave_logs') {
-              const isParentHighlighted = isActive;
-              const isRequestsActive =
-                isActive && leaveSubTab === 'leave_requests';
-              const isFundActive = isActive && leaveSubTab === 'leave_fund';
+            // Module cha dạng Accordion: "Nhân sự" (gồm 5 menu con)
+            if (item.id === 'hr_module' && item.children) {
+              const isParentHighlighted = isInsideHrModule;
 
               return (
                 <div key={item.id} className="space-y-1">
-                  {/* Menu cha: Nghỉ phép */}
+                  {/* Menu cha: Nhân sự */}
                   <button
                     type="button"
-                    data-testid="sidebar-nav-leave-parent"
+                    data-testid="sidebar-nav-hr-parent"
+                    aria-expanded={!collapsed ? isHrExpanded : undefined}
                     onClick={() => {
                       if (collapsed) {
-                        onSelectModule('leave_logs');
-                      } else if (!isActive) {
-                        setIsLeaveExpanded(true);
-                        onSelectModule('leave_logs');
-                      } else {
-                        setIsLeaveExpanded((prev) => !prev);
-                      }
-                    }}
-                    title={collapsed ? item.label : undefined}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
-                      collapsed && isActive
-                        ? 'bg-white text-[#14539E] font-bold shadow-xs'
-                        : isParentHighlighted
-                        ? 'bg-white/15 text-white font-semibold'
-                        : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                    } ${collapsed ? 'justify-center' : 'justify-between'}`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Icon
-                        className={`w-5 h-5 shrink-0 ${
-                          collapsed && isActive
-                            ? 'text-[#14539E]'
-                            : isParentHighlighted
-                            ? 'text-white'
-                            : 'text-blue-100'
-                        }`}
-                      />
-                      {!collapsed && (
-                        <span className="truncate whitespace-nowrap">
-                          {item.label}
-                        </span>
-                      )}
-                    </div>
-
-                    {!collapsed && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md text-blue-100">
-                          {recordCount}
-                        </span>
-                        <span className="text-blue-100">
-                          {isLeaveExpanded ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </span>
-                      </div>
-                    )}
-                  </button>
-
-                  {/* 2 Menu con dưới "Nghỉ phép": Đơn nghỉ | Quỹ phép năm */}
-                  {!collapsed && isLeaveExpanded && (
-                    <div className="ml-5 pl-3 border-l border-white/30 space-y-1 py-0.5">
-                      {/* Sub-menu 1: Đơn nghỉ */}
-                      <button
-                        type="button"
-                        data-testid="sidebar-subnav-leave-requests"
-                        onClick={() =>
-                          handleSelectLeaveChild('leave_requests')
+                        onToggleCollapse();
+                        setIsHrExpanded(true);
+                        if (!isInsideHrModule) {
+                          onSelectModule('employees');
                         }
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
-                          isRequestsActive
-                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
-                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                        }`}
-                      >
-                        <FileText
-                          className={`w-4 h-4 shrink-0 ${
-                            isRequestsActive
-                              ? 'text-[#14539E]'
-                              : 'text-blue-100'
-                          }`}
-                        />
-                        <span className="leading-snug">Đơn nghỉ</span>
-                      </button>
-
-                      {/* Sub-menu 2: Quỹ phép năm */}
-                      <button
-                        type="button"
-                        data-testid="sidebar-subnav-leave-fund"
-                        onClick={() => handleSelectLeaveChild('leave_fund')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
-                          isFundActive
-                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
-                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                        }`}
-                      >
-                        <Wallet
-                          className={`w-4 h-4 shrink-0 ${
-                            isFundActive ? 'text-[#14539E]' : 'text-blue-100'
-                          }`}
-                        />
-                        <span className="leading-snug">Quỹ phép năm</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
-            // Menu đa cấp 2: "Báo cáo tổng hợp"
-            if (item.id === 'annual_report') {
-              const isParentHighlighted = isActive;
-              const isMonthlyActive =
-                isActive && reportSubTab === 'monthly_summary';
-              const isAnnualActive =
-                isActive && reportSubTab === 'annual_matrix';
-
-              return (
-                <div key={item.id} className="space-y-1">
-                  {/* Menu cha: Báo cáo tổng hợp */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (collapsed) {
-                        onSelectModule('annual_report');
-                      } else if (!isActive) {
-                        setIsReportsExpanded(true);
-                        onSelectModule('annual_report');
                       } else {
-                        setIsReportsExpanded((prev) => !prev);
+                        setIsHrExpanded((prev) => !prev);
                       }
                     }}
                     title={collapsed ? item.label : undefined}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
-                      collapsed && isActive
+                      collapsed && isParentHighlighted
                         ? 'bg-white text-[#14539E] font-bold shadow-xs'
                         : isParentHighlighted
                         ? 'bg-white/15 text-white font-semibold'
@@ -331,7 +297,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="flex items-center gap-3 min-w-0">
                       <Icon
                         className={`w-5 h-5 shrink-0 ${
-                          collapsed && isActive
+                          collapsed && isParentHighlighted
                             ? 'text-[#14539E]'
                             : isParentHighlighted
                             ? 'text-white'
@@ -347,7 +313,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                     {!collapsed && (
                       <span className="text-blue-100 shrink-0">
-                        {isReportsExpanded ? (
+                        {isHrExpanded ? (
                           <ChevronDown className="w-4 h-4" />
                         ) : (
                           <ChevronRight className="w-4 h-4" />
@@ -356,63 +322,62 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </button>
 
-                  {/* Các Menu con thụt lề + đường kẻ dọc mỏng dẫn hướng thị giác */}
-                  {!collapsed && isReportsExpanded && (
-                    <div className="ml-5 pl-3 border-l border-white/30 space-y-1 py-0.5">
-                      {/* Menu con 1: Báo cáo tháng */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleSelectReportChild('monthly_summary')
-                        }
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
-                          isMonthlyActive
-                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
-                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                        }`}
-                      >
-                        <CalendarRange
-                          className={`w-4 h-4 shrink-0 ${
-                            isMonthlyActive
-                              ? 'text-[#14539E]'
-                              : 'text-blue-100'
-                          }`}
-                        />
-                        <span className="leading-snug">Báo cáo tháng</span>
-                      </button>
-
-                      {/* Menu con 2: Báo cáo năm */}
-                      <button
-                        type="button"
-                        onClick={() => handleSelectReportChild('annual_matrix')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
-                          isAnnualActive
-                            ? 'bg-white text-[#14539E] font-bold shadow-sm'
-                            : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                        }`}
-                      >
-                        <Layers
-                          className={`w-4 h-4 shrink-0 ${
-                            isAnnualActive ? 'text-[#14539E]' : 'text-blue-100'
-                          }`}
-                        />
-                        <span className="leading-snug">Báo cáo năm</span>
-                      </button>
+                  {/* 5 Menu con bên trong Module "Nhân sự" (Thụt lề pl-3.5 + đường dẫn dọc) */}
+                  {!collapsed && isHrExpanded && (
+                    <div
+                      data-testid="sidebar-hr-children"
+                      className="ml-4 pl-3.5 border-l border-white/25 space-y-1 py-0.5"
+                    >
+                      {item.children.map((child) => {
+                        const ChildIcon = child.icon;
+                        const active = isChildActive(child.id);
+                        return (
+                          <button
+                            key={child.id}
+                            type="button"
+                            data-testid={child.testId}
+                            onClick={() => handleSelectHrChild(child.id)}
+                            className={`w-full flex items-center gap-2.5 pl-3 pr-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
+                              active
+                                ? 'bg-white text-[#14539E] font-bold shadow-sm'
+                                : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                            }`}
+                          >
+                            <ChildIcon
+                              className={`w-4 h-4 shrink-0 ${
+                                active ? 'text-[#14539E]' : 'text-blue-100'
+                              }`}
+                            />
+                            <span className="leading-snug truncate">
+                              {child.label}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               );
             }
 
-            // Các mục Menu cấp 1 thông thường
+            // Các mục Menu cấp 1 đơn: "Trang chủ" và "Hệ thống / Cài đặt"
+            const isTopActive =
+              (item.id === 'dashboard' && activeModule === 'dashboard') ||
+              (item.id === 'settings' && activeModule === 'settings');
+
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => onSelectModule(item.id)}
+                data-testid={`sidebar-nav-${item.id}`}
+                onClick={() =>
+                  onSelectModule(
+                    item.id === 'dashboard' ? 'dashboard' : 'settings'
+                  )
+                }
                 title={collapsed ? item.label : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
-                  isActive
+                  isTopActive
                     ? 'bg-white text-[#14539E] font-bold shadow-sm'
                     : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
                 } ${collapsed ? 'justify-center' : 'justify-between'}`}
@@ -420,7 +385,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center gap-3 min-w-0">
                   <Icon
                     className={`w-5 h-5 shrink-0 ${
-                      isActive ? 'text-[#14539E]' : 'text-blue-100'
+                      isTopActive ? 'text-[#14539E]' : 'text-blue-100'
                     }`}
                   />
                   {!collapsed && (
@@ -429,18 +394,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                   )}
                 </div>
-
-                {!collapsed && item.id === 'employees' && (
-                  <span
-                    className={`text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md ${
-                      isActive
-                        ? 'bg-blue-50 text-[#14539E] font-bold'
-                        : 'text-blue-100'
-                    }`}
-                  >
-                    {employeeCount}
-                  </span>
-                )}
               </button>
             );
           })}
@@ -531,35 +484,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Bottom Navigation Bar (< 768px) */}
       <nav
         aria-label="Điều hướng di động"
-        className={`no-print md:hidden fixed bottom-0 inset-x-0 z-40 h-14 bg-[#14539E] border-t border-white/15 grid ${
-          visibleNavItems.length === 5 ? 'grid-cols-5' : 'grid-cols-4'
-        } px-1 shadow-lg`}
+        className="no-print md:hidden fixed bottom-0 inset-x-0 z-40 h-14 bg-[#14539E] border-t border-white/15 flex items-center justify-around px-1 shadow-lg overflow-x-auto"
       >
-        {visibleNavItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeModule === item.id;
+        <button
+          type="button"
+          onClick={() => onSelectModule('dashboard')}
+          className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
+            activeModule === 'dashboard'
+              ? 'bg-white text-[#14539E] font-bold'
+              : 'text-white/80 hover:text-white'
+          }`}
+        >
+          <LayoutDashboard
+            className={`w-4 h-4 ${
+              activeModule === 'dashboard' ? 'text-[#14539E]' : 'text-blue-100'
+            }`}
+          />
+          <span className="text-[10px] leading-tight whitespace-nowrap">
+            Trang chủ
+          </span>
+        </button>
+
+        {NAVIGATION_DATA[1].children?.map((child) => {
+          const ChildIcon = child.icon;
+          const active = isChildActive(child.id);
           return (
             <button
-              key={item.id}
+              key={child.id}
               type="button"
-              onClick={() => onSelectModule(item.id)}
-              className={`flex flex-col items-center justify-center gap-0.5 rounded-lg my-1 mx-0.5 transition-colors cursor-pointer ${
-                isActive
+              onClick={() => handleSelectHrChild(child.id)}
+              className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
+                active
                   ? 'bg-white text-[#14539E] font-bold'
                   : 'text-white/80 hover:text-white'
               }`}
             >
-              <Icon
+              <ChildIcon
                 className={`w-4 h-4 ${
-                  isActive ? 'text-[#14539E]' : 'text-blue-100'
+                  active ? 'text-[#14539E]' : 'text-blue-100'
                 }`}
               />
-              <span className="text-[10px] leading-tight whitespace-nowrap truncate max-w-full px-1">
-                {item.shortLabel}
+              <span className="text-[10px] leading-tight whitespace-nowrap">
+                {child.shortLabel}
               </span>
             </button>
           );
         })}
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => onSelectModule('settings')}
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
+              activeModule === 'settings'
+                ? 'bg-white text-[#14539E] font-bold'
+                : 'text-white/80 hover:text-white'
+            }`}
+          >
+            <Settings
+              className={`w-4 h-4 ${
+                activeModule === 'settings' ? 'text-[#14539E]' : 'text-blue-100'
+              }`}
+            />
+            <span className="text-[10px] leading-tight whitespace-nowrap">
+              Cài đặt
+            </span>
+          </button>
+        )}
       </nav>
     </>
   );

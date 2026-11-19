@@ -136,18 +136,131 @@ function enforceCloudStrictCacheVersion(): void {
 
 enforceCloudStrictCacheVersion();
 
+function resolveRouteFromPathname(pathname: string): {
+  module: ActiveModule;
+  leaveSubTab: LeaveSubTab;
+  reportSubTab: ReportSubTab;
+} {
+  const clean = (pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
+  if (clean === '/danh-sach-nhan-su' || clean === '/nhan-su') {
+    return {
+      module: 'employees',
+      leaveSubTab: 'leave_requests',
+      reportSubTab: 'monthly_summary',
+    };
+  }
+  if (clean === '/don-nghi') {
+    return {
+      module: 'leave_logs',
+      leaveSubTab: 'leave_requests',
+      reportSubTab: 'monthly_summary',
+    };
+  }
+  if (clean === '/quy-phep-nam') {
+    return {
+      module: 'leave_logs',
+      leaveSubTab: 'leave_fund',
+      reportSubTab: 'monthly_summary',
+    };
+  }
+  if (clean === '/bao-cao-thang') {
+    return {
+      module: 'annual_report',
+      leaveSubTab: 'leave_requests',
+      reportSubTab: 'monthly_summary',
+    };
+  }
+  if (clean === '/bao-cao-nam') {
+    return {
+      module: 'annual_report',
+      leaveSubTab: 'leave_requests',
+      reportSubTab: 'annual_matrix',
+    };
+  }
+  if (clean === '/cai-dat' || clean === '/he-thong') {
+    return {
+      module: 'settings',
+      leaveSubTab: 'leave_requests',
+      reportSubTab: 'monthly_summary',
+    };
+  }
+  return {
+    module: 'dashboard',
+    leaveSubTab: 'leave_requests',
+    reportSubTab: 'monthly_summary',
+  };
+}
+
+function getPathnameForState(
+  module: ActiveModule,
+  leaveSubTab: LeaveSubTab,
+  reportSubTab: ReportSubTab
+): string {
+  if (module === 'employees') return '/danh-sach-nhan-su';
+  if (module === 'leave_logs') {
+    return leaveSubTab === 'leave_fund' ? '/quy-phep-nam' : '/don-nghi';
+  }
+  if (module === 'annual_report') {
+    return reportSubTab === 'annual_matrix' ? '/bao-cao-nam' : '/bao-cao-thang';
+  }
+  if (module === 'settings') return '/cai-dat';
+  return '/';
+}
+
 export default function App() {
   enforceCloudStrictCacheVersion();
 
-  const [activeModule, setActiveModule] = useState<ActiveModule>('dashboard');
-  const [leaveSubTab, setLeaveSubTab] =
-    useState<LeaveSubTab>('leave_requests');
-  const [reportSubTab, setReportSubTab] =
-    useState<ReportSubTab>('monthly_summary');
+  const initialRoute =
+    typeof window !== 'undefined'
+      ? resolveRouteFromPathname(window.location.pathname)
+      : {
+          module: 'dashboard' as ActiveModule,
+          leaveSubTab: 'leave_requests' as LeaveSubTab,
+          reportSubTab: 'monthly_summary' as ReportSubTab,
+        };
+
+  const [activeModule, setActiveModule] = useState<ActiveModule>(
+    initialRoute.module
+  );
+  const [leaveSubTab, setLeaveSubTab] = useState<LeaveSubTab>(
+    initialRoute.leaveSubTab
+  );
+  const [reportSubTab, setReportSubTab] = useState<ReportSubTab>(
+    initialRoute.reportSubTab
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isProcessingData, setIsProcessingData] = useState<boolean>(false);
+
+  // Sync URL pathname with current active navigation item & listen to browser back/forward
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const targetPath = getPathnameForState(
+      activeModule,
+      leaveSubTab,
+      reportSubTab
+    );
+    if (window.location.pathname !== targetPath) {
+      window.history.replaceState(
+        null,
+        '',
+        `${targetPath}${window.location.search}${window.location.hash}`
+      );
+    }
+  }, [activeModule, leaveSubTab, reportSubTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      const resolved = resolveRouteFromPathname(window.location.pathname);
+      setActiveModule(resolved.module);
+      setLeaveSubTab(resolved.leaveSubTab);
+      setReportSubTab(resolved.reportSubTab);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Check if already initialized locally
   const [localInitialized] = useState<boolean>(() => {
