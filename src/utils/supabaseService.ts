@@ -2209,3 +2209,157 @@ export async function syncLocalLeaveLogsToSupabase(
   };
 }
 
+/**
+ * Cấu trúc dữ liệu bản ghi Tăng ca (OvertimeRecord) lưu vào bảng `overtime_records`
+ */
+export interface OvertimeRecord {
+  id?: string;
+  employee_id: string;
+  employee_code?: string;
+  employee_name?: string;
+  department: string;
+  overtime_date: string;
+  reason_vi: string;
+  reason_kr: string;
+  start_time: string;
+  end_time: string;
+  total_hours: number;
+  block_id?: string;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  created_at?: string;
+}
+
+export interface OvertimeBlockForFlatten {
+  id: string;
+  reasonVi: string;
+  reasonKr: string;
+  startTime: string;
+  endTime: string;
+  selectedEmployeeIds: string[];
+}
+
+/**
+ * Thuật toán Flatten (Phẳng hóa):
+ * Duyệt qua từng Block (Nhóm công việc), bóc tách danh sách nhân viên đã chọn
+ * để tạo ra mảng các dòng riêng biệt (mỗi nhân viên 1 dòng) trước khi Insert/Update vào bảng `overtime_records`.
+ */
+export function flattenOvertimeBlocksToRecords(
+  blocks: OvertimeBlockForFlatten[],
+  department: string,
+  overtimeDate: string,
+  employees: Employee[] = []
+): OvertimeRecord[] {
+  const empById = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+  const flattened: OvertimeRecord[] = [];
+
+  for (const block of blocks) {
+    const [startH, startM] = (block.startTime || '00:00').split(':').map(Number);
+    const [endH, endM] = (block.endTime || '00:00').split(':').map(Number);
+    const diffMinutes =
+      !Number.isNaN(startH) &&
+      !Number.isNaN(startM) &&
+      !Number.isNaN(endH) &&
+      !Number.isNaN(endM)
+        ? endH * 60 + endM - (startH * 60 + startM)
+        : 0;
+    const totalHours =
+      diffMinutes > 0 ? Number((diffMinutes / 60).toFixed(2)) : 0;
+
+    for (const empId of block.selectedEmployeeIds) {
+      const emp = empById.get(empId);
+      flattened.push({
+        employee_id: empId,
+        employee_code: emp?.employeeCode || '',
+        employee_name: emp?.fullName || '',
+        department:
+          department && department !== 'ALL'
+            ? department
+            : emp?.department || 'Kỹ Thuật',
+        overtime_date: overtimeDate,
+        reason_vi: block.reasonVi.trim(),
+        reason_kr: block.reasonKr.trim(),
+        start_time: block.startTime,
+        end_time: block.endTime,
+        total_hours: totalHours,
+        block_id: block.id,
+        is_deleted: false,
+        deleted_at: null,
+      });
+    }
+  }
+
+  return flattened;
+}
+
+/**
+ * Lưu danh sách các dòng tăng ca đã phẳng hóa (OvertimeRecord[]) vào bảng `overtime_records` trên Supabase.
+ * Tự động đồng bộ an toàn kèm cơ chế lưu dự phòng localStorage nếu bảng `overtime_records` chưa được migrate trên Cloud.
+ */
+export async function insertOvertimeRecords(
+  records: OvertimeRecord[]
+): Promise<OvertimeRecord[]> {
+  if (!Array.isArray(records) || records.length === 0) {
+    return [];
+  }
+
+  const dbPayload = records.map((rec) => ({
+    employee_id: rec.employee_id,
+    employee_code: rec.employee_code || null,
+    employee_name: rec.employee_name || null,
+    department: rec.department,
+    overtime_date: rec.overtime_date,
+    reason_vi: rec.reason_vi,
+    reason_kr: rec.reason_kr,
+    start_time: rec.start_time,
+    end_time: rec.end_time,
+    total_hours: rec.total_hours,
+    block_id: rec.block_id || null,
+    is_deleted: false,
+  }));
+
+  try {
+    const inserted = await supabaseRestFetch<OvertimeRecord[]>(
+      'overtime_records?select=*',
+      {
+        method: 'POST',
+        headers: {
+          Prefer: 'return=representation,resolution=merge-duplicates',
+        },
+        body: JSON.stringify(dbPayload),
+      }
+    );
+
+    if (inserted && inserted.length > 0) {
+      return inserted;
+    }
+  } catch {
+    // Fallback an toàn vào localStorage để đảm bảo luồng xuất Excel/PDF luôn hoạt động mượt mà
+    try {
+      const storageKey = 'hr_pro_overtime_records_v2';
+      const existingRaw = localStorage.getItem(storageKey);
+      const existingList: OvertimeRecord[] = existingRaw
+        ? JSON.parse(existingRaw)
+        : [];
+      const stamped = records.map((r, idx) => ({
+        ...r,
+        id: r.id || `ot-rec-${Date.now()}-${idx}`,
+        created_at: new Date().toISOString(),
+      }));
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify([...stamped, ...existingList])
+      );
+      return stamped;
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  return records.map((r, idx) => ({
+    ...r,
+    id: r.id || `ot-rec-${Date.now()}-${idx}`,
+    created_at: new Date().toISOString(),
+  }));
+}
+
