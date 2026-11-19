@@ -22,6 +22,7 @@ import {
   exportAnnualLeaveFundToExcel,
   OpeningBalanceImportRow,
 } from '../utils/exportUtils';
+import { formatNumberVN } from '../utils/errorAndSecurityService';
 import { OpeningBalanceImportModal } from './OpeningBalanceImportModal';
 import { AnnualLeaveRulesModal } from './AnnualLeaveRulesModal';
 
@@ -190,7 +191,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
     currentMonth,
   ]);
 
-  const fmtZero = (val: number) => (val === 0 ? '-' : val);
+  const fmtZero = (val: number) => formatNumberVN(val, true);
 
   return (
     <div className="space-y-3">
@@ -202,7 +203,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
             Quỹ phép năm ({currentYear})
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Tổng số: <strong className="font-semibold text-slate-700">{fundRows.length}</strong> nhân sự
+            Tổng số: <strong className="font-semibold text-slate-700">{formatNumberVN(fundRows.length)}</strong> nhân sự
           </p>
         </div>
 
@@ -309,12 +310,12 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
 
       {/* HÀNG 2: BẢNG DỮ LIỆU PHƯƠNG TRÌNH TOÁN HỌC MINH BẠCH (Zero-Noise: 0 -> "-") */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="max-h-[calc(100vh-220px)] overflow-y-auto overflow-x-auto relative">
           <table
             data-testid="annual-leave-fund-table"
             className="w-full text-left border-collapse text-xs"
           >
-            <thead>
+            <thead className="sticky top-0 z-20 bg-slate-50 shadow-2xs">
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
                 <th className="px-2 py-1.5 border-r border-slate-200 whitespace-nowrap w-24">
                   Mã NV
@@ -446,7 +447,7 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
                             : 'text-red-600'
                         }`}
                       >
-                        {row.remainingLeave === 0 ? '-' : row.remainingLeave}
+                        {fmtZero(row.remainingLeave)}
                       </td>
                     </tr>
                   );

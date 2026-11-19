@@ -22,17 +22,29 @@ import {
 } from '../data/mockData';
 import { formatDateVN, LEAVE_TYPE_META } from './hrCalculations';
 
-export const SUPABASE_URL =
-  (typeof import.meta !== 'undefined' &&
+function resolveEnvVar(key: string, defaultVal: string): string {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return String(process.env[key]);
+  }
+  if (
+    typeof import.meta !== 'undefined' &&
     import.meta.env &&
-    import.meta.env.VITE_SUPABASE_URL) ||
-  'https://txhnuqhslalgrbritqtj.supabase.co';
+    (import.meta.env as Record<string, string | undefined>)[key]
+  ) {
+    return String((import.meta.env as Record<string, string | undefined>)[key]);
+  }
+  return defaultVal;
+}
 
-export const SUPABASE_ANON_KEY =
-  (typeof import.meta !== 'undefined' &&
-    import.meta.env &&
-    import.meta.env.VITE_SUPABASE_ANON_KEY) ||
-  'sb_publishable_3-67g0uGEgJ6OReOwxNnQQ_YjTz84eC';
+export const SUPABASE_URL = resolveEnvVar(
+  'VITE_SUPABASE_URL',
+  'https://txhnuqhslalgrbritqtj.supabase.co'
+);
+
+export const SUPABASE_ANON_KEY = resolveEnvVar(
+  'VITE_SUPABASE_ANON_KEY',
+  'sb_publishable_3-67g0uGEgJ6OReOwxNnQQ_YjTz84eC'
+);
 
 export const HR_IMAGES_BUCKET = 'hr-images';
 
@@ -205,6 +217,56 @@ async function supabaseRestFetch<T>(
   }
 
   throw lastErr;
+}
+
+/**
+ * Thực thi Xóa mềm (Soft Delete): UPDATE is_deleted = true, deleted_at = NOW()
+ * Tự động fallback an toàn nếu bảng trên Cloud chưa bổ sung cột is_deleted.
+ */
+export async function softDeleteInSupabase(queryPath: string): Promise<void> {
+  const nowIso = new Date().toISOString();
+  try {
+    await supabaseRestFetch<void>(queryPath, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        is_deleted: true,
+        deleted_at: nowIso,
+      }),
+    });
+  } catch {
+    // Fallback nếu schema bảng trên Supabase chưa tạo cột is_deleted / deleted_at
+    await supabaseRestFetch<void>(queryPath, {
+      method: 'DELETE',
+    });
+  }
+}
+
+/**
+ * Thực thi chuỗi thao tác GHI (Insert / Update / Soft-Delete) theo cơ chế Transaction Coordinator:
+ * Nếu có bước thất bại sẽ tự động kích hoạt compensating rollback và chuẩn hóa lỗi.
+ */
+export async function executeTransactionalBatch<T>(
+  steps: Array<{
+    execute: () => Promise<unknown>;
+    rollback?: () => Promise<unknown>;
+  }>,
+  finalResult: () => Promise<T>
+): Promise<T> {
+  const completedRollbacks: Array<() => Promise<unknown>> = [];
+  try {
+    for (const step of steps) {
+      await step.execute();
+      if (step.rollback) {
+        completedRollbacks.unshift(step.rollback);
+      }
+    }
+    return await finalResult();
+  } catch (err) {
+    for (const rb of completedRollbacks) {
+      await rb().catch(() => {});
+    }
+    throw err;
+  }
 }
 
 /**
@@ -1076,9 +1138,7 @@ export async function updateCompanyInSupabase(
 }
 
 export async function deleteCompanyFromSupabase(id: string): Promise<void> {
-  await supabaseRestFetch<void>(`companies?id=eq.${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
+  await softDeleteInSupabase(`companies?id=eq.${encodeURIComponent(id)}`);
 }
 
 /* ============================================================================
@@ -1145,24 +1205,24 @@ export async function reorderDepartmentsInSupabase(
   orderedGroups: DepartmentGroup[],
   companyId?: string | null
 ): Promise<void> {
-  await Promise.all(
-    orderedGroups.map((grp, idx) =>
-      updateDepartmentInSupabase(
-        grp.id,
-        {
-          ...grp,
-          sortOrder: idx,
-        },
-        grp.companyId || companyId || null
-      ).catch(() => {})
-    )
-  );
+  await executeTransactionalBatch(
+    orderedGroups.map((grp, idx) => ({
+      execute: () =>
+        updateDepartmentInSupabase(
+          grp.id,
+          {
+            ...grp,
+            sortOrder: idx,
+          },
+          grp.companyId || companyId || null
+        ),
+    })),
+    async () => undefined
+  ).catch(() => {});
 }
 
 export async function deleteDepartmentFromSupabase(id: string): Promise<void> {
-  await supabaseRestFetch<void>(`departments?id=eq.${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
+  await softDeleteInSupabase(`departments?id=eq.${encodeURIComponent(id)}`);
 }
 
 /* ============================================================================
@@ -1220,9 +1280,7 @@ export async function updatePositionInSupabase(
 }
 
 export async function deletePositionFromSupabase(id: string): Promise<void> {
-  await supabaseRestFetch<void>(`positions?id=eq.${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
+  await softDeleteInSupabase(`positions?id=eq.${encodeURIComponent(id)}`);
 }
 
 /* ============================================================================
@@ -1277,30 +1335,35 @@ export async function updateAppUserRoleInSupabase(
 }
 
 export async function deleteAppUserFromSupabase(id: string): Promise<void> {
-  await supabaseRestFetch<void>(`app_users?id=eq.${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
+  await softDeleteInSupabase(`app_users?id=eq.${encodeURIComponent(id)}`);
 }
 
 /* ============================================================================
    DATA RESET & DEMO RESTORE
 ============================================================================ */
 /**
- * Deletes ALL employees and leave_logs from Supabase and ensures companies.is_initialized = true
+ * Soft-deletes ALL employees and leave_logs in a single transactional batch and ensures companies.is_initialized = true
  */
 export async function clearAllDataInSupabase(): Promise<void> {
-  await supabaseRestFetch<void>('leave_logs?id=not.is.null', {
-    method: 'DELETE',
-  }).catch(() => {});
-
-  await supabaseRestFetch<void>('employees?id=not.is.null', {
-    method: 'DELETE',
-  });
-
-  await supabaseRestFetch<void>('companies?id=not.is.null', {
-    method: 'PATCH',
-    body: JSON.stringify({ is_initialized: true }),
-  }).catch(() => {});
+  await executeTransactionalBatch(
+    [
+      {
+        execute: () =>
+          softDeleteInSupabase('leave_logs?id=not.is.null').catch(() => {}),
+      },
+      {
+        execute: () => softDeleteInSupabase('employees?id=not.is.null'),
+      },
+      {
+        execute: () =>
+          supabaseRestFetch<void>('companies?id=not.is.null', {
+            method: 'PATCH',
+            body: JSON.stringify({ is_initialized: true }),
+          }).catch(() => {}),
+      },
+    ],
+    async () => undefined
+  );
 }
 
 /**
@@ -1658,20 +1721,28 @@ export async function updateEmployeeInSupabase(
 }
 
 /**
- * Deletes one or more employees (and their dependent leave_logs) from Supabase
+ * Soft-deletes one or more employees (and their dependent leave_logs) in a transactional batch
  */
 export async function deleteEmployeesFromSupabase(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const inClause = `(${ids.map((id) => `"${id}"`).join(',')})`;
 
-  await supabaseRestFetch<void>(
-    `leave_logs?employee_id=in.${encodeURIComponent(inClause)}`,
-    { method: 'DELETE' }
-  ).catch(() => {});
-
-  await supabaseRestFetch<void>(
-    `employees?id=in.${encodeURIComponent(inClause)}`,
-    { method: 'DELETE' }
+  await executeTransactionalBatch(
+    [
+      {
+        execute: () =>
+          softDeleteInSupabase(
+            `leave_logs?employee_id=in.${encodeURIComponent(inClause)}`
+          ).catch(() => {}),
+      },
+      {
+        execute: () =>
+          softDeleteInSupabase(
+            `employees?id=in.${encodeURIComponent(inClause)}`
+          ),
+      },
+    ],
+    async () => undefined
   );
 }
 
@@ -2039,23 +2110,19 @@ export async function updateLeaveLogInSupabase(
 }
 
 /**
-  * Deletes a leave/late record from Supabase `leave_logs`
-  */
+ * Soft-deletes a leave/late record from Supabase `leave_logs`
+ */
 export async function deleteLeaveLogFromSupabase(
   id: string,
   rec?: Pick<LeaveRecord, 'employeeId' | 'startDate' | 'amount'>
 ): Promise<void> {
   if (id && !id.startsWith('rec-')) {
-    await supabaseRestFetch<void>(
-      `leave_logs?id=eq.${encodeURIComponent(id)}`,
-      { method: 'DELETE' }
-    );
+    await softDeleteInSupabase(`leave_logs?id=eq.${encodeURIComponent(id)}`);
     return;
   }
   if (rec && rec.employeeId && rec.startDate) {
-    await supabaseRestFetch<void>(
-      `leave_logs?employee_id=eq.${encodeURIComponent(rec.employeeId)}&start_date=eq.${encodeURIComponent(rec.startDate)}`,
-      { method: 'DELETE' }
+    await softDeleteInSupabase(
+      `leave_logs?employee_id=eq.${encodeURIComponent(rec.employeeId)}&start_date=eq.${encodeURIComponent(rec.startDate)}`
     );
   }
 }

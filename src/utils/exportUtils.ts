@@ -1029,7 +1029,7 @@ export function exportAnnualLeaveFundToExcel(
       <meta charset="UTF-8" />
       <style>
         table { border-collapse: collapse; font-family: Times New Roman, Arial, sans-serif; font-size: 11pt; }
-        th { background-color: #14539E; color: #FFFFFF; font-weight: bold; padding: 8px 10px; border: 1px solid #1e3a8a; }
+        th { background-color: #14539E; color: #FFFFFF; font-weight: bold; padding: 8px 10px; border: 1px solid #14539E; }
         td { padding: 6px 8px; border: 1px solid #CBD5E1; }
       </style>
     </head>

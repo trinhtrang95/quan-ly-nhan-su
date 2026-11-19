@@ -84,6 +84,11 @@ import {
   applyThemeToDocument,
   loadSavedThemeConfig,
 } from './utils/themeManager';
+import { HRRouteManager, useHRRouteSync } from './utils/routeManager';
+import {
+  getFriendlyErrorMessage,
+  maskSensitiveUserAccount,
+} from './utils/errorAndSecurityService';
 
 const DATA_VERSION = 'v2_cloud_strict';
 
@@ -136,83 +141,12 @@ function enforceCloudStrictCacheVersion(): void {
 
 enforceCloudStrictCacheVersion();
 
-function resolveRouteFromPathname(pathname: string): {
-  module: ActiveModule;
-  leaveSubTab: LeaveSubTab;
-  reportSubTab: ReportSubTab;
-} {
-  const clean = (pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
-  if (clean === '/danh-sach-nhan-su' || clean === '/nhan-su') {
-    return {
-      module: 'employees',
-      leaveSubTab: 'leave_requests',
-      reportSubTab: 'monthly_summary',
-    };
-  }
-  if (clean === '/don-nghi') {
-    return {
-      module: 'leave_logs',
-      leaveSubTab: 'leave_requests',
-      reportSubTab: 'monthly_summary',
-    };
-  }
-  if (clean === '/quy-phep-nam') {
-    return {
-      module: 'leave_logs',
-      leaveSubTab: 'leave_fund',
-      reportSubTab: 'monthly_summary',
-    };
-  }
-  if (clean === '/bao-cao-thang') {
-    return {
-      module: 'annual_report',
-      leaveSubTab: 'leave_requests',
-      reportSubTab: 'monthly_summary',
-    };
-  }
-  if (clean === '/bao-cao-nam') {
-    return {
-      module: 'annual_report',
-      leaveSubTab: 'leave_requests',
-      reportSubTab: 'annual_matrix',
-    };
-  }
-  if (clean === '/cai-dat' || clean === '/he-thong') {
-    return {
-      module: 'settings',
-      leaveSubTab: 'leave_requests',
-      reportSubTab: 'monthly_summary',
-    };
-  }
-  return {
-    module: 'dashboard',
-    leaveSubTab: 'leave_requests',
-    reportSubTab: 'monthly_summary',
-  };
-}
-
-function getPathnameForState(
-  module: ActiveModule,
-  leaveSubTab: LeaveSubTab,
-  reportSubTab: ReportSubTab
-): string {
-  if (module === 'employees') return '/danh-sach-nhan-su';
-  if (module === 'leave_logs') {
-    return leaveSubTab === 'leave_fund' ? '/quy-phep-nam' : '/don-nghi';
-  }
-  if (module === 'annual_report') {
-    return reportSubTab === 'annual_matrix' ? '/bao-cao-nam' : '/bao-cao-thang';
-  }
-  if (module === 'settings') return '/cai-dat';
-  return '/';
-}
-
 export default function App() {
   enforceCloudStrictCacheVersion();
 
   const initialRoute =
     typeof window !== 'undefined'
-      ? resolveRouteFromPathname(window.location.pathname)
+      ? HRRouteManager.resolveFromPathname(window.location.pathname)
       : {
           module: 'dashboard' as ActiveModule,
           leaveSubTab: 'leave_requests' as LeaveSubTab,
@@ -233,34 +167,12 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isProcessingData, setIsProcessingData] = useState<boolean>(false);
 
-  // Sync URL pathname with current active navigation item & listen to browser back/forward
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const targetPath = getPathnameForState(
-      activeModule,
-      leaveSubTab,
-      reportSubTab
-    );
-    if (window.location.pathname !== targetPath) {
-      window.history.replaceState(
-        null,
-        '',
-        `${targetPath}${window.location.search}${window.location.hash}`
-      );
-    }
-  }, [activeModule, leaveSubTab, reportSubTab]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handlePopState = () => {
-      const resolved = resolveRouteFromPathname(window.location.pathname);
-      setActiveModule(resolved.module);
-      setLeaveSubTab(resolved.leaveSubTab);
-      setReportSubTab(resolved.reportSubTab);
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  // Đồng bộ URL định tuyến thông qua Custom Hook độc lập (useHRRouteSync)
+  useHRRouteSync(activeModule, leaveSubTab, reportSubTab, (resolved) => {
+    setActiveModule(resolved.module);
+    setLeaveSubTab(resolved.leaveSubTab);
+    setReportSubTab(resolved.reportSubTab);
+  });
 
   // Check if already initialized locally
   const [localInitialized] = useState<boolean>(() => {
@@ -1390,7 +1302,7 @@ export default function App() {
       positions,
       employees,
       records,
-      accounts,
+      accounts: accounts.map(maskSensitiveUserAccount),
     };
 
     const jsonString = JSON.stringify(payload, null, 2);
@@ -1415,11 +1327,14 @@ export default function App() {
       setRecords(synced.records);
       setIsCloudConnected(true);
       showToast(
-        `Đã đồng bộ thành công lên Supabase Cloud! (Đẩy mới ${synced.syncedCount} bản ghi, tổng ${synced.records.length} bản ghi trên Cloud).`
+        `Đã đồng bộ dữ liệu thành công lên hệ thống Cloud! (Cập nhật mới ${synced.syncedCount} bản ghi, tổng ${synced.records.length} bản ghi).`
       );
     } catch (err) {
       showToast(
-        `Không thể đồng bộ lên Supabase. Vui lòng kiểm tra bảng leave_logs hoặc chạy mã SQL chuẩn hóa. (${err instanceof Error ? err.message : 'Lỗi kết nối'})`
+        getFriendlyErrorMessage(
+          err,
+          'Đã xảy ra lỗi hệ thống khi đồng bộ dữ liệu, vui lòng thử lại sau.'
+        )
       );
     } finally {
       setIsProcessingData(false);
@@ -1443,12 +1358,12 @@ export default function App() {
       await clearAllDataInSupabase();
       showToast(
         autoBackupFirst
-          ? 'Đã tải bản sao lưu (.json) và xóa trắng toàn bộ dữ liệu nhân sự, phép năm trên Supabase về 0.'
-          : 'Đã xóa trắng toàn bộ dữ liệu trên Supabase (employees & leave_logs = 0) và làm mới hệ thống.'
+          ? 'Đã tải bản sao lưu (.json) và làm mới toàn bộ dữ liệu nhân sự, phép năm trên hệ thống.'
+          : 'Đã làm mới toàn bộ dữ liệu nhân sự và đơn nghỉ phép trên hệ thống.'
       );
     } catch {
       showToast(
-        'Đã xóa trắng toàn bộ dữ liệu nhân sự và nghỉ phép về 0.'
+        'Đã làm mới toàn bộ dữ liệu nhân sự và đơn nghỉ phép về trạng thái ban đầu.'
       );
     } finally {
       setIsProcessingData(false);
