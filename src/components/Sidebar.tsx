@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -6,6 +6,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   LogOut,
   ShieldCheck,
   UserCheck,
@@ -143,26 +145,68 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCloudConnected = true,
   onLogoutClick,
 }) => {
+  const isAdmin = currentUser.role === 'admin';
+  const visibleNavItems = useMemo(
+    () => NAVIGATION_DATA.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin]
+  );
+
+  // Danh sách ID các Menu cha dạng Accordion (có menu con)
+  const expandableParentIds = useMemo(
+    () =>
+      visibleNavItems
+        .filter((item) => Array.isArray(item.children) && item.children.length > 0)
+        .map((item) => item.id),
+    [visibleNavItems]
+  );
+
   // Kiểm tra xem người dùng có đang đứng ở một trong 5 menu con của Module "Nhân sự" hay không
   const isInsideHrModule =
     activeModule === 'employees' ||
     activeModule === 'leave_logs' ||
     activeModule === 'annual_report';
 
-  // Mặc định mở rộng Module "Nhân sự" (Accordion)
-  const [isHrExpanded, setIsHrExpanded] = useState<boolean>(true);
+  // Global state quản lý trạng thái đóng/mở chung của tất cả các Menu cha
+  const [isAllExpanded, setIsAllExpanded] = useState<boolean>(true);
 
-  // Đảm bảo khi đang đứng ở bất kỳ menu con nào của Module "Nhân sự", menu cha luôn ở trạng thái mở (Expanded)
+  // State chi tiết từng Menu cha để đồng bộ với isAllExpanded và vẫn cho phép đóng/mở từng phân hệ
+  const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>(() => ({
+    hr_module: true,
+  }));
+
+  // Đảm bảo khi chuyển sang bất kỳ menu con nào của Module "Nhân sự", menu cha luôn tự động mở (Expanded)
   useEffect(() => {
     if (isInsideHrModule) {
-      setIsHrExpanded(true);
+      setExpandedMap((prev) => {
+        const next: Record<string, boolean> = { ...prev, hr_module: true };
+        const allOpen = expandableParentIds.every((id) => Boolean(next[id]));
+        setIsAllExpanded(allOpen);
+        return next;
+      });
     }
-  }, [isInsideHrModule, activeModule, leaveSubTab, reportSubTab]);
+  }, [isInsideHrModule, activeModule, leaveSubTab, reportSubTab, expandableParentIds]);
 
-  const isAdmin = currentUser.role === 'admin';
-  const visibleNavItems = NAVIGATION_DATA.filter(
-    (item) => !item.adminOnly || isAdmin
-  );
+  // Hàm xử lý nút "Thu gọn tất cả / Mở rộng tất cả"
+  const handleToggleAllExpanded = () => {
+    const nextExpanded = !isAllExpanded;
+    setIsAllExpanded(nextExpanded);
+    const updatedMap: Record<string, boolean> = {};
+    for (const id of expandableParentIds) {
+      updatedMap[id] = nextExpanded;
+    }
+    setExpandedMap(updatedMap);
+  };
+
+  // Hàm xử lý đóng/mở từng Menu cha riêng lẻ và đồng bộ ngược lại với isAllExpanded
+  const handleToggleSingleParent = (parentId: string) => {
+    setExpandedMap((prev) => {
+      const nextVal = !prev[parentId];
+      const next: Record<string, boolean> = { ...prev, [parentId]: nextVal };
+      const allOpen = expandableParentIds.every((id) => Boolean(next[id]));
+      setIsAllExpanded(allOpen);
+      return next;
+    });
+  };
 
   const userInitials = (() => {
     const parts = currentUser.fullName.trim().split(' ').filter(Boolean);
@@ -194,7 +238,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const handleSelectHrChild = (childId: HrChildMenuId) => {
-    setIsHrExpanded(true);
+    setExpandedMap((prev) => {
+      const next: Record<string, boolean> = { ...prev, hr_module: true };
+      const allOpen = expandableParentIds.every((id) => Boolean(next[id]));
+      setIsAllExpanded(allOpen);
+      return next;
+    });
+
     switch (childId) {
       case 'employees_list':
         onSelectModule('employees');
@@ -217,6 +267,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         break;
     }
   };
+
+  const toggleAllTextLabel = isAllExpanded ? 'Thu gọn' : 'Mở tất cả';
 
   return (
     <>
@@ -259,39 +311,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Links (ERP Module Parent-Children Structure) */}
-        <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 px-3 pt-3 pb-4 space-y-1.5 overflow-y-auto">
+          {/* Nút Text "Thu gọn" / "Mở tất cả" ở mép phải trên cùng của khu vực menu */}
+          {!collapsed && (
+            <div className="flex items-center justify-end px-2 pb-1">
+              <button
+                type="button"
+                onClick={handleToggleAllExpanded}
+                data-testid="sidebar-toggle-all-btn"
+                className="text-sm text-white/70 hover:text-white font-medium cursor-pointer transition-colors"
+              >
+                {toggleAllTextLabel}
+              </button>
+            </div>
+          )}
+
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
 
             // Module cha dạng Accordion: "Nhân sự" (gồm 5 menu con)
             if (item.id === 'hr_module' && item.children) {
               const isParentHighlighted = isInsideHrModule;
+              const isModuleExpanded = Boolean(expandedMap[item.id]);
 
               return (
                 <div key={item.id} className="space-y-1">
-                  {/* Menu cha: Nhân sự */}
+                  {/* Menu cha: Nhân sự (bg-transparent, chỉ hover:bg-white/10) */}
                   <button
                     type="button"
                     data-testid="sidebar-nav-hr-parent"
-                    aria-expanded={!collapsed ? isHrExpanded : undefined}
+                    aria-expanded={!collapsed ? isModuleExpanded : undefined}
                     onClick={() => {
                       if (collapsed) {
                         onToggleCollapse();
-                        setIsHrExpanded(true);
+                        setExpandedMap((prev) => ({
+                          ...prev,
+                          [item.id]: true,
+                        }));
+                        setIsAllExpanded(true);
                         if (!isInsideHrModule) {
                           onSelectModule('employees');
                         }
                       } else {
-                        setIsHrExpanded((prev) => !prev);
+                        handleToggleSingleParent(item.id);
                       }
                     }}
                     title={collapsed ? item.label : undefined}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
                       collapsed && isParentHighlighted
                         ? 'bg-white text-[#14539E] font-bold shadow-xs'
-                        : isParentHighlighted
-                        ? 'bg-white/15 text-white font-semibold'
-                        : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                        : 'bg-transparent text-white hover:bg-white/10 font-semibold'
                     } ${collapsed ? 'justify-center' : 'justify-between'}`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
@@ -299,9 +368,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         className={`w-5 h-5 shrink-0 ${
                           collapsed && isParentHighlighted
                             ? 'text-[#14539E]'
-                            : isParentHighlighted
-                            ? 'text-white'
-                            : 'text-blue-100'
+                            : 'text-white'
                         }`}
                       />
                       {!collapsed && (
@@ -312,8 +379,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
 
                     {!collapsed && (
-                      <span className="text-blue-100 shrink-0">
-                        {isHrExpanded ? (
+                      <span className="text-white/80 shrink-0 transition-transform duration-200">
+                        {isModuleExpanded ? (
                           <ChevronDown className="w-4 h-4" />
                         ) : (
                           <ChevronRight className="w-4 h-4" />
@@ -322,38 +389,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </button>
 
-                  {/* 5 Menu con bên trong Module "Nhân sự" (Thụt lề pl-3.5 + đường dẫn dọc) */}
-                  {!collapsed && isHrExpanded && (
+                  {/* 5 Menu con bên trong Module "Nhân sự" với đường kẻ dọc liền mạch border-white/20 */}
+                  {!collapsed && (
                     <div
-                      data-testid="sidebar-hr-children"
-                      className="ml-4 pl-3.5 border-l border-white/25 space-y-1 py-0.5"
+                      aria-hidden={!isModuleExpanded}
+                      className={`grid transition-all duration-200 ease-in-out ${
+                        isModuleExpanded
+                          ? 'grid-rows-[1fr] opacity-100'
+                          : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+                      }`}
                     >
-                      {item.children.map((child) => {
-                        const ChildIcon = child.icon;
-                        const active = isChildActive(child.id);
-                        return (
-                          <button
-                            key={child.id}
-                            type="button"
-                            data-testid={child.testId}
-                            onClick={() => handleSelectHrChild(child.id)}
-                            className={`w-full flex items-center gap-2.5 pl-3 pr-3 py-2 rounded-lg text-xs transition-all cursor-pointer text-left ${
-                              active
-                                ? 'bg-white text-[#14539E] font-bold shadow-sm'
-                                : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
-                            }`}
-                          >
-                            <ChildIcon
-                              className={`w-4 h-4 shrink-0 ${
-                                active ? 'text-[#14539E]' : 'text-blue-100'
-                              }`}
-                            />
-                            <span className="leading-snug truncate">
-                              {child.label}
-                            </span>
-                          </button>
-                        );
-                      })}
+                      <div className="overflow-hidden">
+                        <div
+                          data-testid="sidebar-hr-children"
+                          className="relative ml-5 border-l border-white/20 space-y-1"
+                        >
+                          {item.children.map((child) => {
+                            const ChildIcon = child.icon;
+                            const active = isChildActive(child.id);
+                            return (
+                              <div key={child.id} className="relative pl-3">
+                                {active && (
+                                  <span
+                                    aria-hidden="true"
+                                    data-testid="sidebar-active-tree-indicator"
+                                    className="absolute left-[-2px] top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#F59E0B] rounded-full z-10"
+                                  />
+                                )}
+                                <button
+                                  type="button"
+                                  tabIndex={isModuleExpanded ? 0 : -1}
+                                  data-testid={child.testId}
+                                  onClick={() => handleSelectHrChild(child.id)}
+                                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs transition-all cursor-pointer text-left ${
+                                    active
+                                      ? 'bg-white text-[#14539E] font-bold shadow-sm'
+                                      : 'text-white/80 hover:bg-white/10 hover:text-white font-medium'
+                                  }`}
+                                >
+                                  <ChildIcon
+                                    className={`w-4 h-4 shrink-0 ${
+                                      active ? 'text-[#F59E0B]' : 'text-blue-100'
+                                    }`}
+                                  />
+                                  <span className="leading-snug truncate">
+                                    {child.label}
+                                  </span>
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
