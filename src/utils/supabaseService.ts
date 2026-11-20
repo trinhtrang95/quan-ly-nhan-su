@@ -2232,6 +2232,7 @@ export interface OvertimeRecord {
 
 export interface OvertimeBlockForFlatten {
   id: string;
+  overtimeDate?: string;
   reasonVi: string;
   reasonKr: string;
   startTime: string;
@@ -2243,6 +2244,7 @@ export interface OvertimeBlockForFlatten {
  * Thuật toán Flatten (Phẳng hóa):
  * Duyệt qua từng Block (Nhóm công việc), bóc tách danh sách nhân viên đã chọn
  * để tạo ra mảng các dòng riêng biệt (mỗi nhân viên 1 dòng) trước khi Insert/Update vào bảng `overtime_records`.
+ * Hỗ trợ lấy đúng `block.overtimeDate` của từng nhóm công việc khi gộp nhiều ngày trong cùng một phiếu.
  */
 export function flattenOvertimeBlocksToRecords(
   blocks: OvertimeBlockForFlatten[],
@@ -2254,6 +2256,7 @@ export function flattenOvertimeBlocksToRecords(
   const flattened: OvertimeRecord[] = [];
 
   for (const block of blocks) {
+    const blockDate = block.overtimeDate || overtimeDate;
     const [startH, startM] = (block.startTime || '00:00').split(':').map(Number);
     const [endH, endM] = (block.endTime || '00:00').split(':').map(Number);
     const diffMinutes =
@@ -2276,7 +2279,7 @@ export function flattenOvertimeBlocksToRecords(
           department && department !== 'ALL'
             ? department
             : emp?.department || 'Kỹ Thuật',
-        overtime_date: overtimeDate,
+        overtime_date: blockDate,
         reason_vi: block.reasonVi.trim(),
         reason_kr: block.reasonKr.trim(),
         start_time: block.startTime,

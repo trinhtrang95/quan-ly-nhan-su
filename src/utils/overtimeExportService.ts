@@ -4,6 +4,7 @@ import { Employee } from '../types/hr';
 
 export interface OvertimeExportTaskBlock {
   id: string;
+  overtimeDate?: string;
   reasonVi: string;
   reasonKr: string;
   startTime: string;
@@ -91,11 +92,41 @@ export function buildCombinedReasonText(reasonVi: string, reasonKr: string): str
 /**
  * Lớp Dịch vụ Xuất Excel Phiếu Đề Nghị Làm Thêm (TV-PSGC2022)
  * Tuân thủ nguyên tắc OOP & Single Responsibility Principle.
+ * Hỗ trợ gộp nhiều ngày làm thêm vào cùng một phiếu, lặp lại tiêu đề bảng và reset No theo từng ngày.
  */
 export class OvertimeExportService {
   async exportExcel(payload: OvertimeExportPayload): Promise<void> {
     const { department, overtimeDate, blocks, employees } = payload;
     const empById = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+
+    // Gom các block theo từng overtimeDate và sắp xếp tăng dần
+    const mapByDate = new Map<string, OvertimeExportTaskBlock[]>();
+    const effectiveBlocks =
+      blocks.length > 0
+        ? blocks
+        : [
+            {
+              id: 'empty-block',
+              overtimeDate: overtimeDate || '2026-11-16',
+              reasonVi: '',
+              reasonKr: '',
+              startTime: '16:10',
+              endTime: '20:10',
+              selectedEmployeeIds: [],
+            },
+          ];
+
+    for (const b of effectiveBlocks) {
+      const d = b.overtimeDate || overtimeDate || '2026-11-16';
+      if (!mapByDate.has(d)) {
+        mapByDate.set(d, []);
+      }
+      mapByDate.get(d)!.push(b);
+    }
+
+    const sortedDates = Array.from(mapByDate.keys()).sort((a, b) =>
+      a.localeCompare(b)
+    );
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Transon Viet nam Co., Ltd';
@@ -149,10 +180,7 @@ export class OvertimeExportService {
     formCodeCell.alignment = { vertical: 'middle', horizontal: 'center' };
     worksheet.getRow(1).height = 18;
 
-    // Góc phải (D2:G6) vẽ bảng chữ ký (Người lập, Kiểm tra, Phê duyệt) + Tiêu đề lớn bên trái (A3:C5)
-    // Cột C (hoặc phần đầu bảng ký) + D, E, F, G cho khung phê duyệt:
-    // Để giữ đúng 7 cột của bảng chính bên dưới, ta bố trí bảng chữ ký ở các cột D, E, F, G (D2:G6):
-    // D: 결재 (Xác nhận) | E: 작성 / Người lập | F: 검사 / Kiểm tra | G: 승인 / Phê duyệt
+    // Góc phải (D2:G6) vẽ bảng chữ ký (Người lập, Kiểm tra, Phê duyệt)
     const approvalHeadersRow2: Array<{ col: string; text: string }> = [
       { col: 'D', text: '결 / xác' },
       { col: 'E', text: '작성' },
@@ -208,23 +236,7 @@ export class OvertimeExportService {
       wrapText: true,
     };
 
-    // Dòng 7: Bộ phận (trái) và Ngày làm thêm (phải)
-    worksheet.getRow(7).height = 20;
-    worksheet.mergeCells('A7:C7');
-    const deptCell = worksheet.getCell('A7');
-    deptCell.value = formatDepartmentHeaderLabel(department);
-    deptCell.font = { name: FONT_NAME, size: 11, bold: false };
-    deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
-
-    worksheet.mergeCells('D7:G7');
-    const dateCell = worksheet.getCell('D7');
-    dateCell.value = formatDateToFormStyle(overtimeDate);
-    dateCell.font = { name: FONT_NAME, size: 11, bold: true };
-    dateCell.alignment = { vertical: 'middle', horizontal: 'center' };
-
-    // =========================================================================
-    // 2. VẼ HEADER BẢNG 7 CỘT (DÒNG 8 TIẾNG VIỆT & DÒNG 9 TIẾNG HÀN)
-    // =========================================================================
+    // Header 7 cột chuẩn của bảng
     const tableHeadersVi = [
       'No',
       'Danh sách làm thêm',
@@ -244,144 +256,157 @@ export class OvertimeExportService {
       '싸인',
     ];
 
-    const headerRowVi = worksheet.getRow(8);
-    headerRowVi.height = 18;
-    const headerRowKr = worksheet.getRow(9);
-    headerRowKr.height = 18;
-
-    for (let colIdx = 1; colIdx <= 7; colIdx += 1) {
-      const cellVi = headerRowVi.getCell(colIdx);
-      cellVi.value = tableHeadersVi[colIdx - 1];
-      cellVi.font = { name: FONT_NAME, size: 10, bold: false };
-      cellVi.alignment = { vertical: 'middle', horizontal: 'center' };
-      cellVi.border = THIN_BLACK_BORDER;
-
-      const cellKr = headerRowKr.getCell(colIdx);
-      cellKr.value = tableHeadersKr[colIdx - 1];
-      cellKr.font = { name: FONT_NAME, size: 10, bold: false };
-      cellKr.alignment = { vertical: 'middle', horizontal: 'center' };
-      cellKr.border = THIN_BLACK_BORDER;
-    }
+    let currentRowIndex = 7;
 
     // =========================================================================
-    // 3. VẼ DỮ LIỆU CÁC BLOCK & THUẬT TOÁN MERGE CELLS CỘT (3), (4), (5), (6)
+    // 2. VẼ DỮ LIỆU TỪNG NGÀY: NGÀY 1 & CÁC NGÀY TIẾP THEO (TỰ ĐỘNG CHÈN PHÂN CÁCH)
     // =========================================================================
-    let currentRowIndex = 10;
-    let sequentialNo = 1;
+    for (let dateIdx = 0; dateIdx < sortedDates.length; dateIdx += 1) {
+      const curDate = sortedDates[dateIdx];
+      const dateBlocks = mapByDate.get(curDate) || [];
 
-    // Lọc các block có nhân sự (nếu một block chưa chọn nhân sự nào thì vẫn xuất 1 dòng trống đại diện cho block đó)
-    const activeBlocks =
-      blocks.length > 0
-        ? blocks
-        : [
-            {
-              id: 'empty-block',
-              reasonVi: '',
-              reasonKr: '',
-              startTime: '16:10',
-              endTime: '20:10',
-              selectedEmployeeIds: [],
-            },
-          ];
+      if (dateIdx === 0) {
+        // Dòng Bộ phận (trái) và Ngày làm thêm (phải) cho ngày đầu tiên
+        worksheet.getRow(currentRowIndex).height = 20;
+        worksheet.mergeCells(`A${currentRowIndex}:C${currentRowIndex}`);
+        const deptCell = worksheet.getCell(`A${currentRowIndex}`);
+        deptCell.value = formatDepartmentHeaderLabel(department);
+        deptCell.font = { name: FONT_NAME, size: 11, bold: false };
+        deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
 
-    for (const block of activeBlocks) {
-      const participantIds =
-        block.selectedEmployeeIds.length > 0
-          ? block.selectedEmployeeIds
-          : ['__EMPTY_PARTICIPANT__'];
-
-      const startRow = currentRowIndex;
-      const endRow = currentRowIndex + participantIds.length - 1;
-
-      const combinedReason = buildCombinedReasonText(
-        block.reasonVi,
-        block.reasonKr
-      );
-      const formattedStart = formatTimeToFormStyle(block.startTime);
-      const formattedEnd = formatTimeToFormStyle(block.endTime);
-
-      for (let i = 0; i < participantIds.length; i += 1) {
-        const empId = participantIds[i];
-        const emp = empById.get(empId);
-        const rowNumber = currentRowIndex + i;
-        const row = worksheet.getRow(rowNumber);
-        row.height = 24;
-
-        // Cột (1): No
-        const cellNo = row.getCell(1);
-        cellNo.value = sequentialNo;
-        cellNo.font = { name: FONT_NAME, size: 10 };
-        cellNo.alignment = { vertical: 'middle', horizontal: 'center' };
-
-        // Cột (2): Danh sách làm thêm (Họ và tên nhân viên)
-        const cellName = row.getCell(2);
-        cellName.value = emp ? emp.fullName : '';
-        cellName.font = { name: FONT_NAME, size: 10 };
-        cellName.alignment = { vertical: 'middle', horizontal: 'left' };
-
-        // Cột (3): Lý do làm thêm (VN \n KR)
-        const cellReason = row.getCell(3);
-        cellReason.value = combinedReason;
-        cellReason.font = { name: FONT_NAME, size: 10 };
-        cellReason.alignment = {
-          vertical: 'middle',
-          horizontal: 'left',
-          wrapText: true,
-        };
-
-        // Cột (4): Giờ bắt đầu (Không gộp theo từng người hoặc gộp theo Block tùy yêu cầu:
-        // Theo yêu cầu: "Lấy index dòng của người đầu tiên và người cuối cùng trong Block đó để dùng lệnh worksheet.mergeCells() gộp các cột (3), (4), (5), (6)")
-        const cellStart = row.getCell(4);
-        cellStart.value = formattedStart;
-        cellStart.font = { name: FONT_NAME, size: 10, bold: true };
-        cellStart.alignment = { vertical: 'middle', horizontal: 'center' };
-
-        // Cột (5): Giờ kết thúc
-        const cellEnd = row.getCell(5);
-        cellEnd.value = formattedEnd;
-        cellEnd.font = { name: FONT_NAME, size: 10, bold: true };
-        cellEnd.alignment = { vertical: 'middle', horizontal: 'center' };
-
-        // Cột (6): Tổng thời gian (Để trống hoặc điền giờ theo mẫu giấy in)
-        const cellTotal = row.getCell(6);
-        cellTotal.value = '';
-        cellTotal.font = { name: FONT_NAME, size: 10 };
-        cellTotal.alignment = { vertical: 'middle', horizontal: 'center' };
-
-        // Cột (7): Ký nhận (Để trống cho từng nhân viên ký)
-        const cellSign = row.getCell(7);
-        cellSign.value = '';
-        cellSign.font = { name: FONT_NAME, size: 10 };
-        cellSign.alignment = { vertical: 'middle', horizontal: 'center' };
-
-        // Kẻ khung viền đen nét liền toàn bộ 7 cột trên dòng này
-        for (let colIdx = 1; colIdx <= 7; colIdx += 1) {
-          row.getCell(colIdx).border = THIN_BLACK_BORDER;
-        }
-
-        sequentialNo += 1;
+        worksheet.mergeCells(`D${currentRowIndex}:G${currentRowIndex}`);
+        const dateCell = worksheet.getCell(`D${currentRowIndex}`);
+        dateCell.value = formatDateToFormStyle(curDate);
+        dateCell.font = { name: FONT_NAME, size: 11, bold: true };
+        dateCell.alignment = { vertical: 'middle', horizontal: 'right' };
+        currentRowIndex += 1;
+      } else {
+        // Với các ngày tiếp theo: Tự động chèn 1 hàng phân cách hiển thị ngày [DD/MM/YYYY] căn phải
+        worksheet.getRow(currentRowIndex).height = 22;
+        worksheet.mergeCells(`D${currentRowIndex}:G${currentRowIndex}`);
+        const subDateCell = worksheet.getCell(`D${currentRowIndex}`);
+        subDateCell.value = formatDateToFormStyle(curDate);
+        subDateCell.font = { name: FONT_NAME, size: 11, bold: true };
+        subDateCell.alignment = { vertical: 'middle', horizontal: 'right' };
+        currentRowIndex += 1;
       }
 
-      // Gộp các cột (3), (4), (5), (6) từ startRow đến endRow nếu Block có từ 2 nhân sự trở lên
-      if (endRow > startRow) {
-        worksheet.mergeCells(startRow, 3, endRow, 3); // Cột 3: Lý do làm thêm
-        worksheet.mergeCells(startRow, 4, endRow, 4); // Cột 4: Giờ bắt đầu
-        worksheet.mergeCells(startRow, 5, endRow, 5); // Cột 5: Giờ kết thúc
-        worksheet.mergeCells(startRow, 6, endRow, 6); // Cột 6: Tổng thời gian
+      // Ngay bên dưới lặp lại 2 dòng tiêu đề cột của bảng
+      const headerRowVi = worksheet.getRow(currentRowIndex);
+      headerRowVi.height = 18;
+      const headerRowKr = worksheet.getRow(currentRowIndex + 1);
+      headerRowKr.height = 18;
 
-        // Đảm bảo viền đen nét liền sau khi mergeCells
-        for (let r = startRow; r <= endRow; r += 1) {
-          for (const c of [3, 4, 5, 6]) {
-            worksheet.getRow(r).getCell(c).border = THIN_BLACK_BORDER;
+      for (let colIdx = 1; colIdx <= 7; colIdx += 1) {
+        const cellVi = headerRowVi.getCell(colIdx);
+        cellVi.value = tableHeadersVi[colIdx - 1];
+        cellVi.font = { name: FONT_NAME, size: 10, bold: false };
+        cellVi.alignment = { vertical: 'middle', horizontal: 'center' };
+        cellVi.border = THIN_BLACK_BORDER;
+
+        const cellKr = headerRowKr.getCell(colIdx);
+        cellKr.value = tableHeadersKr[colIdx - 1];
+        cellKr.font = { name: FONT_NAME, size: 10, bold: false };
+        cellKr.alignment = { vertical: 'middle', horizontal: 'center' };
+        cellKr.border = THIN_BLACK_BORDER;
+      }
+      currentRowIndex += 2;
+
+      // Reset cột No đếm lại từ 1 cho ngày mới
+      let sequentialNo = 1;
+
+      for (const block of dateBlocks) {
+        const participantIds =
+          block.selectedEmployeeIds.length > 0
+            ? block.selectedEmployeeIds
+            : ['__EMPTY_PARTICIPANT__'];
+
+        const startRow = currentRowIndex;
+        const endRow = currentRowIndex + participantIds.length - 1;
+
+        const combinedReason = buildCombinedReasonText(
+          block.reasonVi,
+          block.reasonKr
+        );
+        const formattedStart = formatTimeToFormStyle(block.startTime);
+        const formattedEnd = formatTimeToFormStyle(block.endTime);
+
+        for (let i = 0; i < participantIds.length; i += 1) {
+          const empId = participantIds[i];
+          const emp = empById.get(empId);
+          const rowNumber = currentRowIndex + i;
+          const row = worksheet.getRow(rowNumber);
+          row.height = 24;
+
+          // Cột (1): No (đếm lại từ 1 theo ngày)
+          const cellNo = row.getCell(1);
+          cellNo.value = sequentialNo;
+          cellNo.font = { name: FONT_NAME, size: 10 };
+          cellNo.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          // Cột (2): Danh sách làm thêm (Họ và tên nhân viên)
+          const cellName = row.getCell(2);
+          cellName.value = emp ? emp.fullName : '';
+          cellName.font = { name: FONT_NAME, size: 10 };
+          cellName.alignment = { vertical: 'middle', horizontal: 'left' };
+
+          // Cột (3): Lý do làm thêm (sẽ được gộp ô nếu block có từ 2 người trở lên)
+          const cellReason = row.getCell(3);
+          cellReason.value = combinedReason;
+          cellReason.font = { name: FONT_NAME, size: 10 };
+          cellReason.alignment = {
+            vertical: 'middle',
+            horizontal: 'left',
+            wrapText: true,
+          };
+
+          // Cột (4): Giờ bắt đầu - HIỂN THỊ TRÊN TỪNG DÒNG NHÂN VIÊN
+          const cellStart = row.getCell(4);
+          cellStart.value = formattedStart;
+          cellStart.font = { name: FONT_NAME, size: 10, bold: true };
+          cellStart.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          // Cột (5): Giờ kết thúc - HIỂN THỊ TRÊN TỪNG DÒNG NHÂN VIÊN
+          const cellEnd = row.getCell(5);
+          cellEnd.value = formattedEnd;
+          cellEnd.font = { name: FONT_NAME, size: 10, bold: true };
+          cellEnd.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          // Cột (6): Tổng thời gian - Từng dòng nhân viên
+          const cellTotal = row.getCell(6);
+          cellTotal.value = '';
+          cellTotal.font = { name: FONT_NAME, size: 10 };
+          cellTotal.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          // Cột (7): Ký nhận - Từng dòng nhân viên
+          const cellSign = row.getCell(7);
+          cellSign.value = '';
+          cellSign.font = { name: FONT_NAME, size: 10 };
+          cellSign.alignment = { vertical: 'middle', horizontal: 'center' };
+
+          // Kẻ khung viền đen nét liền toàn bộ 7 cột trên dòng này
+          for (let colIdx = 1; colIdx <= 7; colIdx += 1) {
+            row.getCell(colIdx).border = THIN_BLACK_BORDER;
+          }
+
+          sequentialNo += 1;
+        }
+
+        // Cột Lý do làm thêm gộp ô (rowSpan) theo số nhân sự của nhóm đó (Cột 3)
+        // Các cột Giờ bắt đầu (4) và Giờ kết thúc (5) hiển thị trên từng dòng nhân viên, không gộp
+        if (endRow > startRow) {
+          worksheet.mergeCells(startRow, 3, endRow, 3);
+          for (let r = startRow; r <= endRow; r += 1) {
+            worksheet.getRow(r).getCell(3).border = THIN_BLACK_BORDER;
           }
         }
-      }
 
-      currentRowIndex = endRow + 1;
+        currentRowIndex = endRow + 1;
+      }
     }
 
     // =========================================================================
-    // 4. VẼ FOOTER: GHI CHÚ DÀI BẰNG TIẾNG VIỆT VÀ TIẾNG HÀN DƯỚI CÙNG
+    // 3. VẼ FOOTER: GHI CHÚ DÀI BẰNG TIẾNG VIỆT VÀ TIẾNG HÀN DƯỚI CÙNG
     // =========================================================================
     const noteRow1Idx = currentRowIndex;
     const noteRow2Idx = currentRowIndex + 1;
@@ -415,8 +440,11 @@ export class OvertimeExportService {
     const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
-    const safeDate = (overtimeDate || '2026-11-16').replace(/[^0-9-]/g, '');
-    saveAs(blob, `Phieu_Tang_Ca_TV-PSGC2022_${safeDate}.xlsx`);
+    const dateSuffix =
+      sortedDates.length > 1
+        ? `${sortedDates[0].replace(/[^0-9-]/g, '')}_den_${sortedDates[sortedDates.length - 1].replace(/[^0-9-]/g, '')}`
+        : (sortedDates[0] || '2026-11-16').replace(/[^0-9-]/g, '');
+    saveAs(blob, `Phieu_Tang_Ca_TV-PSGC2022_${dateSuffix}.xlsx`);
   }
 }
 
