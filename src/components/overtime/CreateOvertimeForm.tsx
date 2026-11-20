@@ -182,17 +182,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const isInitialReasonMountRef = useRef<boolean>(true);
 
   // Mảng State previewData chứa danh sách các Block đã được "Ghi nhận"
-  const [previewData, setPreviewData] = useState<OvertimeTaskBlock[]>(() => [
-    {
-      id: 'ot-block-initial-1',
-      reasonVi: 'Trực sản xuất',
-      reasonKr: '생산 당직',
-      startTime: '16:10',
-      endTime: '20:10',
-      selectedEmployeeIds: [],
-      isTranslating: false,
-    },
-  ]);
+  const [previewData, setPreviewData] = useState<OvertimeTaskBlock[]>([]);
 
   // Trạng thái đang xử lý lưu DB / xuất file
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -447,20 +437,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   // Chuẩn bị danh sách dòng cho bảng Preview / Print (TV-PSGC2022) với rowSpan chuẩn theo từng Block
   const printableBlockRows = useMemo(() => {
+    if (previewData.length === 0) return [];
     let runningNo = 1;
-    const activeBlocks =
-      previewData.length > 0
-        ? previewData
-        : [
-            {
-              id: 'empty-print-block',
-              reasonVi: 'Chưa có nhóm công việc được ghi nhận',
-              reasonKr: '작업 내용 없음',
-              startTime: currentStartTime,
-              endTime: currentEndTime,
-              selectedEmployeeIds: [],
-            },
-          ];
+    const activeBlocks = previewData;
 
     return activeBlocks.map((block) => {
       const participantIds =
@@ -494,7 +473,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   }, [previewData, employeeMap, currentStartTime, currentEndTime]);
 
   return (
-    <div className="flex flex-col lg:flex-row w-full h-[calc(100vh-80px)] overflow-hidden p-4 gap-4 bg-slate-50 text-slate-800">
+    <div className="flex flex-col lg:flex-row w-full h-full flex-1 min-h-0 overflow-hidden p-4 gap-4 bg-slate-50 text-slate-800">
       {/* ===================================================================
           CỘT TRÁI (1/3) - BẢNG ĐIỀU KHIỂN / FORM NHẬP LIỆU (col-span-4)
       =================================================================== */}
@@ -757,8 +736,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   return (
                     <div
                       key={emp.id}
+                      role="checkbox"
+                      aria-checked={isSelected}
                       onClick={(e) => {
                         e.preventDefault();
+                        e.stopPropagation();
                         handleToggleEmployee(emp.id);
                       }}
                       className={`flex items-center gap-2 p-2 rounded-md text-xs cursor-pointer transition-colors select-none ${
@@ -767,15 +749,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                           : 'bg-white border border-slate-100 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        readOnly
-                        className="peer sr-only pointer-events-none"
-                      />
                       <span
                         aria-hidden="true"
-                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 peer-focus-visible:ring-2 peer-focus-visible:ring-[#14539E]/40 ${
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 ${
                           isSelected ? 'bg-[#14539E] border-[#14539E]' : 'border-slate-300 bg-white'
                         }`}
                       >
@@ -842,8 +818,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       {/* ===================================================================
           CỘT PHẢI (2/3) - KHỐI PREVIEW (col-span-8)
       =================================================================== */}
-      <div className="w-full lg:w-2/3 bg-slate-100 rounded-2xl border border-slate-200 shadow-inner flex flex-col h-full overflow-y-auto relative">
-        <div className="p-6 flex flex-col items-center justify-start">
+      <div className="w-full lg:w-2/3 bg-slate-100 rounded-2xl border border-slate-200 shadow-inner flex flex-col h-full overflow-hidden relative">
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-start">
           {/* Thẻ div mô phỏng tờ giấy A4 ở giữa */}
           <div className="bg-white shadow-2xl p-8 max-w-4xl w-full mx-auto font-serif text-black rounded-lg space-y-4">
             {/* Dòng 1: Tên công ty (trái) & Mã biểu mẫu (phải) */}

@@ -1497,7 +1497,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-800">
+    <div className="h-screen w-screen overflow-hidden flex flex-col md:flex-row bg-slate-50 text-slate-800">
       {/* Left Fixed Sidebar (PC) & Bottom Navigation Bar (Mobile) */}
       <Sidebar
         activeModule={activeModule}
@@ -1536,7 +1536,7 @@ export default function App() {
 
       {/* Right Main Content Viewport */}
       <div
-        className={`flex-1 min-w-0 flex flex-col h-screen ${
+        className={`flex-1 min-w-0 flex flex-col h-full overflow-hidden ${
           activeModule === 'dashboard' ||
           activeModule === 'overtime' ||
           (activeModule === 'leave_logs' && leaveSubTab === 'leave_requests')
@@ -1547,7 +1547,7 @@ export default function App() {
         <div
           className={`w-full max-w-[1600px] mx-auto flex-1 ${
             activeModule === 'dashboard' || activeModule === 'overtime'
-              ? 'px-0 pt-0 min-h-0'
+              ? 'px-0 pt-0 min-h-0 flex flex-col overflow-hidden'
               : activeModule === 'leave_logs' &&
                   leaveSubTab === 'leave_requests'
                 ? 'px-3 sm:px-5 md:px-6 pt-3 pb-3 min-h-0 flex flex-col'
@@ -1562,7 +1562,7 @@ export default function App() {
               activeModule === 'overtime' ||
               (activeModule === 'leave_logs' &&
                 leaveSubTab === 'leave_requests')
-                ? 'h-full min-h-0 flex flex-col'
+                ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden'
                 : ''
             }
           >
