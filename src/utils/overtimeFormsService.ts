@@ -148,6 +148,7 @@ interface SupabaseOvertimeFormItemRow {
 
 export const OVERTIME_FORMS_STORAGE_KEY = 'hr_pro_overtime_forms_v1';
 export const OVERTIME_FORMS_DELETED_KEY = 'hr_pro_overtime_forms_deleted_v1';
+export const OVERTIME_FORMS_UPDATED_KEY = 'hr_pro_overtime_forms_updated_v1';
 
 /**
  * Safe Supabase REST client wrapper for the Overtime module.
@@ -746,6 +747,114 @@ function markIdDeletedLocally(formId: string): void {
   }
 }
 
+function readLocalUpdatedMap(): Record<string, OvertimeFormWithItems> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(OVERTIME_FORMS_UPDATED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, OvertimeFormWithItems>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalUpdatedForm(form: OvertimeFormWithItems): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = readLocalUpdatedMap();
+    current[form.id] = form;
+    localStorage.setItem(OVERTIME_FORMS_UPDATED_KEY, JSON.stringify(current));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function clearLocalUpdatedForm(formId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = readLocalUpdatedMap();
+    if (formId in current) {
+      delete current[formId];
+      localStorage.setItem(OVERTIME_FORMS_UPDATED_KEY, JSON.stringify(current));
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Pure helper: resolves a clean department display name from selection or employees.
+ */
+export function resolveDepartmentLabel(
+  department: string,
+  blocks: OvertimeBlockInput[],
+  employees: Employee[]
+): string {
+  if (department && department !== 'ALL' && department.trim()) {
+    return department.trim();
+  }
+  const empById = new Map(employees.map((e) => [e.id, e]));
+  const matchedDepts = new Set<string>();
+  for (const block of blocks) {
+    const ids =
+      block.participants?.length > 0
+        ? block.participants.map((p) => p.employeeId)
+        : block.selectedEmployeeIds;
+    for (const id of ids) {
+      const dept = empById.get(id)?.department?.trim();
+      if (dept) matchedDepts.add(dept);
+    }
+  }
+  return matchedDepts.size === 1 ? Array.from(matchedDepts)[0] : 'Kỹ Thuật';
+}
+
+/**
+ * Pure helper: produces an updated OvertimeFormWithItems preserving id, form_code, and created_at.
+ */
+export function buildUpdatedOvertimeForm(
+  existingForm: OvertimeFormWithItems,
+  input: SaveOvertimeFormInput
+): OvertimeFormWithItems {
+  const primaryDate =
+    input.blocks[0]?.overtimeDate ||
+    input.overtimeDate ||
+    existingForm.overtime_date ||
+    '2026-11-16';
+  const uniqueDates = Array.from(
+    new Set(
+      input.blocks.map((b) => b.overtimeDate || primaryDate).filter(Boolean)
+    )
+  );
+  const departmentLabel = resolveDepartmentLabel(
+    input.department,
+    input.blocks,
+    input.employees
+  );
+  const items = buildOvertimeFormItemsFromBlocks(
+    existingForm.id,
+    input.blocks,
+    input.employees,
+    primaryDate
+  );
+  const totalHours = Number(
+    items.reduce((sum, item) => sum + item.total_hours, 0).toFixed(2)
+  );
+
+  return {
+    ...existingForm,
+    department: departmentLabel,
+    overtime_date: primaryDate,
+    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [primaryDate],
+    total_blocks: input.blocks.length,
+    total_participants: items.length,
+    total_hours: totalHours,
+    items,
+  };
+}
+
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -778,9 +887,13 @@ export async function fetchOvertimeForms(): Promise<{
     }
 
     const deletedIds = readDeletedIds();
+    const updatedMap = readLocalUpdatedMap();
     const hydrated: OvertimeFormWithItems[] = (formsRows || [])
       .filter((f) => !f.deleted_at && !deletedIds.has(f.id))
       .map((f) => {
+        if (updatedMap[f.id]) {
+          return updatedMap[f.id];
+        }
         const formItems = itemsByForm.get(f.id) || [];
         const derivedDates = Array.from(
           new Set(formItems.map((i) => i.overtime_date).filter(Boolean))
@@ -977,6 +1090,91 @@ export async function saveOvertimeFormToHistory(
 }
 
 /**
+ * Updates an existing overtime form header and replaces its items in Supabase,
+ * with durable local cache synchronization if offline or RLS-restricted.
+ */
+export async function updateOvertimeFormInHistory(
+  existingForm: OvertimeFormWithItems,
+  input: SaveOvertimeFormInput
+): Promise<OvertimeFormWithItems> {
+  const updatedForm = buildUpdatedOvertimeForm(existingForm, input);
+
+  let syncedToSupabase = false;
+  try {
+    await overtimeSupabase.request<void>(
+      `overtime_forms?id=eq.${encodeURIComponent(existingForm.id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          department: updatedForm.department,
+          overtime_date: updatedForm.overtime_date,
+          total_blocks: updatedForm.total_blocks,
+          total_employees: updatedForm.total_participants,
+          total_hours: updatedForm.total_hours,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+
+    await overtimeSupabase.request<void>(
+      `overtime_form_items?form_id=eq.${encodeURIComponent(existingForm.id)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+
+    if (updatedForm.items.length > 0) {
+      const insertedItems = await overtimeSupabase.request<
+        SupabaseOvertimeFormItemRow[]
+      >('overtime_form_items?select=*', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(
+          updatedForm.items.map((item) => ({
+            form_id: existingForm.id,
+            overtime_date: item.overtime_date,
+            block_order: item.block_order,
+            item_order: item.item_order,
+            block_id: item.block_id || `block-${item.block_order}`,
+            employee_id: UUID_REGEX.test(item.employee_id)
+              ? item.employee_id
+              : null,
+            employee_code: item.employee_code,
+            full_name: item.employee_name,
+            reason_vi: item.reason_vi,
+            reason_kr: item.reason_kr,
+            start_time: item.start_time,
+            end_time: item.end_time,
+          }))
+        ),
+      });
+
+      if (insertedItems && insertedItems.length > 0) {
+        updatedForm.items = insertedItems.map(mapSupabaseItemRow);
+      }
+    }
+    syncedToSupabase = true;
+  } catch {
+    // Graceful fallback: local override ensures edits persist across reloads
+  }
+
+  if (syncedToSupabase) {
+    clearLocalUpdatedForm(existingForm.id);
+  } else {
+    saveLocalUpdatedForm(updatedForm);
+  }
+
+  const localForms = readLocalForms(false);
+  const existsLocally = localForms.some((f) => f.id === updatedForm.id);
+  const nextLocal = existsLocally
+    ? localForms.map((f) => (f.id === updatedForm.id ? updatedForm : f))
+    : [updatedForm, ...localForms];
+  writeLocalForms(nextLocal);
+
+  return updatedForm;
+}
+
+/**
  * Soft-deletes an overtime form by setting `deleted_at = NOW()` on `overtime_forms`,
  * plus updating local cache so offline environments stay consistent.
  */
@@ -996,6 +1194,7 @@ export async function softDeleteOvertimeForm(formId: string): Promise<void> {
   }
 
   markIdDeletedLocally(formId);
+  clearLocalUpdatedForm(formId);
   const localForms = readLocalForms(false).map((form) =>
     form.id === formId
       ? {

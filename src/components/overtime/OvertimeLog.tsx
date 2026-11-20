@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Calendar,
   Eye,
   FileSpreadsheet,
   FileText,
   Loader2,
+  Pencil,
   Plus,
   Printer,
   RefreshCw,
@@ -37,6 +39,7 @@ export interface OvertimeLogProps {
   employees: Employee[];
   isLoading: boolean;
   onRefresh: () => Promise<void> | void;
+  onEdit: (form: OvertimeFormWithItems) => void;
   onSoftDelete: (formId: string) => Promise<void>;
   onSwitchToCreate?: () => void;
   onShowToast?: (message: string) => void;
@@ -47,6 +50,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   employees,
   isLoading,
   onRefresh,
+  onEdit,
   onSoftDelete,
   onSwitchToCreate,
   onShowToast,
@@ -59,6 +63,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   );
   const [deletingForm, setDeletingForm] =
     useState<OvertimeFormWithItems | null>(null);
+  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [exportingFormId, setExportingFormId] = useState<string | null>(null);
 
@@ -109,8 +114,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   };
 
+  const handleOpenDeleteModal = (form: OvertimeFormWithItems) => {
+    setIsDeleteConfirmed(false);
+    setDeletingForm(form);
+  };
+
+  const handleCloseDeleteModal = () => {
+    if (isDeleting) return;
+    setDeletingForm(null);
+    setIsDeleteConfirmed(false);
+  };
+
   const handleConfirmDelete = async () => {
-    if (!deletingForm) return;
+    if (!deletingForm || !isDeleteConfirmed) return;
     setIsDeleting(true);
     try {
       const code = deletingForm.form_code;
@@ -120,6 +136,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         setViewingForm(null);
       }
       setDeletingForm(null);
+      setIsDeleteConfirmed(false);
       onShowToast?.(`Đã xóa phiếu tăng ca ${code} khỏi nhật ký.`);
     } catch (error) {
       onShowToast?.(getFriendlyErrorMessage(error));
@@ -230,7 +247,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   Số lượng
                 </th>
                 <th className="py-3 px-3.5 w-32 text-center">Trạng thái</th>
-                <th className="py-3 px-3.5 w-52 text-right">Thao tác</th>
+                <th className="py-3 px-3.5 w-60 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -373,6 +390,16 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                           <button
                             type="button"
+                            onClick={() => onEdit(form)}
+                            className="h-8 w-8 rounded-lg border border-slate-200 text-[#14539E] hover:bg-blue-50 hover:border-[#14539E]/40 inline-flex items-center justify-center transition-colors cursor-pointer"
+                            title="Sửa phiếu"
+                            aria-label={`Sửa phiếu ${form.form_code}`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
                             disabled={isExporting}
                             onClick={() => handleExportFormExcel(form)}
                             className="h-8 w-8 rounded-lg border border-slate-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
@@ -388,7 +415,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => setDeletingForm(form)}
+                            onClick={() => handleOpenDeleteModal(form)}
                             className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer"
                             title="Xóa phiếu"
                             aria-label={`Xóa phiếu ${form.form_code}`}
@@ -436,6 +463,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = viewingForm;
+                    setViewingForm(null);
+                    onEdit(target);
+                  }}
+                  className="h-9 px-3.5 rounded-lg border border-[#14539E] text-[#14539E] hover:bg-blue-50 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Sửa phiếu</span>
+                </button>
+
                 <button
                   type="button"
                   disabled={exportingFormId === viewingForm.id}
@@ -692,7 +732,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* In-app Soft Delete Confirmation Modal */}
+      {/* In-app Soft Delete Confirmation Modal with Extra Protection Layer */}
       {deletingForm && (
         <div
           role="dialog"
@@ -702,50 +742,91 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         >
           <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-md p-5 space-y-4">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3
-                  id="delete-overtime-title"
-                  className="text-sm font-bold text-slate-900"
-                >
-                  Xác nhận xóa phiếu tăng ca
-                </h3>
-                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Bạn có chắc chắn muốn xóa phiếu{' '}
-                  <strong className="font-mono text-slate-900">
-                    {deletingForm.form_code}
-                  </strong>{' '}
-                  ({deletingForm.department})? Phiếu sẽ được đánh dấu xóa mềm và
-                  ẩn khỏi nhật ký.
-                </p>
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-red-50 border border-red-200 text-red-600 flex items-center justify-center shrink-0 mt-0.5">
+                  <AlertTriangle className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h3
+                    id="delete-overtime-title"
+                    className="text-sm font-bold text-slate-900"
+                  >
+                    Xác nhận xóa phiếu tăng ca
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Bạn có chắc chắn muốn xóa phiếu này khỏi nhật ký không? Phiếu
+                    sẽ được đánh dấu xóa mềm và ẩn khỏi danh sách tra cứu.
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 disabled={isDeleting}
-                onClick={() => setDeletingForm(null)}
+                onClick={handleCloseDeleteModal}
                 aria-label="Đóng hộp thoại xác nhận xóa"
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
+            {/* Thông tin tóm tắt phiếu sắp xóa */}
+            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">Mã phiếu:</span>
+                <span className="font-mono font-bold text-[#14539E]">
+                  {deletingForm.form_code}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">Bộ phận:</span>
+                <span className="font-semibold text-slate-800">
+                  {deletingForm.department}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">Quy mô:</span>
+                <span className="font-medium text-slate-700 tabular-nums">
+                  {formatNumberVN(deletingForm.total_participants)} lượt •{' '}
+                  {formatNumberVN(deletingForm.total_hours)} giờ
+                </span>
+              </div>
+            </div>
+
+            {/* Lớp bảo vệ xác nhận bắt buộc trước khi xóa */}
+            <label className="flex items-start gap-2.5 p-3 rounded-lg border border-red-200/80 bg-red-50/40 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isDeleteConfirmed}
+                onChange={(e) => setIsDeleteConfirmed(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+              />
+              <span className="text-xs text-slate-700 leading-snug">
+                Tôi xác nhận muốn xóa phiếu tăng ca{' '}
+                <strong className="font-mono text-slate-900">
+                  {deletingForm.form_code}
+                </strong>{' '}
+                khỏi nhật ký.
+              </span>
+            </label>
+
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 disabled={isDeleting}
-                onClick={() => setDeletingForm(null)}
+                onClick={handleCloseDeleteModal}
                 className="h-9 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
               >
-                Hủy
+                Không, giữ lại
               </button>
               <button
                 type="button"
-                disabled={isDeleting}
+                disabled={isDeleting || !isDeleteConfirmed}
                 onClick={handleConfirmDelete}
-                className="h-9 px-4 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                className="h-9 px-4 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
               >
                 {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>Xóa phiếu</span>
+                <span>Xác nhận xóa</span>
               </button>
             </div>
           </div>

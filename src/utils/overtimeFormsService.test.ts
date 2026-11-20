@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildOvertimeFormItemsFromBlocks,
   buildPrintableDateGroupsFromItems,
+  buildUpdatedOvertimeForm,
   calculateHoursBetween,
   filterOvertimeForms,
   generateOvertimeFormCode,
@@ -191,5 +192,53 @@ describe('overtimeFormsService pure logic', () => {
     assert.equal(filterOvertimeForms(forms, 'TC-20261115', '')[0].id, 'f2');
     assert.equal(filterOvertimeForms(forms, '', '2026-11-17')[0].id, 'f1');
     assert.equal(filterOvertimeForms(forms, 'san xuat', '2026-11-16').length, 0);
+  });
+
+  it('builds an updated overtime form preserving id, form_code, and created_at while recalculating totals', () => {
+    const existing: OvertimeFormWithItems = {
+      id: 'form-edit-1',
+      form_code: 'TC-20261116-005',
+      department: 'Kỹ Thuật',
+      overtime_date: '2026-11-16',
+      overtime_dates: ['2026-11-16'],
+      total_blocks: 1,
+      total_participants: 1,
+      total_hours: 4,
+      status: 'Đã lưu',
+      created_at: '2026-11-16T08:00:00.000Z',
+      deleted_at: null,
+      items: [],
+    };
+
+    const updated = buildUpdatedOvertimeForm(existing, {
+      department: 'Sản Xuất',
+      overtimeDate: '2026-11-16',
+      employees: sampleEmployees,
+      blocks: [
+        {
+          id: 'b-edit-1',
+          overtimeDate: '2026-11-16',
+          reasonVi: 'Bảo dưỡng máy',
+          reasonKr: '정기 보수',
+          startTime: '16:10',
+          endTime: '20:40',
+          selectedEmployeeIds: ['emp-1', 'emp-2'],
+          participants: [
+            { employeeId: 'emp-1', startTime: '16:10', endTime: '20:40' },
+            { employeeId: 'emp-2', startTime: '16:10', endTime: '21:10' },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(updated.id, 'form-edit-1');
+    assert.equal(updated.form_code, 'TC-20261116-005');
+    assert.equal(updated.created_at, '2026-11-16T08:00:00.000Z');
+    assert.equal(updated.department, 'Sản Xuất');
+    assert.equal(updated.total_participants, 2);
+    assert.equal(updated.total_hours, 9.5);
+    assert.equal(updated.items.length, 2);
+    assert.equal(updated.items[0].reason_vi, 'Bảo dưỡng máy');
+    assert.equal(updated.items[1].end_time, '21:10');
   });
 });
