@@ -73,8 +73,6 @@ import { EmployeeDirectoryView } from './components/EmployeeDirectoryView';
 import { EmployeeModal } from './components/EmployeeModal';
 import { GroupManageModal } from './components/GroupManageModal';
 import { LeaveLateLogView } from './components/LeaveLateLogView';
-import { AnnualLeaveFundView } from './components/AnnualLeaveFundView';
-import { AnnualLeaveRulesView } from './components/AnnualLeaveRulesView';
 import { LeaveRecordModal } from './components/LeaveRecordModal';
 import { BulkLeaveRecordModal } from './components/BulkLeaveRecordModal';
 import { ReportDashboard } from './components/ReportDashboard';
@@ -1671,48 +1669,47 @@ export default function App() {
               />
             )}
 
-            {activeModule === 'leave_logs' &&
-              leaveSubTab === 'leave_requests' && (
-                <LeaveLateLogView
-                  records={companyRecords}
-                  employees={companyEmployees}
-                  groups={effectiveGroups}
-                  isAdmin={isAdmin}
-                  initialTypeFilter={leaveInitialTypeFilter}
-                  onOpenAddRecord={() => {
-                    setEditingRecord(null);
-                    setLeaveDefaultEmpId(undefined);
-                    setLeaveDefaultMonth(undefined);
-                    setLeaveDefaultYear(undefined);
-                    setIsLeaveModalOpen(true);
-                  }}
-                  onOpenBulkRecord={() => {
-                    setIsBulkLeaveModalOpen(true);
-                  }}
-                  onOpenEditRecord={(rec) => {
-                    if (!isAdmin) return;
-                    setEditingRecord(rec);
-                    setIsLeaveModalOpen(true);
-                  }}
-                  onQuickUpdateRecord={(rec, patch) => {
-                    const { id, ...rest } = rec;
-                    handleSaveLeaveRecord({ ...rest, ...patch }, id);
-                  }}
-                  onDeleteRecord={handleDeleteLeaveRecord}
-                  onInspectAttachment={(url, title) =>
-                    setLightboxImage({ url, title })
-                  }
-                  onExportExcel={(filteredList) => {
-                    exportLeaveRecordsToExcel(filteredList, companyEmployees);
-                    showToast(
-                      `Đã xuất tệp Excel nhật ký (${filteredList.length} bản ghi).`
-                    );
-                  }}
-                />
-              )}
+            {activeModule === 'leave_logs' && (
+              <LeaveLateLogView
+                records={companyRecords}
+                employees={companyEmployees}
+                groups={effectiveGroups}
+                isAdmin={isAdmin}
+                initialTypeFilter={leaveInitialTypeFilter}
+                onOpenAddRecord={() => {
+                  setEditingRecord(null);
+                  setLeaveDefaultEmpId(undefined);
+                  setLeaveDefaultMonth(undefined);
+                  setLeaveDefaultYear(undefined);
+                  setIsLeaveModalOpen(true);
+                }}
+                onOpenBulkRecord={() => {
+                  setIsBulkLeaveModalOpen(true);
+                }}
+                onOpenEditRecord={(rec) => {
+                  if (!isAdmin) return;
+                  setEditingRecord(rec);
+                  setIsLeaveModalOpen(true);
+                }}
+                onQuickUpdateRecord={(rec, patch) => {
+                  const { id, ...rest } = rec;
+                  handleSaveLeaveRecord({ ...rest, ...patch }, id);
+                }}
+                onDeleteRecord={handleDeleteLeaveRecord}
+                onInspectAttachment={(url, title) =>
+                  setLightboxImage({ url, title })
+                }
+                onExportExcel={(filteredList) => {
+                  exportLeaveRecordsToExcel(filteredList, companyEmployees);
+                  showToast(
+                    `Đã xuất tệp Excel nhật ký (${filteredList.length} bản ghi).`
+                  );
+                }}
+              />
+            )}
 
-            {activeModule === 'leave_logs' && leaveSubTab === 'leave_fund' && (
-              <AnnualLeaveFundView
+            {activeModule === 'annual_report' && (
+              <ReportDashboard
                 employees={companyEmployees}
                 records={companyRecords}
                 groups={effectiveGroups}
@@ -1722,6 +1719,8 @@ export default function App() {
                   activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
                 }
                 isAdmin={isAdmin}
+                activeSubTab={reportSubTab}
+                onSubTabChange={(subTab) => setReportSubTab(subTab)}
                 onUpdateEmployeeQuota={(emp, newQuota) => {
                   const { id, ...rest } = emp;
                   handleSaveEmployee(
@@ -1764,16 +1763,6 @@ export default function App() {
                     `Đã chốt số dư phép đầu kỳ (đến 31/10/2026) cho ${importedRows.length} nhân sự vào bảng Quỹ phép năm.`
                   );
                 }}
-              />
-            )}
-
-            {activeModule === 'annual_report' && (
-              <ReportDashboard
-                employees={companyEmployees}
-                records={companyRecords}
-                groups={effectiveGroups}
-                activeSubTab={reportSubTab}
-                onSubTabChange={(subTab) => setReportSubTab(subTab)}
                 onExportMatrixExcel={(rows, year, viewMode) => {
                   exportAnnualMatrixToExcel(rows, year, viewMode);
                   showToast(`Đã xuất tệp Excel Báo cáo Ma trận Tồn phép năm ${year}.`);
@@ -1798,6 +1787,7 @@ export default function App() {
                   setLeaveDefaultYear(year);
                   setIsLeaveModalOpen(true);
                 }}
+                onShowToast={showToast}
               />
             )}
 

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BookmarkPlus,
+  BookOpen,
   Calendar,
   Check,
   CheckCircle2,
@@ -12,6 +14,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';  
@@ -25,6 +28,14 @@ import {
   OvertimeFormWithItems,
   reconstructBlocksFromItems,
 } from '../../utils/overtimeFormsService';
+import {
+  findExactGlossaryMatch,
+  loadOvertimeGlossary,
+  OvertimeGlossaryEntry,
+  readLocalOvertimeGlossary,
+  suggestFactoryKoreanTranslation,
+  upsertOvertimeGlossaryEntry,
+} from '../../utils/overtimeGlossaryService';
 import {
   buildCombinedReasonText,
   formatDateToFormStyle,
@@ -66,39 +77,6 @@ export interface CreateOvertimeFormProps {
   onCancelEdit?: () => void;
   onSaveOnly?: (payload: CreateOvertimeFormPayload) => Promise<void> | void;
 }
-
-const FACTORY_DICTIONARY: Record<string, string> = {
-  'trực sản xuất': '생산 당직',
-  'sửa máy': '설비 수리',
-  'hàng gấp': '긴급 생산',
-  'đổi model': '모델 교체',
-  'vệ sinh': '청소',
-  'kiểm tra hàng': '품질 검사',
-  'đóng gói': '포장 작업',
-  'bảo dưỡng': '정기 보수',
-  'họp sản xuất': '생산 회의',
-};
-
-const translateVnToKr = async (text: string): Promise<string> => {
-  if (!text) return '';
-  const cleaned = text.trim().toLowerCase();
-  if (FACTORY_DICTIONARY[cleaned]) {
-    return FACTORY_DICTIONARY[cleaned];
-  }
-  for (const [k, v] of Object.entries(FACTORY_DICTIONARY)) {
-    if (cleaned === k) return v;
-  }
-  try {
-    const response = await fetch(
-      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=vi&tl=ko&dt=t&q=${encodeURIComponent(text)}`
-    );
-    const data = await response.json();
-    return data[0].map((item: [string]) => item[0]).join('');
-  } catch (error) {
-    console.error('Lỗi dịch thuật:', error);
-    return text;
-  }
-};
 
 class OvertimeFormService {
   static createEmptyBlock(defaultDate = '2026-11-16'): OvertimeTaskBlock {
@@ -214,14 +192,30 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
-  const [employeeGroupFilter, setEmployeeGroupFilter] = useState<string>(selectedDepartment);
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState<string>('');
+  const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState<boolean>(false);
+  const employeePickerRef = useRef<HTMLDivElement | null>(null);
   const [currentReasonVi, setCurrentReasonVi] = useState<string>('Trực sản xuất');
   const [currentReasonKr, setCurrentReasonKr] = useState<string>('생산 당직');
+  const [isReasonKrManuallyEdited, setIsReasonKrManuallyEdited] = useState<boolean>(false);
+  const [glossaryEntries, setGlossaryEntries] = useState<OvertimeGlossaryEntry[]>(() =>
+    readLocalOvertimeGlossary()
+  );
   const [isAutoTranslating, setIsAutoTranslating] = useState<boolean>(false);
   const isInitialReasonMountRef = useRef<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Nạp & đồng bộ nhẹ từ điển nội bộ (localStorage + Supabase overtime_glossary nếu có)
+  useEffect(() => {
+    let active = true;
+    void loadOvertimeGlossary().then((loaded) => {
+      if (active) setGlossaryEntries(loaded);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Đồng bộ dữ liệu khi chuyển sang/thoát khỏi chế độ chỉnh sửa phiếu
   useEffect(() => {
@@ -234,17 +228,36 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         ? editingForm.department
         : 'ALL';
       setSelectedDepartment(matchedDept);
-      setEmployeeGroupFilter(matchedDept);
       setOvertimeDate(editingForm.overtime_date || initialDate);
       setPreviewData(reconstructed);
       setEditingBlockId(null);
       setCurrentSelectedEmployeeIds([]);
       setCustomTimes({});
       setEditingTimeEmpId(null);
+      setEmployeeSearchQuery('');
+      setIsEmployeeDropdownOpen(false);
       setCurrentReasonVi('');
       setCurrentReasonKr('');
+      setIsReasonKrManuallyEdited(false);
     }
   }, [editingForm, groups, initialDate]);
+
+  // Tự động đóng danh sách nhân sự sổ xuống khi bấm ra ngoài vùng tìm kiếm
+  useEffect(() => {
+    if (!isEmployeeDropdownOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        employeePickerRef.current &&
+        !employeePickerRef.current.contains(event.target as Node)
+      ) {
+        setIsEmployeeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isEmployeeDropdownOpen]);
 
   // Auto-save vào LocalStorage chỉ khi đang tạo phiếu mới (tránh ghi đè nháp khi sửa phiếu cũ)
   useEffect(() => {
@@ -263,7 +276,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   const employeeMap = useMemo(() => new Map<string, Employee>(employees.map((e) => [e.id, e])), [employees]);
 
-  const departmentFilterOptions = useMemo(() => {
+  const departmentOptions = useMemo(() => {
     const names = new Set<string>();
     groups.forEach((g) => { if (g.name?.trim()) names.add(g.name.trim()); });
     employees.forEach((emp) => { if (emp.department?.trim()) names.add(emp.department.trim()); });
@@ -288,17 +301,18 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   const filteredEmployeesForInput = useMemo(() => {
     const available = employees.filter((emp) => !alreadyRecordedIdsForCurrentDate.has(emp.id));
-    const byGroup = !employeeGroupFilter || employeeGroupFilter === 'ALL'
-        ? available
-        : available.filter((emp) => emp.department === employeeGroupFilter);
+    const normalizedDept = (selectedDepartment || '').trim();
+    const byDepartment = !normalizedDept || normalizedDept === 'ALL'
+      ? available
+      : available.filter((emp) => (emp.department || '').trim() === normalizedDept);
     const query = employeeSearchQuery.trim().toLowerCase();
-    if (!query) return byGroup;
-    return byGroup.filter(
+    if (!query) return byDepartment;
+    return byDepartment.filter(
       (emp) => emp.fullName.toLowerCase().includes(query) ||
                emp.employeeCode.toLowerCase().includes(query) ||
                emp.department.toLowerCase().includes(query)
     );
-  }, [employees, employeeGroupFilter, employeeSearchQuery, alreadyRecordedIdsForCurrentDate]);
+  }, [employees, selectedDepartment, employeeSearchQuery, alreadyRecordedIdsForCurrentDate]);
 
   useEffect(() => {
     setCurrentSelectedEmployeeIds((prev) => {
@@ -329,27 +343,87 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     };
   }, [previewData]);
 
-  const handleTranslate = async (sourceReasonVi: string): Promise<string> => {
-    if (!sourceReasonVi.trim()) return '';
-    return await translateVnToKr(sourceReasonVi);
+  const handleSelectGlossaryTemplate = (entryId: string) => {
+    if (!entryId) return;
+    const found = glossaryEntries.find((item) => item.id === entryId);
+    if (!found) return;
+    setCurrentReasonVi(found.reasonVi);
+    setCurrentReasonKr(found.reasonKr);
+    setIsReasonKrManuallyEdited(false);
+    setIsAutoTranslating(false);
   };
 
+  const handleSuggestTranslation = async () => {
+    const cleanVi = currentReasonVi.trim();
+    if (!cleanVi) {
+      showToast('Vui lòng nhập lý do (Tiếng Việt) trước khi bấm Dịch gợi ý.');
+      return;
+    }
+    setIsAutoTranslating(true);
+    try {
+      const { translation } = await suggestFactoryKoreanTranslation(
+        cleanVi,
+        glossaryEntries
+      );
+      setCurrentReasonKr(translation);
+      setIsReasonKrManuallyEdited(false);
+    } finally {
+      setIsAutoTranslating(false);
+    }
+  };
+
+  const handleSaveGlossaryTemplate = async () => {
+    const cleanVi = currentReasonVi.trim();
+    const cleanKr = currentReasonKr.trim();
+    if (!cleanVi || !cleanKr) {
+      showToast('Vui lòng nhập đầy đủ cả Lý do (Tiếng Việt) và Lý do (Tiếng Hàn) để lưu mẫu.');
+      return;
+    }
+    const { entries, isUpdate } = await upsertOvertimeGlossaryEntry(cleanVi, cleanKr);
+    setGlossaryEntries(entries);
+    showToast(
+      isUpdate
+        ? `Đã cập nhật mẫu "${cleanVi}" trong từ điển.`
+        : `Đã lưu mẫu "${cleanVi}" vào từ điển.`
+    );
+  };
+
+  // Tầng 1 (khớp 100% từ điển tức thì) + Tầng 3 (gợi ý dịch ngữ cảnh debounce 500ms)
+  // Tuyệt đối không ghi đè nếu người dùng đã tự sửa tay ô Tiếng Hàn
   useEffect(() => {
     if (isInitialReasonMountRef.current) {
       isInitialReasonMountRef.current = false;
       return;
     }
-    if (!currentReasonVi.trim()) {
+    if (isReasonKrManuallyEdited) {
+      setIsAutoTranslating(false);
+      return;
+    }
+    const cleanVi = currentReasonVi.trim();
+    if (!cleanVi) {
       setIsAutoTranslating(false);
       setCurrentReasonKr('');
       return;
     }
+
+    // Tầng 1: Khớp 100% từ điển nội bộ -> điền ngay lập tức
+    const exactMatch = findExactGlossaryMatch(glossaryEntries, cleanVi);
+    if (exactMatch) {
+      setIsAutoTranslating(false);
+      setCurrentReasonKr(exactMatch.reasonKr);
+      return;
+    }
+
+    // Tầng 3: Dịch gợi ý tự động theo ngữ cảnh nhà máy (debounce 500ms)
     let isCancelled = false;
     setIsAutoTranslating(true);
     const debounceTimer = window.setTimeout(async () => {
-      const translatedText = await handleTranslate(currentReasonVi);
+      const { translation } = await suggestFactoryKoreanTranslation(
+        cleanVi,
+        glossaryEntries
+      );
       if (!isCancelled) {
-        setCurrentReasonKr(translatedText);
+        setCurrentReasonKr(translation);
         setIsAutoTranslating(false);
       }
     }, 500);
@@ -357,7 +431,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       isCancelled = true;
       window.clearTimeout(debounceTimer);
     };
-  }, [currentReasonVi]);
+  }, [currentReasonVi, glossaryEntries, isReasonKrManuallyEdited]);
 
   const handleToggleEmployee = (empId: string) => {
     setCurrentSelectedEmployeeIds((prev) => prev.includes(empId) ? prev.filter((id) => id !== empId) : [...prev, empId]);
@@ -401,6 +475,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     isInitialReasonMountRef.current = true;
     setCurrentReasonVi(block.reasonVi || '');
     setCurrentReasonKr(block.reasonKr || '');
+    setIsReasonKrManuallyEdited(false);
     showToast(`Đang chỉnh sửa nhóm #${index + 1} [${formatDateToFormStyle(block.overtimeDate)}]`);
   };
 
@@ -411,6 +486,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setEditingTimeEmpId(null);
     setCurrentReasonVi('');
     setCurrentReasonKr('');
+    setIsReasonKrManuallyEdited(false);
   };
 
   const handleCommitBlock = async () => {
@@ -428,7 +504,17 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setCurrentStartTime(normalizedStart);
     setCurrentEndTime(normalizedEnd);
 
-    const finalReasonKr = currentReasonKr.trim() || (await translateVnToKr(currentReasonVi.trim()));
+    const cleanReasonVi = currentReasonVi.trim();
+    const finalReasonKr = currentReasonKr.trim()
+      ? currentReasonKr.trim()
+      : (await suggestFactoryKoreanTranslation(cleanReasonVi, glossaryEntries)).translation;
+
+    // Tự động học/cập nhật cặp (reasonVi, reasonKr) vào từ điển nội bộ khi ghi nhận
+    if (cleanReasonVi && finalReasonKr.trim()) {
+      void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim()).then(
+        ({ entries }) => setGlossaryEntries(entries)
+      );
+    }
 
     const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map((empId) => {
       const custom = customTimes[empId];
@@ -442,7 +528,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     const newBlock: OvertimeTaskBlock = {
       id: editingBlockId || `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       overtimeDate: overtimeDate || '2026-11-16',
-      reasonVi: currentReasonVi.trim(),
+      reasonVi: cleanReasonVi,
       reasonKr: finalReasonKr.trim(),
       startTime: normalizedStart,
       endTime: normalizedEnd,
@@ -464,9 +550,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
     setCurrentReasonVi('');
     setCurrentReasonKr('');
+    setIsReasonKrManuallyEdited(false);
     setCurrentSelectedEmployeeIds([]);
     setCustomTimes({});
     setEditingTimeEmpId(null);
+    setEmployeeSearchQuery('');
+    setIsEmployeeDropdownOpen(false);
   };
 
   const handleMoveBlock = (index: number, direction: 'up' | 'down') => {
@@ -641,14 +730,24 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           {/* HÀNG 1 */}
           <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Bộ phận / Nhóm</label>
+              <label
+                htmlFor="overtime-department-select"
+                className="block text-[11px] font-semibold text-slate-600 mb-1"
+              >
+                Bộ phận / Nhóm
+              </label>
               <select
+                id="overtime-department-select"
                 value={selectedDepartment}
-                onChange={(e) => { setSelectedDepartment(e.target.value); setEmployeeGroupFilter(e.target.value); }}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
                 className="w-full h-9 px-2.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
               >
                 <option value="ALL">Tất cả bộ phận</option>
-                {groups.map((grp) => <option key={grp.id} value={grp.name}>{grp.name}</option>)}
+                {departmentOptions.map((deptName) => (
+                  <option key={deptName} value={deptName}>
+                    {deptName}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -707,50 +806,199 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             </datalist>
           </div>
 
-          {/* HÀNG 3 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-600">
+          {/* HÀNG 3: CHỌN NHÂN SỰ (SEARCHABLE MULTI-SELECT POPOVER) */}
+          <div className="space-y-2" ref={employeePickerRef}>
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="overtime-employee-search"
+                className="text-[11px] font-semibold text-slate-600"
+              >
                 Nhân sự ({currentSelectedEmployeeIds.length} chọn)
                 {alreadyRecordedIdsForCurrentDate.size > 0 && (
-                  <span className="text-slate-400 font-normal ml-1">({alreadyRecordedIdsForCurrentDate.size} đã lên lịch)</span>
+                  <span className="text-slate-400 font-normal ml-1">
+                    ({alreadyRecordedIdsForCurrentDate.size} đã lên lịch)
+                  </span>
                 )}
-              </span>
-              <button
-                type="button"
-                onClick={handleSelectAllFiltered}
-                className="text-[11px] font-semibold text-[#14539E] hover:underline cursor-pointer"
-              >
-                {filteredEmployeesForInput.length > 0 && filteredEmployeesForInput.every((e) => currentSelectedEmployeeIds.includes(e.id))
-                  ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
-              </button>
+              </label>
+              {currentSelectedEmployeeIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentSelectedEmployeeIds([]);
+                    setCustomTimes({});
+                    setEditingTimeEmpId(null);
+                  }}
+                  className="text-[11px] font-medium text-slate-500 hover:text-red-600 cursor-pointer transition-colors"
+                >
+                  Bỏ chọn hết
+                </button>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={employeeGroupFilter}
-                onChange={(e) => setEmployeeGroupFilter(e.target.value)}
-                className="w-full h-8 px-2 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
-              >
-                <option value="ALL">Lọc nhóm: Tất cả</option>
-                {departmentFilterOptions.map((deptName) => <option key={deptName} value={deptName}>{deptName}</option>)}
-              </select>
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  value={employeeSearchQuery}
-                  onChange={(e) => setEmployeeSearchQuery(e.target.value)}
-                  placeholder="Tìm mã, tên..."
-                  className="w-full h-8 pl-7 pr-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-                />
+
+            {/* Ô tìm kiếm duy nhất + Popover danh sách sổ xuống */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="overtime-employee-search"
+                type="text"
+                role="combobox"
+                aria-expanded={isEmployeeDropdownOpen}
+                aria-controls="overtime-employee-popover"
+                aria-autocomplete="list"
+                value={employeeSearchQuery}
+                onFocus={() => setIsEmployeeDropdownOpen(true)}
+                onClick={() => setIsEmployeeDropdownOpen(true)}
+                onChange={(e) => {
+                  setEmployeeSearchQuery(e.target.value);
+                  if (!isEmployeeDropdownOpen) setIsEmployeeDropdownOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setIsEmployeeDropdownOpen(false);
+                  }
+                }}
+                placeholder="Bấm để chọn hoặc tìm mã, tên nhân sự..."
+                className={`w-full h-9 pl-8 pr-14 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border bg-white focus:outline-none transition-colors ${
+                  isEmployeeDropdownOpen
+                    ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              />
+              <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                {employeeSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setEmployeeSearchQuery('')}
+                    aria-label="Xóa từ khóa tìm kiếm nhân sự"
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsEmployeeDropdownOpen((prev) => !prev)}
+                  aria-label={isEmployeeDropdownOpen ? 'Đóng danh sách nhân sự' : 'Mở danh sách nhân sự'}
+                  className="p-1 text-slate-400 hover:text-[#14539E] rounded cursor-pointer transition-transform"
+                >
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform duration-150 ${
+                      isEmployeeDropdownOpen ? 'rotate-180 text-[#14539E]' : ''
+                    }`}
+                  />
+                </button>
               </div>
+
+              {isEmployeeDropdownOpen && (
+                <div
+                  id="overtime-employee-popover"
+                  role="listbox"
+                  aria-multiselectable="true"
+                  className="absolute left-0 right-0 top-full mt-1 z-30 rounded-lg border border-slate-200 bg-white shadow-xl overflow-hidden"
+                >
+                  {/* Thanh đầu danh sách sổ xuống */}
+                  <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-slate-500 truncate">
+                      {selectedDepartment && selectedDepartment !== 'ALL' ? (
+                        <>
+                          Nhóm <strong className="text-slate-700">{selectedDepartment}</strong> • {filteredEmployeesForInput.length} người
+                        </>
+                      ) : (
+                        <>Tất cả bộ phận • {filteredEmployeesForInput.length} người</>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={filteredEmployeesForInput.length === 0}
+                      onClick={handleSelectAllFiltered}
+                      className="font-semibold text-[#14539E] hover:underline cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {filteredEmployeesForInput.length > 0 &&
+                      filteredEmployeesForInput.every((e) =>
+                        currentSelectedEmployeeIds.includes(e.id)
+                      )
+                        ? 'Bỏ chọn tất cả'
+                        : 'Chọn tất cả'}
+                    </button>
+                  </div>
+
+                  {/* Danh sách nhân sự cuộn bên trong popover */}
+                  <div className="max-h-48 overflow-y-auto p-1.5 space-y-1">
+                    {filteredEmployeesForInput.length === 0 ? (
+                      <div className="text-center py-4 text-xs text-slate-400">
+                        Không tìm thấy nhân sự phù hợp.
+                      </div>
+                    ) : (
+                      filteredEmployeesForInput.map((emp) => {
+                        const isSelected = currentSelectedEmployeeIds.includes(emp.id);
+                        return (
+                          <button
+                            key={emp.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => handleToggleEmployee(emp.id)}
+                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors select-none ${
+                              isSelected
+                                ? 'bg-blue-50/90 border border-blue-200 text-slate-900 font-semibold'
+                                : 'bg-white border border-transparent text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span
+                                aria-hidden="true"
+                                className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 ${
+                                  isSelected
+                                    ? 'bg-[#14539E] border-[#14539E]'
+                                    : 'border-slate-300 bg-white'
+                                }`}
+                              >
+                                {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                              </span>
+                              <div className="min-w-0 flex-1 truncate">
+                                <span>{emp.fullName}</span>
+                                <span className="text-slate-400 text-[10px] font-mono ml-1">
+                                  ({emp.employeeCode})
+                                </span>
+                              </div>
+                            </div>
+                            {(!selectedDepartment || selectedDepartment === 'ALL') && emp.department && (
+                              <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0 max-w-[90px] truncate">
+                                {emp.department}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Chân popover */}
+                  <div className="px-2.5 py-1.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">
+                      Đã tích chọn: <strong className="text-[#14539E]">{currentSelectedEmployeeIds.length}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsEmployeeDropdownOpen(false)}
+                      className="px-2 py-0.5 rounded bg-[#14539E] text-white font-semibold hover:bg-[#10427f] cursor-pointer transition-colors"
+                    >
+                      Xong
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-1.5 space-y-1">
-              {filteredEmployeesForInput.length === 0 ? (
-                <div className="text-center py-3 text-xs text-slate-400">Không tìm thấy nhân sự phù hợp.</div>
-              ) : (
-                filteredEmployeesForInput.map((emp) => {
-                  const isSelected = currentSelectedEmployeeIds.includes(emp.id);
+
+            {/* Danh sách thẻ nhân sự đã tích chọn gọn bên dưới ô tìm kiếm */}
+            {currentSelectedEmployeeIds.length > 0 && (
+              <div
+                data-testid="selected-employee-chips"
+                className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pt-0.5"
+              >
+                {currentSelectedEmployeeIds.map((empId) => {
+                  const emp = employeeMap.get(empId);
+                  if (!emp) return null;
                   const empStartTime = customTimes[emp.id]?.startTime || currentStartTime;
                   const empEndTime = customTimes[emp.id]?.endTime || currentEndTime;
                   const isCustomized = !!customTimes[emp.id];
@@ -759,55 +1007,238 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   return (
                     <div
                       key={emp.id}
-                      onClick={() => handleToggleEmployee(emp.id)}
-                      className={`flex items-center justify-between gap-1.5 p-1.5 rounded-md text-xs cursor-pointer transition-colors select-none ${isSelected ? 'bg-blue-50/80 border border-blue-200 text-slate-900 font-semibold' : 'bg-white border border-slate-100 text-slate-700 hover:bg-slate-100'}`}
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] max-w-full transition-colors ${
+                        isCustomized
+                          ? 'bg-amber-50/90 border-amber-300 text-slate-800'
+                          : 'bg-blue-50/75 border-blue-200 text-slate-800'
+                      }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span aria-hidden="true" className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 ${isSelected ? 'bg-[#14539E] border-[#14539E]' : 'border-slate-300 bg-white'}`}>
-                          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                        </span>
-                        <div className="min-w-0 flex-1 truncate">
-                          <span>{emp.fullName}</span>
-                          <span className="text-slate-400 text-[10px] font-mono ml-1">({emp.employeeCode})</span>
-                        </div>
-                      </div>
-                      {isSelected && (
-                        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {isEditingThis ? (
-                            <div className="flex items-center gap-1 bg-white p-0.5 rounded border border-[#14539E] shadow-2xs">
-                              <input type="text" maxLength={5} value={empStartTime} onChange={(e) => setCustomTimes((prev) => ({ ...prev, [emp.id]: { startTime: OvertimeFormService.sanitize24hTimeInput(e.target.value), endTime: prev[emp.id]?.endTime || currentEndTime } }))} onBlur={() => setCustomTimes((prev) => ({ ...prev, [emp.id]: { startTime: OvertimeFormService.normalize24hTime(empStartTime, currentStartTime), endTime: prev[emp.id]?.endTime || currentEndTime } }))} className="w-11 h-5 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]" placeholder="16:10" />
-                              <span className="text-[10px] text-slate-400">-</span>
-                              <input type="text" maxLength={5} value={empEndTime} onChange={(e) => setCustomTimes((prev) => ({ ...prev, [emp.id]: { startTime: prev[emp.id]?.startTime || currentStartTime, endTime: OvertimeFormService.sanitize24hTimeInput(e.target.value) } }))} onBlur={() => setCustomTimes((prev) => ({ ...prev, [emp.id]: { startTime: prev[emp.id]?.startTime || currentStartTime, endTime: OvertimeFormService.normalize24hTime(empEndTime, currentEndTime) } }))} className="w-11 h-5 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]" placeholder="20:10" />
-                              <button type="button" onClick={() => setEditingTimeEmpId(null)} className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer" title="Xong"><Check className="w-3 h-3 stroke-[2.5]" /></button>
-                              {isCustomized && (
-                                <button type="button" onClick={() => { setCustomTimes((prev) => { const next = { ...prev }; delete next[emp.id]; return next; }); setEditingTimeEmpId(null); }} className="p-0.5 text-slate-400 hover:text-red-500 rounded cursor-pointer" title="Khôi phục giờ chung"><X className="w-2.5 h-2.5" /></button>
-                              )}
-                            </div>
-                          ) : (
-                            <button type="button" onClick={() => setEditingTimeEmpId(emp.id)} className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border transition-all cursor-pointer ${isCustomized ? 'bg-amber-50 text-amber-800 border-amber-300 font-bold' : 'bg-slate-100 text-slate-600 border-slate-200 hover:border-blue-300 hover:bg-blue-50'}`} title="Click để sửa giờ riêng">
-                              <Clock className={`w-2.5 h-2.5 ${isCustomized ? 'text-amber-600' : 'text-slate-400'}`} />
-                              <span>{empStartTime} - {empEndTime}</span>
-                              {isCustomized && <span className="w-1 h-1 rounded-full bg-amber-500" />}
+                      <span className="font-medium truncate max-w-[135px]" title={`${emp.fullName} (${emp.employeeCode})`}>
+                        {emp.fullName}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                        ({emp.employeeCode})
+                      </span>
+
+                      {isEditingThis ? (
+                        <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
+                          <input
+                            type="text"
+                            maxLength={5}
+                            aria-label={`Giờ bắt đầu của ${emp.fullName}`}
+                            value={empStartTime}
+                            onChange={(e) =>
+                              setCustomTimes((prev) => ({
+                                ...prev,
+                                [emp.id]: {
+                                  startTime: OvertimeFormService.sanitize24hTimeInput(e.target.value),
+                                  endTime: prev[emp.id]?.endTime || currentEndTime,
+                                },
+                              }))
+                            }
+                            onBlur={() =>
+                              setCustomTimes((prev) => ({
+                                ...prev,
+                                [emp.id]: {
+                                  startTime: OvertimeFormService.normalize24hTime(empStartTime, currentStartTime),
+                                  endTime: prev[emp.id]?.endTime || currentEndTime,
+                                },
+                              }))
+                            }
+                            className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
+                            placeholder="16:10"
+                          />
+                          <span className="text-[10px] text-slate-400">-</span>
+                          <input
+                            type="text"
+                            maxLength={5}
+                            aria-label={`Giờ kết thúc của ${emp.fullName}`}
+                            value={empEndTime}
+                            onChange={(e) =>
+                              setCustomTimes((prev) => ({
+                                ...prev,
+                                [emp.id]: {
+                                  startTime: prev[emp.id]?.startTime || currentStartTime,
+                                  endTime: OvertimeFormService.sanitize24hTimeInput(e.target.value),
+                                },
+                              }))
+                            }
+                            onBlur={() =>
+                              setCustomTimes((prev) => ({
+                                ...prev,
+                                [emp.id]: {
+                                  startTime: prev[emp.id]?.startTime || currentStartTime,
+                                  endTime: OvertimeFormService.normalize24hTime(empEndTime, currentEndTime),
+                                },
+                              }))
+                            }
+                            className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
+                            placeholder="20:10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setEditingTimeEmpId(null)}
+                            className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                            title="Xong"
+                            aria-label={`Lưu giờ riêng của ${emp.fullName}`}
+                          >
+                            <Check className="w-2.5 h-2.5 stroke-[2.5]" />
+                          </button>
+                          {isCustomized && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomTimes((prev) => {
+                                  const next = { ...prev };
+                                  delete next[emp.id];
+                                  return next;
+                                });
+                                setEditingTimeEmpId(null);
+                              }}
+                              className="p-0.5 text-slate-400 hover:text-red-500 rounded cursor-pointer"
+                              title="Khôi phục giờ chung"
+                              aria-label={`Khôi phục giờ chung cho ${emp.fullName}`}
+                            >
+                              <X className="w-2.5 h-2.5" />
                             </button>
                           )}
                         </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setEditingTimeEmpId(emp.id)}
+                          className={`inline-flex items-center gap-0.5 text-[10px] font-mono px-1 py-0.5 rounded border transition-colors cursor-pointer shrink-0 ${
+                            isCustomized
+                              ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+                              : 'bg-white/80 text-slate-500 border-slate-200 hover:border-[#14539E] hover:text-[#14539E]'
+                          }`}
+                          title="Bấm để sửa giờ tăng ca riêng"
+                          aria-label={`Sửa giờ riêng cho ${emp.fullName}`}
+                        >
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>{empStartTime}-{empEndTime}</span>
+                        </button>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleToggleEmployee(emp.id);
+                          setCustomTimes((prev) => {
+                            if (!prev[emp.id]) return prev;
+                            const next = { ...prev };
+                            delete next[emp.id];
+                            return next;
+                          });
+                          if (editingTimeEmpId === emp.id) setEditingTimeEmpId(null);
+                        }}
+                        aria-label={`Bỏ chọn ${emp.fullName}`}
+                        title={`Bỏ chọn ${emp.fullName}`}
+                        className="p-0.5 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer shrink-0 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                     </div>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </div>
 
-          {/* HÀNG 4 */}
+          {/* HÀNG 4: TỪ ĐIỂN MẪU & LÝ DO VIỆT - HÀN */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-semibold text-slate-600">Lý do (Tiếng Việt)</label>
-              {isAutoTranslating && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]"><Loader2 className="w-3 h-3 animate-spin" /><span>Đang dịch...</span></span>}
+            <div>
+              <label
+                htmlFor="overtime-glossary-select"
+                className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 mb-1"
+              >
+                <BookOpen className="w-3 h-3 text-[#14539E]" />
+                <span>Mẫu lý do đã lưu ({glossaryEntries.length})</span>
+              </label>
+              <select
+                id="overtime-glossary-select"
+                value=""
+                onChange={(e) => handleSelectGlossaryTemplate(e.target.value)}
+                aria-label="Mẫu lý do đã lưu"
+                className="w-full h-8 px-2 text-xs font-medium text-slate-700 rounded-lg border border-slate-200 bg-slate-50/70 hover:border-slate-300 focus:outline-none focus:border-[#14539E] focus:bg-white cursor-pointer"
+              >
+                <option value="">-- Chọn nhanh mẫu câu Việt - Hàn --</option>
+                {glossaryEntries.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.reasonVi} — {item.reasonKr}
+                  </option>
+                ))}
+              </select>
             </div>
-            <textarea rows={2} value={currentReasonVi} onChange={(e) => setCurrentReasonVi(e.target.value)} placeholder="VD: Trực sản xuất, sửa máy..." className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all" />
-            <label className="block text-[11px] font-semibold text-slate-600">Lý do (Tiếng Hàn)</label>
-            <textarea rows={2} value={currentReasonKr} onChange={(e) => setCurrentReasonKr(e.target.value)} placeholder="생산 당직 (Tự động dịch)..." className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all" />
+
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="overtime-reason-vi"
+                className="block text-[11px] font-semibold text-slate-600"
+              >
+                Lý do (Tiếng Việt)
+              </label>
+              {isAutoTranslating && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Đang dịch...</span>
+                </span>
+              )}
+            </div>
+            <textarea
+              id="overtime-reason-vi"
+              rows={2}
+              value={currentReasonVi}
+              onChange={(e) => setCurrentReasonVi(e.target.value)}
+              placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp..."
+              className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+            />
+
+            <div className="flex items-center justify-between gap-2 pt-0.5">
+              <label
+                htmlFor="overtime-reason-kr"
+                className="block text-[11px] font-semibold text-slate-600 truncate"
+              >
+                Lý do (Tiếng Hàn)
+              </label>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={isAutoTranslating || !currentReasonVi.trim()}
+                  onClick={handleSuggestTranslation}
+                  className="h-6 px-2 rounded-md border border-[#14539E]/30 bg-blue-50/70 hover:bg-[#14539E] hover:text-white text-[#14539E] text-[10px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+                  title="Dịch gợi ý theo ngữ cảnh làm thêm giờ nhà máy"
+                >
+                  {isAutoTranslating ? (
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-2.5 h-2.5" />
+                  )}
+                  <span>Dịch gợi ý</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!currentReasonVi.trim() || !currentReasonKr.trim()}
+                  onClick={handleSaveGlossaryTemplate}
+                  className="h-6 px-2 rounded-md border border-slate-200 bg-white hover:border-[#14539E] hover:text-[#14539E] text-slate-600 text-[10px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+                  title="Lưu cặp Việt - Hàn hiện tại vào từ điển nội bộ"
+                >
+                  <BookmarkPlus className="w-2.5 h-2.5" />
+                  <span>+ Lưu mẫu</span>
+                </button>
+              </div>
+            </div>
+            <textarea
+              id="overtime-reason-kr"
+              rows={2}
+              value={currentReasonKr}
+              onChange={(e) => {
+                setCurrentReasonKr(e.target.value);
+                setIsReasonKrManuallyEdited(true);
+              }}
+              placeholder="생산 당직 (Tự động điền từ từ điển hoặc bấm Dịch gợi ý)..."
+              className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+            />
           </div>
 
         </div>

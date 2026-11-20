@@ -12,9 +12,7 @@ import {
   ShieldCheck,
   UserCheck,
   CalendarRange,
-  Layers,
   FileText,
-  Wallet,
   Clock,
 } from 'lucide-react';
 import { ActiveModule as BaseActiveModule, CompanyUnit, UserAccount } from '../types/hr';
@@ -22,12 +20,16 @@ import { ActiveModule as BaseActiveModule, CompanyUnit, UserAccount } from '../t
 export type ActiveModule = BaseActiveModule | 'overtime';
 
 export type LeaveSubTab = 'leave_requests' | 'leave_fund';
-export type ReportSubTab = 'monthly_summary' | 'annual_matrix';
+export type ReportSubTab =
+  | 'monthly_summary'
+  | 'annual_matrix'
+  | 'leave_fund'
+  | 'overtime_hours';
 
 export type HrChildMenuId =
   | 'employees_list'
   | 'leave_requests'
-  | 'leave_fund'
+  | 'overtime'
   | 'summary_report';
 
 export interface NavChildItem {
@@ -40,7 +42,7 @@ export interface NavChildItem {
 }
 
 export interface NavParentItem {
-  id: 'dashboard' | 'hr_module' | 'settings' | 'overtime';
+  id: 'dashboard' | 'hr_module' | 'settings';
   label: string;
   shortLabel: string;
   path?: string;
@@ -56,13 +58,6 @@ export const NAVIGATION_DATA: NavParentItem[] = [
     shortLabel: 'Trang chủ',
     path: '/',
     icon: LayoutDashboard,
-  },
-  {
-    id: 'overtime',
-    label: 'Tăng ca',
-    shortLabel: 'Tăng ca',
-    path: '/tang-ca',
-    icon: Clock,
   },
   {
     id: 'hr_module',
@@ -87,12 +82,12 @@ export const NAVIGATION_DATA: NavParentItem[] = [
         testId: 'sidebar-subnav-leave-requests',
       },
       {
-        id: 'leave_fund',
-        label: 'Quỹ phép năm',
-        shortLabel: 'Quỹ phép',
-        path: '/quy-phep-nam',
-        icon: Wallet,
-        testId: 'sidebar-subnav-leave-fund',
+        id: 'overtime',
+        label: 'Tăng ca',
+        shortLabel: 'Tăng ca',
+        path: '/tang-ca',
+        icon: Clock,
+        testId: 'sidebar-subnav-overtime',
       },
       {
         id: 'summary_report',
@@ -161,10 +156,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     [visibleNavItems]
   );
 
-  // Kiểm tra xem người dùng có đang đứng ở một trong 5 menu con của Module "Nhân sự" hay không
+  // Kiểm tra xem người dùng có đang đứng ở một trong các menu con của Module "Nhân sự" hay không
   const isInsideHrModule =
     activeModule === 'employees' ||
     activeModule === 'leave_logs' ||
+    activeModule === 'overtime' ||
     activeModule === 'annual_report';
 
   // Global state quản lý trạng thái đóng/mở chung của tất cả các Menu cha
@@ -221,9 +217,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       case 'employees_list':
         return activeModule === 'employees';
       case 'leave_requests':
-        return activeModule === 'leave_logs' && leaveSubTab === 'leave_requests';
-      case 'leave_fund':
-        return activeModule === 'leave_logs' && leaveSubTab === 'leave_fund';
+        return activeModule === 'leave_logs';
+      case 'overtime':
+        return activeModule === 'overtime';
       case 'summary_report':
         return activeModule === 'annual_report';
       default:
@@ -247,9 +243,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onSelectModule('leave_logs');
         onSelectLeaveSubTab?.('leave_requests');
         break;
-      case 'leave_fund':
-        onSelectModule('leave_logs');
-        onSelectLeaveSubTab?.('leave_fund');
+      case 'overtime':
+        onSelectModule('overtime');
         break;
       case 'summary_report':
         onSelectModule('annual_report');
@@ -437,10 +432,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               );
             }
 
-            // Các mục Menu cấp 1 đơn: "Trang chủ", "Tăng ca" và "Hệ thống / Cài đặt"
+            // Các mục Menu cấp 1 đơn: "Trang chủ" và "Hệ thống / Cài đặt"
             const isTopActive =
               (item.id === 'dashboard' && activeModule === 'dashboard') ||
-              (item.id === 'overtime' && activeModule === 'overtime') ||
               (item.id === 'settings' && activeModule === 'settings');
 
             return (
@@ -450,7 +444,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 data-testid={`sidebar-nav-${item.id}`}
                 onClick={() => {
                   if (item.id === 'dashboard') onSelectModule('dashboard');
-                  else if (item.id === 'overtime') onSelectModule('overtime');
                   else if (item.id === 'settings') onSelectModule('settings');
                 }}
                 title={collapsed ? item.label : undefined}
@@ -580,25 +573,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
           <span className="text-[10px] leading-tight whitespace-nowrap">
             Trang chủ
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onSelectModule('overtime')}
-          className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
-            activeModule === 'overtime'
-              ? 'bg-white text-[#14539E] font-bold'
-              : 'text-white/80 hover:text-white'
-          }`}
-        >
-          <Clock
-            className={`w-4 h-4 ${
-              activeModule === 'overtime' ? 'text-[#14539E]' : 'text-blue-100'
-            }`}
-          />
-          <span className="text-[10px] leading-tight whitespace-nowrap">
-            Tăng ca
           </span>
         </button>
 

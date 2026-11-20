@@ -33,9 +33,16 @@ export class HRRouteManager {
     }
     if (clean === '/quy-phep-nam') {
       return {
-        module: 'leave_logs',
-        leaveSubTab: 'leave_fund',
-        reportSubTab: 'monthly_summary',
+        module: 'annual_report',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'leave_fund',
+      };
+    }
+    if (clean === '/bao-cao-tang-ca' || clean === '/gio-tang-ca') {
+      return {
+        module: 'annual_report',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'overtime_hours',
       };
     }
     if (clean === '/bao-cao-tong-hop' || clean === '/bao-cao-thang') {
@@ -75,14 +82,15 @@ export class HRRouteManager {
 
   static getPathnameForState(
     module: ActiveModule,
-    leaveSubTab: LeaveSubTab,
-    _reportSubTab?: ReportSubTab
+    _leaveSubTab: LeaveSubTab,
+    reportSubTab?: ReportSubTab
   ): string {
     if (module === 'employees') return '/danh-sach-nhan-su';
-    if (module === 'leave_logs') {
-      return leaveSubTab === 'leave_fund' ? '/quy-phep-nam' : '/don-nghi';
-    }
+    if (module === 'leave_logs') return '/don-nghi';
     if (module === 'annual_report') {
+      if (reportSubTab === 'leave_fund') return '/quy-phep-nam';
+      if (reportSubTab === 'overtime_hours') return '/bao-cao-tang-ca';
+      if (reportSubTab === 'annual_matrix') return '/bao-cao-nam';
       return '/bao-cao-tong-hop';
     }
     if (module === 'overtime') return '/tang-ca';
