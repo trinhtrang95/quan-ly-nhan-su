@@ -2,6 +2,12 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { Employee } from '../types/hr';
 
+export interface OvertimeExportParticipant {
+  employeeId: string;
+  startTime: string;
+  endTime: string;
+}
+
 export interface OvertimeExportTaskBlock {
   id: string;
   overtimeDate?: string;
@@ -10,6 +16,7 @@ export interface OvertimeExportTaskBlock {
   startTime: string;
   endTime: string;
   selectedEmployeeIds: string[];
+  participants?: OvertimeExportParticipant[];
 }
 
 export interface OvertimeExportPayload {
@@ -314,27 +321,44 @@ export class OvertimeExportService {
       let sequentialNo = 1;
 
       for (const block of dateBlocks) {
-        const participantIds =
-          block.selectedEmployeeIds.length > 0
-            ? block.selectedEmployeeIds
-            : ['__EMPTY_PARTICIPANT__'];
+        const participants: OvertimeExportParticipant[] =
+          Array.isArray(block.participants) && block.participants.length > 0
+            ? block.participants
+            : block.selectedEmployeeIds.length > 0
+            ? block.selectedEmployeeIds.map((id) => ({
+                employeeId: id,
+                startTime: block.startTime,
+                endTime: block.endTime,
+              }))
+            : [
+                {
+                  employeeId: '__EMPTY_PARTICIPANT__',
+                  startTime: block.startTime,
+                  endTime: block.endTime,
+                },
+              ];
 
         const startRow = currentRowIndex;
-        const endRow = currentRowIndex + participantIds.length - 1;
+        const endRow = currentRowIndex + participants.length - 1;
 
         const combinedReason = buildCombinedReasonText(
           block.reasonVi,
           block.reasonKr
         );
-        const formattedStart = formatTimeToFormStyle(block.startTime);
-        const formattedEnd = formatTimeToFormStyle(block.endTime);
 
-        for (let i = 0; i < participantIds.length; i += 1) {
-          const empId = participantIds[i];
-          const emp = empById.get(empId);
+        for (let i = 0; i < participants.length; i += 1) {
+          const p = participants[i];
+          const emp = empById.get(p.employeeId);
           const rowNumber = currentRowIndex + i;
           const row = worksheet.getRow(rowNumber);
           row.height = 24;
+
+          const formattedStart = formatTimeToFormStyle(
+            p.startTime || block.startTime
+          );
+          const formattedEnd = formatTimeToFormStyle(
+            p.endTime || block.endTime
+          );
 
           // Cột (1): No (đếm lại từ 1 theo ngày)
           const cellNo = row.getCell(1);
@@ -358,13 +382,13 @@ export class OvertimeExportService {
             wrapText: true,
           };
 
-          // Cột (4): Giờ bắt đầu - HIỂN THỊ TRÊN TỪNG DÒNG NHÂN VIÊN
+          // Cột (4): Giờ bắt đầu - In chính xác giờ của từng cá nhân
           const cellStart = row.getCell(4);
           cellStart.value = formattedStart;
           cellStart.font = { name: FONT_NAME, size: 10, bold: true };
           cellStart.alignment = { vertical: 'middle', horizontal: 'center' };
 
-          // Cột (5): Giờ kết thúc - HIỂN THỊ TRÊN TỪNG DÒNG NHÂN VIÊN
+          // Cột (5): Giờ kết thúc - In chính xác giờ của từng cá nhân
           const cellEnd = row.getCell(5);
           cellEnd.value = formattedEnd;
           cellEnd.font = { name: FONT_NAME, size: 10, bold: true };

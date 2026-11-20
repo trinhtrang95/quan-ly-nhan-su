@@ -2230,6 +2230,12 @@ export interface OvertimeRecord {
   created_at?: string;
 }
 
+export interface OvertimeParticipantForFlatten {
+  employeeId: string;
+  startTime: string;
+  endTime: string;
+}
+
 export interface OvertimeBlockForFlatten {
   id: string;
   overtimeDate?: string;
@@ -2238,13 +2244,14 @@ export interface OvertimeBlockForFlatten {
   startTime: string;
   endTime: string;
   selectedEmployeeIds: string[];
+  participants?: OvertimeParticipantForFlatten[];
 }
 
 /**
  * Thuật toán Flatten (Phẳng hóa):
  * Duyệt qua từng Block (Nhóm công việc), bóc tách danh sách nhân viên đã chọn
  * để tạo ra mảng các dòng riêng biệt (mỗi nhân viên 1 dòng) trước khi Insert/Update vào bảng `overtime_records`.
- * Hỗ trợ lấy đúng `block.overtimeDate` của từng nhóm công việc khi gộp nhiều ngày trong cùng một phiếu.
+ * Hỗ trợ lấy đúng `block.overtimeDate` và giờ riêng từng cá nhân (participants) nếu được chỉnh sửa riêng.
  */
 export function flattenOvertimeBlocksToRecords(
   blocks: OvertimeBlockForFlatten[],
@@ -2257,22 +2264,35 @@ export function flattenOvertimeBlocksToRecords(
 
   for (const block of blocks) {
     const blockDate = block.overtimeDate || overtimeDate;
-    const [startH, startM] = (block.startTime || '00:00').split(':').map(Number);
-    const [endH, endM] = (block.endTime || '00:00').split(':').map(Number);
-    const diffMinutes =
-      !Number.isNaN(startH) &&
-      !Number.isNaN(startM) &&
-      !Number.isNaN(endH) &&
-      !Number.isNaN(endM)
-        ? endH * 60 + endM - (startH * 60 + startM)
-        : 0;
-    const totalHours =
-      diffMinutes > 0 ? Number((diffMinutes / 60).toFixed(2)) : 0;
 
-    for (const empId of block.selectedEmployeeIds) {
-      const emp = empById.get(empId);
+    const participantsList: OvertimeParticipantForFlatten[] =
+      Array.isArray(block.participants) && block.participants.length > 0
+        ? block.participants
+        : block.selectedEmployeeIds.map((empId) => ({
+            employeeId: empId,
+            startTime: block.startTime,
+            endTime: block.endTime,
+          }));
+
+    for (const p of participantsList) {
+      const emp = empById.get(p.employeeId);
+      const startT = p.startTime || block.startTime || '16:10';
+      const endT = p.endTime || block.endTime || '20:10';
+
+      const [startH, startM] = startT.split(':').map(Number);
+      const [endH, endM] = endT.split(':').map(Number);
+      const diffMinutes =
+        !Number.isNaN(startH) &&
+        !Number.isNaN(startM) &&
+        !Number.isNaN(endH) &&
+        !Number.isNaN(endM)
+          ? endH * 60 + endM - (startH * 60 + startM)
+          : 0;
+      const totalHours =
+        diffMinutes > 0 ? Number((diffMinutes / 60).toFixed(2)) : 0;
+
       flattened.push({
-        employee_id: empId,
+        employee_id: p.employeeId,
         employee_code: emp?.employeeCode || '',
         employee_name: emp?.fullName || '',
         department:
@@ -2282,8 +2302,8 @@ export function flattenOvertimeBlocksToRecords(
         overtime_date: blockDate,
         reason_vi: block.reasonVi.trim(),
         reason_kr: block.reasonKr.trim(),
-        start_time: block.startTime,
-        end_time: block.endTime,
+        start_time: startT,
+        end_time: endT,
         total_hours: totalHours,
         block_id: block.id,
         is_deleted: false,

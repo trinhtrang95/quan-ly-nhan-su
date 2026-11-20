@@ -30,14 +30,21 @@ import {
   overtimeExportService,
 } from '../../utils/overtimeExportService';
 
+export interface OvertimeParticipant {
+  employeeId: string;
+  startTime: string;
+  endTime: string;
+}
+
 export interface OvertimeTaskBlock {
   id: string;
   overtimeDate: string; // YYYY-MM-DD
   reasonVi: string;
   reasonKr: string;
-  startTime: string;
-  endTime: string;
+  startTime: string; // Giờ chung
+  endTime: string;   // Giờ chung
   selectedEmployeeIds: string[];
+  participants: OvertimeParticipant[]; // Từng nhân sự kèm giờ riêng
   isTranslating?: boolean;
 }
 
@@ -108,6 +115,7 @@ class OvertimeFormService {
       startTime: '16:10',
       endTime: '20:10',
       selectedEmployeeIds: [],
+      participants: [],
       isTranslating: false,
     };
   }
@@ -194,27 +202,31 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   // 1. STATE QUẢN LÝ FORM & BỘ LỌC
   // =========================================================================
 
-  // Bước 1: Bộ phận (chung toàn phiếu) & Ngày làm thêm (cho nhóm đang nhập)
+  // Hàng 1: Bộ phận / Nhóm & Ngày làm thêm
   const [selectedDepartment, setSelectedDepartment] =
     useState<string>(initialDepartment);
   const [overtimeDate, setOvertimeDate] = useState<string>(initialDate);
 
-  // Bước 2: Danh sách nhân sự đang chọn trong nhóm hiện tại & bộ lọc
+  // Hàng 2: Giờ tăng ca (Giờ chung)
+  const [currentStartTime, setCurrentStartTime] = useState<string>('16:10');
+  const [currentEndTime, setCurrentEndTime] = useState<string>('20:10');
+
+  // Hàng 3: Chọn nhân sự + State chỉnh giờ riêng từng cá nhân
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
+  const [customTimes, setCustomTimes] = useState<
+    Record<string, { startTime: string; endTime: string }>
+  >({});
+  const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
   const [employeeGroupFilter, setEmployeeGroupFilter] = useState<string>(initialDepartment);
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState<string>('');
 
-  // Bước 3: Nội dung / Lý do (Tiếng Việt -> Tiếng Hàn)
+  // Hàng 4: Lý do tăng ca (Tiếng Việt -> Tiếng Hàn)
   const [currentReasonVi, setCurrentReasonVi] = useState<string>('Trực sản xuất');
   const [currentReasonKr, setCurrentReasonKr] = useState<string>('생산 당직');
   const [isAutoTranslating, setIsAutoTranslating] = useState<boolean>(false);
   const isInitialReasonMountRef = useRef<boolean>(true);
 
-  // Bước 4: Giờ bắt đầu (mặc định 16:10) & Giờ kết thúc (mặc định 20:10)
-  const [currentStartTime, setCurrentStartTime] = useState<string>('16:10');
-  const [currentEndTime, setCurrentEndTime] = useState<string>('20:10');
-
-  // Mảng State previewData chứa danh sách các Block đã được "Ghi nhận" (kèm overtimeDate riêng từng nhóm)
+  // Hàng 6: Mảng State previewData chứa danh sách các Block đã được "Ghi nhận"
   const [previewData, setPreviewData] = useState<OvertimeTaskBlock[]>([]);
 
   // Trạng thái đang xử lý lưu DB / xuất file
@@ -273,13 +285,21 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
     for (const block of previewData) {
       if (block.overtimeDate) dateSet.add(block.overtimeDate);
-      const count = block.selectedEmployeeIds.length;
-      const hours = OvertimeFormService.calculateDurationHours(
-        block.startTime,
-        block.endTime
-      );
-      totalParticipants += count;
-      totalHours += count * hours;
+      const parts =
+        Array.isArray(block.participants) && block.participants.length > 0
+          ? block.participants
+          : block.selectedEmployeeIds.map((id) => ({
+              employeeId: id,
+              startTime: block.startTime,
+              endTime: block.endTime,
+            }));
+      totalParticipants += parts.length;
+      for (const p of parts) {
+        totalHours += OvertimeFormService.calculateDurationHours(
+          p.startTime || block.startTime,
+          p.endTime || block.endTime
+        );
+      }
     }
 
     return {
@@ -353,7 +373,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   };
 
   // =========================================================================
-  // 2. BƯỚC 5: HÀNH ĐỘNG GHI NHẬN VÀO DANH SÁCH XEM TRƯỚC
+  // 2. HÀNG 5: HÀNH ĐỘNG GHI NHẬN VÀO DANH SÁCH XEM TRƯỚC
   // =========================================================================
   const handleCommitBlock = async () => {
     if (currentSelectedEmployeeIds.length === 0) {
@@ -380,7 +400,22 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       currentReasonKr.trim() ||
       (await translateVnToKr(currentReasonVi.trim()));
 
-    // Lưu kèm overtimeDate đang chọn vào block mới
+    // Xây dựng mảng participants lưu kèm giờ riêng của từng nhân sự
+    const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map(
+      (empId) => {
+        const custom = customTimes[empId];
+        return {
+          employeeId: empId,
+          startTime: custom?.startTime
+            ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart)
+            : normalizedStart,
+          endTime: custom?.endTime
+            ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd)
+            : normalizedEnd,
+        };
+      }
+    );
+
     const newBlock: OvertimeTaskBlock = {
       id: `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       overtimeDate: overtimeDate || '2026-11-16',
@@ -389,16 +424,18 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       startTime: normalizedStart,
       endTime: normalizedEnd,
       selectedEmployeeIds: [...currentSelectedEmployeeIds],
+      participants,
       isTranslating: false,
     };
 
     setPreviewData((prev) => [...prev, newBlock]);
 
-    // Reset selectedEmployeeIds về [] và reasonVi, reasonKr về rỗng
-    // Giữ nguyên overtimeDate, startTime, endTime để người dùng nhập tiếp nhóm khác
+    // Reset các ô đã chọn và form nhưng giữ nguyên overtimeDate, startTime, endTime
     setCurrentReasonVi('');
     setCurrentReasonKr('');
     setCurrentSelectedEmployeeIds([]);
+    setCustomTimes({});
+    setEditingTimeEmpId(null);
     showToast(
       `Đã ghi nhận nhóm [${formatDateToFormStyle(newBlock.overtimeDate)}] vào danh sách xem trước!`
     );
@@ -489,22 +526,42 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   };
 
   // =========================================================================
-  // 3. XỬ LÝ DỮ LIỆU HIỂN THỊ PREVIEW & PRINT (GOM THEO TỪNG OVERTIME DATE)
+  // 3. XỬ LÝ DỮ LIỆU HIỂN THỊ PREVIEW & PRINT (IN GIỜ RIÊNG CỦA TỪNG CÁ NHÂN)
   // =========================================================================
   const printableDateGroups = useMemo((): PrintableDateGroup[] => {
-    // Nếu chưa ghi nhận nhóm nào, hiển thị nhóm phác thảo (Draft) cho ngày đang chọn
     if (previewData.length === 0) {
-      const draftParticipantIds =
+      // Nhóm Draft đang soạn thảo
+      const draftParticipants: OvertimeParticipant[] =
         currentSelectedEmployeeIds.length > 0
-          ? currentSelectedEmployeeIds
-          : ['__EMPTY_PARTICIPANT__'];
+          ? currentSelectedEmployeeIds.map((id) => ({
+              employeeId: id,
+              startTime:
+                customTimes[id]?.startTime
+                  ? OvertimeFormService.normalize24hTime(
+                      customTimes[id].startTime,
+                      currentStartTime
+                    )
+                  : currentStartTime,
+              endTime:
+                customTimes[id]?.endTime
+                  ? OvertimeFormService.normalize24hTime(
+                      customTimes[id].endTime,
+                      currentEndTime
+                    )
+                  : currentEndTime,
+            }))
+          : [
+              {
+                employeeId: '__EMPTY_PARTICIPANT__',
+                startTime: currentStartTime || '16:10',
+                endTime: currentEndTime || '20:10',
+              },
+            ];
 
       const combinedReason = buildCombinedReasonText(
         currentReasonVi || 'Trực sản xuất',
         currentReasonKr || '생산 당직'
       );
-      const startTimeFormatted = formatTimeToFormStyle(currentStartTime || '16:10');
-      const endTimeFormatted = formatTimeToFormStyle(currentEndTime || '20:10');
 
       return [
         {
@@ -513,16 +570,16 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           blocks: [
             {
               blockId: 'draft-block',
-              rows: draftParticipantIds.map((empId, idx) => {
-                const emp = employeeMap.get(empId);
+              rows: draftParticipants.map((p, idx) => {
+                const emp = employeeMap.get(p.employeeId);
                 return {
                   no: idx + 1,
                   fullName: emp ? emp.fullName : '(Chưa chọn nhân sự)',
                   isFirstInBlock: idx === 0,
-                  rowSpan: draftParticipantIds.length,
+                  rowSpan: draftParticipants.length,
                   combinedReason,
-                  startTimeFormatted,
-                  endTimeFormatted,
+                  startTimeFormatted: formatTimeToFormStyle(p.startTime),
+                  endTimeFormatted: formatTimeToFormStyle(p.endTime),
                 };
               }),
             },
@@ -531,7 +588,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       ];
     }
 
-    // Gom các block trong previewData theo từng overtimeDate
+    // Gom các block đã ghi nhận theo overtimeDate
     const mapByDate = new Map<string, OvertimeTaskBlock[]>();
     for (const block of previewData) {
       const d = block.overtimeDate || overtimeDate;
@@ -541,40 +598,53 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       mapByDate.get(d)!.push(block);
     }
 
-    // Sắp xếp các ngày tăng dần
     const sortedDates = Array.from(mapByDate.keys()).sort((a, b) =>
       a.localeCompare(b)
     );
 
     return sortedDates.map((date) => {
       const blocksForDate = mapByDate.get(date)!;
-      let runningNo = 1; // Reset cột No đếm lại từ 1 cho ngày mới!
+      let runningNo = 1;
 
       const processedBlocks = blocksForDate.map((block) => {
-        const participantIds =
-          block.selectedEmployeeIds.length > 0
-            ? block.selectedEmployeeIds
-            : ['__EMPTY_PARTICIPANT__'];
+        const participants: OvertimeParticipant[] =
+          Array.isArray(block.participants) && block.participants.length > 0
+            ? block.participants
+            : block.selectedEmployeeIds.length > 0
+            ? block.selectedEmployeeIds.map((id) => ({
+                employeeId: id,
+                startTime: block.startTime,
+                endTime: block.endTime,
+              }))
+            : [
+                {
+                  employeeId: '__EMPTY_PARTICIPANT__',
+                  startTime: block.startTime,
+                  endTime: block.endTime,
+                },
+              ];
 
         const combinedReason = buildCombinedReasonText(
           block.reasonVi,
           block.reasonKr
         );
-        const startTimeFormatted = formatTimeToFormStyle(block.startTime);
-        const endTimeFormatted = formatTimeToFormStyle(block.endTime);
 
-        const rows: PrintableRow[] = participantIds.map((empId, idxInBlock) => {
-          const emp = employeeMap.get(empId);
+        const rows: PrintableRow[] = participants.map((p, idxInBlock) => {
+          const emp = employeeMap.get(p.employeeId);
           const no = runningNo;
           runningNo += 1;
           return {
             no,
             fullName: emp ? emp.fullName : '(Chưa chọn nhân sự)',
             isFirstInBlock: idxInBlock === 0,
-            rowSpan: participantIds.length,
+            rowSpan: participants.length,
             combinedReason,
-            startTimeFormatted,
-            endTimeFormatted,
+            startTimeFormatted: formatTimeToFormStyle(
+              p.startTime || block.startTime
+            ),
+            endTimeFormatted: formatTimeToFormStyle(
+              p.endTime || block.endTime
+            ),
           };
         });
 
@@ -595,6 +665,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     employeeMap,
     overtimeDate,
     currentSelectedEmployeeIds,
+    customTimes,
     currentReasonVi,
     currentReasonKr,
     currentStartTime,
@@ -604,95 +675,167 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   return (
     <div className="flex flex-col lg:flex-row w-full h-full flex-1 min-h-0 overflow-hidden p-4 gap-4 bg-slate-50 text-slate-800">
       {/* ===================================================================
-          CỘT TRÁI (1/3) - BẢNG ĐIỀU KHIỂN / FORM NHẬP LIỆU 5 BƯỚC CHUẨN
+          CỘT TRÁI (1/3) - BẢNG ĐIỀU KHIỂN TỐI GIẢN 6 HÀNG (MINIMALIST UI)
       =================================================================== */}
       <div className="w-full lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
         {/* Header form */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50/50">
-          <div>
-            <h2 className="text-xl font-bold text-[#14539E]">Tạo phiếu tăng ca</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Quy trình 5 bước • Hỗ trợ gộp nhiều ngày vào một phiếu
-            </p>
-          </div>
-          <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-[#14539E] border border-blue-200 shrink-0">
+        <div className="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50/50">
+          <h2 className="text-base font-bold text-[#14539E]">Tạo phiếu tăng ca</h2>
+          <span className="text-xs font-mono font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-[#14539E] border border-blue-200 shrink-0">
             TV-PSGC2022
           </span>
         </div>
 
-        {/* Form cuộn dọc theo 5 bước chuẩn */}
-        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
+        {/* 6 Hàng nhập liệu tối giản */}
+        <div className="p-4 space-y-3.5 overflow-y-auto flex-1">
           {/* ===============================================================
-              BƯỚC 1 (Thời gian & Đơn vị): Hàng trên cùng gồm Bộ phận & Ngày
+              HÀNG 1: Nhóm & Ngày làm thêm (grid 2 cột)
           =============================================================== */}
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-              <span className="w-5 h-5 rounded-full bg-[#14539E] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                1
-              </span>
-              <span>Thời gian &amp; Đơn vị</span>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label
+                htmlFor="overtime-department-select"
+                className="block text-[11px] font-semibold text-slate-600 mb-1"
+              >
+                Bộ phận / Nhóm
+              </label>
+              <select
+                id="overtime-department-select"
+                value={selectedDepartment}
+                onChange={(e) => {
+                  setSelectedDepartment(e.target.value);
+                  setEmployeeGroupFilter(e.target.value);
+                }}
+                className="w-full h-9 px-2.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
+              >
+                <option value="ALL">Tất cả bộ phận</option>
+                {groups.map((grp) => (
+                  <option key={grp.id} value={grp.name}>
+                    {grp.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label
-                  htmlFor="overtime-department-select"
-                  className="block text-[11px] font-semibold text-slate-600 mb-1"
-                >
-                  Bộ phận (Toàn phiếu)
-                </label>
-                <select
-                  id="overtime-department-select"
-                  value={selectedDepartment}
-                  onChange={(e) => {
-                    setSelectedDepartment(e.target.value);
-                    setEmployeeGroupFilter(e.target.value);
-                  }}
-                  className="w-full h-9 px-2.5 py-1.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
-                >
-                  <option value="ALL">Tất cả bộ phận</option>
-                  {groups.map((grp) => (
-                    <option key={grp.id} value={grp.name}>
-                      {grp.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="overtime-date-input"
-                  className="block text-[11px] font-semibold text-slate-600 mb-1"
-                >
-                  Ngày làm thêm (Nhóm này)
-                </label>
-                <div className="relative">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="overtime-date-input"
-                    type="date"
-                    value={overtimeDate}
-                    onChange={(e) => setOvertimeDate(e.target.value)}
-                    className="w-full h-9 pl-8 pr-2 py-1.5 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
-                  />
-                </div>
+            <div>
+              <label
+                htmlFor="overtime-date-input"
+                className="block text-[11px] font-semibold text-slate-600 mb-1"
+              >
+                Ngày làm thêm
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="overtime-date-input"
+                  type="date"
+                  value={overtimeDate}
+                  onChange={(e) => setOvertimeDate(e.target.value)}
+                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
+                />
               </div>
             </div>
           </div>
 
           {/* ===============================================================
-              BƯỚC 2 (Chọn nhân sự): Bộ lọc + Tìm kiếm + Multi-select Checkbox
+              HÀNG 2: Giờ tăng ca (Giờ chung) (grid 2 cột)
           =============================================================== */}
-          <div className="space-y-2 pt-2 border-t border-slate-200/70">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <span className="w-5 h-5 rounded-full bg-[#14539E] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                  2
-                </span>
-                <span>
-                  Chọn nhân sự ({currentSelectedEmployeeIds.length} đã chọn)
-                </span>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label
+                htmlFor="start-time-input"
+                className="block text-[11px] font-semibold text-slate-600 mb-1"
+              >
+                Giờ bắt đầu (chung)
+              </label>
+              <div className="relative">
+                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="start-time-input"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{2}:[0-9]{2}"
+                  maxLength={5}
+                  list="overtime-24h-slots"
+                  placeholder="16:10"
+                  value={currentStartTime}
+                  onChange={(e) =>
+                    setCurrentStartTime(
+                      OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                    )
+                  }
+                  onBlur={() =>
+                    setCurrentStartTime((prev) =>
+                      OvertimeFormService.normalize24hTime(prev, '16:10')
+                    )
+                  }
+                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                />
               </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="end-time-input"
+                className="block text-[11px] font-semibold text-slate-600 mb-1"
+              >
+                Giờ kết thúc (chung)
+              </label>
+              <div className="relative">
+                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="end-time-input"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{2}:[0-9]{2}"
+                  maxLength={5}
+                  list="overtime-24h-slots"
+                  placeholder="20:10"
+                  value={currentEndTime}
+                  onChange={(e) =>
+                    setCurrentEndTime(
+                      OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                    )
+                  }
+                  onBlur={() =>
+                    setCurrentEndTime((prev) =>
+                      OvertimeFormService.normalize24hTime(prev, '20:10')
+                    )
+                  }
+                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                />
+              </div>
+            </div>
+
+            <datalist id="overtime-24h-slots">
+              <option value="07:00" />
+              <option value="08:00" />
+              <option value="12:00" />
+              <option value="16:10" />
+              <option value="17:00" />
+              <option value="17:30" />
+              <option value="18:00" />
+              <option value="18:30" />
+              <option value="19:00" />
+              <option value="19:30" />
+              <option value="20:00" />
+              <option value="20:10" />
+              <option value="20:30" />
+              <option value="21:00" />
+              <option value="21:30" />
+              <option value="22:00" />
+              <option value="23:00" />
+            </datalist>
+          </div>
+
+          {/* ===============================================================
+              HÀNG 3: Chọn nhân sự (Tích hợp chỉnh giờ riêng - Smart Inline Edit)
+          =============================================================== */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-600">
+                Nhân sự tham gia ({currentSelectedEmployeeIds.length} đã chọn)
+              </span>
               <button
                 type="button"
                 onClick={handleSelectAllFiltered}
@@ -707,16 +850,16 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               </button>
             </div>
 
-            {/* Bộ lọc Bộ phận & Ô tìm kiếm nhân sự */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {/* Lọc theo nhóm & Ô tìm kiếm */}
+            <div className="grid grid-cols-2 gap-2">
               <select
                 id="employee-group-filter"
-                aria-label="Chọn theo bộ phận/nhóm"
+                aria-label="Lọc theo nhóm"
                 value={employeeGroupFilter}
                 onChange={(e) => setEmployeeGroupFilter(e.target.value)}
                 className="w-full h-8 px-2 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
               >
-                <option value="ALL">Bộ phận: Tất cả</option>
+                <option value="ALL">Lọc nhóm: Tất cả</option>
                 {departmentFilterOptions.map((deptName) => (
                   <option key={deptName} value={deptName}>
                     {deptName}
@@ -725,20 +868,20 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               </select>
 
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
-                  aria-label="Tìm kiếm mã NV, họ tên"
+                  aria-label="Tìm mã, tên..."
                   value={employeeSearchQuery}
                   onChange={(e) => setEmployeeSearchQuery(e.target.value)}
-                  placeholder="Tìm mã NV, tên..."
-                  className="w-full h-8 pl-8 pr-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                  placeholder="Tìm mã, tên..."
+                  className="w-full h-8 pl-7 pr-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
                 />
               </div>
             </div>
 
-            {/* Danh sách checkbox nhân sự */}
-            <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-1.5 space-y-1">
+            {/* Danh sách checkbox nhân viên với Smart Inline Edit */}
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-1.5 space-y-1">
               {filteredEmployeesForInput.length === 0 ? (
                 <div className="text-center py-3 text-xs text-slate-400">
                   Không tìm thấy nhân sự phù hợp.
@@ -746,43 +889,169 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               ) : (
                 filteredEmployeesForInput.map((emp) => {
                   const isSelected = currentSelectedEmployeeIds.includes(emp.id);
+                  const empStartTime = customTimes[emp.id]?.startTime || currentStartTime;
+                  const empEndTime = customTimes[emp.id]?.endTime || currentEndTime;
+                  const isCustomized = !!customTimes[emp.id];
+                  const isEditingThis = editingTimeEmpId === emp.id;
+
                   return (
                     <div
                       key={emp.id}
-                      role="checkbox"
-                      aria-checked={isSelected}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleToggleEmployee(emp.id);
-                      }}
-                      className={`flex items-center gap-2 p-1.5 rounded-md text-xs cursor-pointer transition-colors select-none ${
+                      onClick={() => handleToggleEmployee(emp.id)}
+                      className={`flex items-center justify-between gap-1.5 p-1.5 rounded-md text-xs cursor-pointer transition-colors select-none ${
                         isSelected
-                          ? 'bg-blue-50 border border-blue-200 text-slate-900 font-semibold'
+                          ? 'bg-blue-50/80 border border-blue-200 text-slate-900 font-semibold'
                           : 'bg-white border border-slate-100 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      <span
-                        aria-hidden="true"
-                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 ${
-                          isSelected
-                            ? 'bg-[#14539E] border-[#14539E]'
-                            : 'border-slate-300 bg-white'
-                        }`}
-                      >
-                        {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                      </span>
-                      <div className="min-w-0 flex-1 truncate">
-                        <span>{emp.fullName}</span>
-                        <span className="text-slate-400 text-[10px] font-mono ml-1">
-                          ({emp.employeeCode})
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span
+                          aria-hidden="true"
+                          className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 ${
+                            isSelected
+                              ? 'bg-[#14539E] border-[#14539E]'
+                              : 'border-slate-300 bg-white'
+                          }`}
+                        >
+                          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                         </span>
-                        {emp.department && (
-                          <span className="text-slate-400 text-[10px] ml-1">
-                            • {emp.department}
+                        <div className="min-w-0 flex-1 truncate">
+                          <span>{emp.fullName}</span>
+                          <span className="text-slate-400 text-[10px] font-mono ml-1">
+                            ({emp.employeeCode})
                           </span>
-                        )}
+                        </div>
                       </div>
+
+                      {/* Smart Inline Edit: chỉ hiển thị khi nhân viên được tick chọn */}
+                      {isSelected && (
+                        <div
+                          className="shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {isEditingThis ? (
+                            <div className="flex items-center gap-1 bg-white p-0.5 rounded border border-[#14539E] shadow-2xs">
+                              <input
+                                type="text"
+                                maxLength={5}
+                                value={empStartTime}
+                                onChange={(e) => {
+                                  const val = OvertimeFormService.sanitize24hTimeInput(
+                                    e.target.value
+                                  );
+                                  setCustomTimes((prev) => ({
+                                    ...prev,
+                                    [emp.id]: {
+                                      startTime: val,
+                                      endTime:
+                                        prev[emp.id]?.endTime || currentEndTime,
+                                    },
+                                  }));
+                                }}
+                                onBlur={() => {
+                                  setCustomTimes((prev) => ({
+                                    ...prev,
+                                    [emp.id]: {
+                                      startTime: OvertimeFormService.normalize24hTime(
+                                        empStartTime,
+                                        currentStartTime
+                                      ),
+                                      endTime:
+                                        prev[emp.id]?.endTime || currentEndTime,
+                                    },
+                                  }));
+                                }}
+                                className="w-11 h-5 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
+                                placeholder="16:10"
+                              />
+                              <span className="text-[10px] text-slate-400">-</span>
+                              <input
+                                type="text"
+                                maxLength={5}
+                                value={empEndTime}
+                                onChange={(e) => {
+                                  const val = OvertimeFormService.sanitize24hTimeInput(
+                                    e.target.value
+                                  );
+                                  setCustomTimes((prev) => ({
+                                    ...prev,
+                                    [emp.id]: {
+                                      startTime:
+                                        prev[emp.id]?.startTime || currentStartTime,
+                                      endTime: val,
+                                    },
+                                  }));
+                                }}
+                                onBlur={() => {
+                                  setCustomTimes((prev) => ({
+                                    ...prev,
+                                    [emp.id]: {
+                                      startTime:
+                                        prev[emp.id]?.startTime || currentStartTime,
+                                      endTime: OvertimeFormService.normalize24hTime(
+                                        empEndTime,
+                                        currentEndTime
+                                      ),
+                                    },
+                                  }));
+                                }}
+                                className="w-11 h-5 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
+                                placeholder="20:10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setEditingTimeEmpId(null)}
+                                className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                                title="Xong"
+                              >
+                                <Check className="w-3 h-3 stroke-[2.5]" />
+                              </button>
+                              {isCustomized && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomTimes((prev) => {
+                                      const next = { ...prev };
+                                      delete next[emp.id];
+                                      return next;
+                                    });
+                                    setEditingTimeEmpId(null);
+                                  }}
+                                  className="p-0.5 text-slate-400 hover:text-red-500 rounded cursor-pointer"
+                                  title="Khôi phục giờ chung"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setEditingTimeEmpId(emp.id)}
+                              className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border transition-all cursor-pointer ${
+                                isCustomized
+                                  ? 'bg-amber-50 text-amber-800 border-amber-300 font-bold'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:border-blue-300 hover:bg-blue-50'
+                              }`}
+                              title="Click để sửa giờ riêng cho nhân sự này"
+                            >
+                              <Clock
+                                className={`w-2.5 h-2.5 ${
+                                  isCustomized
+                                    ? 'text-amber-600'
+                                    : 'text-slate-400'
+                                }`}
+                              />
+                              <span>
+                                {empStartTime} - {empEndTime}
+                              </span>
+                              {isCustomized && (
+                                <span className="w-1 h-1 rounded-full bg-amber-500" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -791,224 +1060,104 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           </div>
 
           {/* ===============================================================
-              BƯỚC 3 (Nội dung / Lý do): Tiếng Việt Debounce 500ms -> Tiếng Hàn
+              HÀNG 4: Lý do tăng ca (Tiếng Việt & Tiếng Hàn)
           =============================================================== */}
-          <div className="space-y-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50/50">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <span className="w-5 h-5 rounded-full bg-[#14539E] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                  3
-                </span>
-                <span>Nội dung / Lý do tăng ca</span>
-              </div>
+              <label
+                htmlFor="reason-vi-input"
+                className="block text-[11px] font-semibold text-slate-600"
+              >
+                Lý do (Tiếng Việt)
+              </label>
               {isAutoTranslating && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#14539E]">
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   <span>Đang dịch...</span>
                 </span>
               )}
             </div>
+            <textarea
+              id="reason-vi-input"
+              rows={2}
+              value={currentReasonVi}
+              onChange={(e) => setCurrentReasonVi(e.target.value)}
+              placeholder="VD: Trực sản xuất, sửa máy, hàng gấp..."
+              className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+            />
 
-            <div>
-              <label
-                htmlFor="reason-vi-input"
-                className="block text-[11px] font-semibold text-slate-500 mb-1"
-              >
-                Lý do (Tiếng Việt)
-              </label>
-              <textarea
-                id="reason-vi-input"
-                rows={2}
-                value={currentReasonVi}
-                onChange={(e) => setCurrentReasonVi(e.target.value)}
-                placeholder="VD: Trực sản xuất, sửa máy, hàng gấp..."
-                className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="reason-kr-input"
-                className="block text-[11px] font-semibold text-slate-500 mb-1"
-              >
-                Lý do (Tiếng Hàn)
-              </label>
-              <textarea
-                id="reason-kr-input"
-                rows={2}
-                value={currentReasonKr}
-                onChange={(e) => setCurrentReasonKr(e.target.value)}
-                placeholder="생산 당직 (Tự động dịch sau 500ms dừng gõ)..."
-                className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
-              />
-            </div>
-          </div>
-
-          {/* ===============================================================
-              BƯỚC 4 (Giờ tăng ca): Giờ bắt đầu (16:10) & Giờ kết thúc (20:10)
-          =============================================================== */}
-          <div className="space-y-1.5 pt-2 border-t border-slate-200/70">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-              <span className="w-5 h-5 rounded-full bg-[#14539E] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                4
-              </span>
-              <span>Giờ tăng ca (24h)</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label
-                  htmlFor="start-time-input"
-                  className="block text-[11px] font-semibold text-slate-600 mb-1"
-                >
-                  Giờ bắt đầu (24h)
-                </label>
-                <div className="relative">
-                  <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="start-time-input"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]{2}:[0-9]{2}"
-                    maxLength={5}
-                    list="overtime-24h-slots"
-                    placeholder="16:10"
-                    title="Định dạng 24 giờ (HH:mm), ví dụ: 16:10"
-                    value={currentStartTime}
-                    onChange={(e) =>
-                      setCurrentStartTime(
-                        OvertimeFormService.sanitize24hTimeInput(e.target.value)
-                      )
-                    }
-                    onBlur={() =>
-                      setCurrentStartTime((prev) =>
-                        OvertimeFormService.normalize24hTime(prev, '16:10')
-                      )
-                    }
-                    className="w-full h-9 pl-8 pr-2 py-1.5 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="end-time-input"
-                  className="block text-[11px] font-semibold text-slate-600 mb-1"
-                >
-                  Giờ kết thúc (24h)
-                </label>
-                <div className="relative">
-                  <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="end-time-input"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]{2}:[0-9]{2}"
-                    maxLength={5}
-                    list="overtime-24h-slots"
-                    placeholder="20:10"
-                    title="Định dạng 24 giờ (HH:mm), ví dụ: 20:10"
-                    value={currentEndTime}
-                    onChange={(e) =>
-                      setCurrentEndTime(
-                        OvertimeFormService.sanitize24hTimeInput(e.target.value)
-                      )
-                    }
-                    onBlur={() =>
-                      setCurrentEndTime((prev) =>
-                        OvertimeFormService.normalize24hTime(prev, '20:10')
-                      )
-                    }
-                    className="w-full h-9 pl-8 pr-2 py-1.5 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
-                  />
-                </div>
-              </div>
-
-              <datalist id="overtime-24h-slots">
-                <option value="07:00" />
-                <option value="08:00" />
-                <option value="12:00" />
-                <option value="16:10" />
-                <option value="17:00" />
-                <option value="17:30" />
-                <option value="18:00" />
-                <option value="18:30" />
-                <option value="19:00" />
-                <option value="19:30" />
-                <option value="20:00" />
-                <option value="20:10" />
-                <option value="20:30" />
-                <option value="21:00" />
-                <option value="21:30" />
-                <option value="22:00" />
-                <option value="23:00" />
-              </datalist>
-            </div>
-          </div>
-
-          {/* ===============================================================
-              BƯỚC 5 (Ghi nhận): Nút Ghi nhận & Danh sách các nhóm đã ghi nhận
-          =============================================================== */}
-          <div className="space-y-2.5 pt-2 border-t border-slate-200/70">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-              <span className="w-5 h-5 rounded-full bg-[#14539E] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                5
-              </span>
-              <span>Ghi nhận vào danh sách xem trước</span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleCommitBlock}
-              className="w-full h-11 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#14539E] border border-blue-200 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-[0.99]"
+            <label
+              htmlFor="reason-kr-input"
+              className="block text-[11px] font-semibold text-slate-600"
             >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>+ Ghi nhận vào danh sách xem trước</span>
-            </button>
-
-            {/* Danh sách các nhóm đã ghi nhận */}
-            {previewData.length > 0 && (
-              <div className="pt-2 border-t border-slate-200 space-y-2">
-                <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>Các nhóm đã ghi nhận ({previewData.length}):</span>
-                  <span className="text-[11px] font-normal text-slate-500">
-                    {summaryStats.datesCount} ngày • {summaryStats.totalParticipants} lượt
-                  </span>
-                </div>
-                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                  {previewData.map((b, idx) => (
-                    <div
-                      key={b.id}
-                      className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white border border-slate-200 text-xs shadow-2xs hover:border-slate-300 transition-colors"
-                    >
-                      <div className="min-w-0 flex-1 truncate">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-[#14539E]">#{idx + 1}</span>
-                          <span className="font-bold text-slate-800 font-mono text-[11px]">
-                            [{formatDateToFormStyle(b.overtimeDate)}]
-                          </span>
-                          <span className="text-slate-800 font-medium truncate">
-                            {b.reasonVi || 'Không có lý do'}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                          {b.selectedEmployeeIds.length} nhân sự • {b.startTime}-{b.endTime}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemovePreviewBlock(idx)}
-                        className="p-1.5 rounded text-red-500 hover:bg-red-50 cursor-pointer transition-colors"
-                        title="Xóa nhóm này"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+              Lý do (Tiếng Hàn)
+            </label>
+            <textarea
+              id="reason-kr-input"
+              rows={2}
+              value={currentReasonKr}
+              onChange={(e) => setCurrentReasonKr(e.target.value)}
+              placeholder="생산 당직 (Tự động dịch sau 500ms dừng gõ)..."
+              className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+            />
           </div>
+
+          {/* ===============================================================
+              HÀNG 5: Nút Ghi nhận (Ngắn gọn, không tiêu đề thừa)
+          =============================================================== */}
+          <button
+            type="button"
+            onClick={handleCommitBlock}
+            className="w-full h-10 rounded-xl bg-[#14539E] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-[0.99]"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>+ Ghi nhận</span>
+          </button>
+
+          {/* ===============================================================
+              HÀNG 6: Các nhóm đã ghi nhận
+          =============================================================== */}
+          {previewData.length > 0 && (
+            <div className="pt-2 border-t border-slate-200 space-y-2">
+              <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                <span>Các nhóm đã ghi nhận ({previewData.length}):</span>
+                <span className="text-[10px] font-normal text-slate-500">
+                  {summaryStats.datesCount} ngày • {summaryStats.totalParticipants} lượt
+                </span>
+              </div>
+              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                {previewData.map((b, idx) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white border border-slate-200 text-xs shadow-2xs hover:border-slate-300 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1 truncate">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-[#14539E]">#{idx + 1}</span>
+                        <span className="font-bold text-slate-800 font-mono text-[11px]">
+                          [{formatDateToFormStyle(b.overtimeDate)}]
+                        </span>
+                        <span className="text-slate-800 font-medium truncate">
+                          {b.reasonVi || 'Không có lý do'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        {b.selectedEmployeeIds.length} nhân sự • {b.startTime}-{b.endTime}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePreviewBlock(idx)}
+                      className="p-1.5 rounded text-red-500 hover:bg-red-50 cursor-pointer transition-colors"
+                      title="Xóa nhóm này"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1145,11 +1294,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                               {row.combinedReason}
                             </td>
                           )}
-                          {/* Cột (4): Giờ bắt đầu - Hiển thị trên từng dòng nhân viên */}
+                          {/* Cột (4): Giờ bắt đầu - In chính xác giờ của từng cá nhân */}
                           <td className="border border-black px-2 py-1 text-center font-bold align-middle">
                             {row.startTimeFormatted}
                           </td>
-                          {/* Cột (5): Giờ kết thúc - Hiển thị trên từng dòng nhân viên */}
+                          {/* Cột (5): Giờ kết thúc - In chính xác giờ của từng cá nhân */}
                           <td className="border border-black px-2 py-1 text-center font-bold align-middle">
                             {row.endTimeFormatted}
                           </td>
