@@ -58,8 +58,26 @@ export interface CreateOvertimeFormProps {
 /**
  * Hàm dịch thực tế Tiếng Việt -> Tiếng Hàn qua API miễn phí của Google Translate
  */
+const FACTORY_DICTIONARY: Record<string, string> = {
+  'trực sản xuất': '생산 당직',
+  'sửa máy': '설비 수리',
+  'hàng gấp': '긴급 생산',
+  'đổi model': '모델 교체',
+  'vệ sinh': '청소',
+};
+
+/**
+ * Hàm dịch thực tế Tiếng Việt -> Tiếng Hàn qua Từ điển nhà máy hoặc Google Translate API
+ */
 const translateVnToKr = async (text: string): Promise<string> => {
   if (!text) return '';
+  const cleaned = text.trim().toLowerCase();
+  if (FACTORY_DICTIONARY[cleaned]) {
+    return FACTORY_DICTIONARY[cleaned];
+  }
+  for (const [k, v] of Object.entries(FACTORY_DICTIONARY)) {
+    if (cleaned === k) return v;
+  }
   try {
     const response = await fetch(
       `https://translate.googleapis.com/translate_a/single?client=gtx&sl=vi&tl=ko&dt=t&q=${encodeURIComponent(text)}`
@@ -68,7 +86,7 @@ const translateVnToKr = async (text: string): Promise<string> => {
     return data[0].map((item: [string]) => item[0]).join('');
   } catch (error) {
     console.error('Lỗi dịch thuật:', error);
-    return 'Lỗi dịch...';
+    return text;
   }
 };
 
@@ -244,13 +262,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     };
   }, [previewData]);
 
-  // Hàm dịch tự động Tiếng Việt -> Tiếng Hàn qua Google Translate API
+  // Hàm dịch tự động Tiếng Việt -> Tiếng Hàn (ưu tiên từ điển nhà máy, fallback Google Translate)
   const handleTranslate = async (sourceReasonVi: string): Promise<string> => {
     if (!sourceReasonVi.trim()) {
-      setCurrentReasonKr('');
       return '';
     }
-    const translatedText = await translateVnToKr(sourceReasonVi.trim());
+    const translatedText = await translateVnToKr(sourceReasonVi);
     return translatedText;
   };
 
@@ -477,7 +494,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   }, [previewData, employeeMap, currentStartTime, currentEndTime]);
 
   return (
-    <div className="grid grid-cols-12 gap-6 h-screen overflow-hidden p-4 bg-slate-50 text-slate-800">
+    <div className="grid grid-cols-12 gap-6 h-[calc(100vh-4rem)] overflow-hidden p-4 bg-slate-50 text-slate-800">
       {/* ===================================================================
           CỘT TRÁI (1/3) - BẢNG ĐIỀU KHIỂN / FORM NHẬP LIỆU (col-span-4)
       =================================================================== */}
@@ -565,7 +582,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 rows={2}
                 value={currentReasonVi}
                 onChange={(e) => setCurrentReasonVi(e.target.value)}
-                placeholder="VD: Lắp ráp máy quấn core PQ50 DATBIKE..."
+                placeholder="VD: Trực sản xuất, sửa máy, hàng gấp..."
                 className="w-full p-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
               />
             </div>
@@ -582,7 +599,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 rows={2}
                 value={currentReasonKr}
                 onChange={(e) => setCurrentReasonKr(e.target.value)}
-                placeholder="잔업. 특근사유 (Tự động dịch sau khi dừng gõ)..."
+                placeholder="생산 당직 (Tự động dịch sau khi dừng gõ)..."
                 className="w-full p-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
               />
             </div>
@@ -738,8 +755,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 filteredEmployeesForInput.map((emp) => {
                   const isSelected = currentSelectedEmployeeIds.includes(emp.id);
                   return (
-                    <label
+                    <div
                       key={emp.id}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleToggleEmployee(emp.id);
+                      }}
                       className={`flex items-center gap-2 p-2 rounded-md text-xs cursor-pointer transition-colors select-none ${
                         isSelected
                           ? 'bg-blue-50 border border-blue-200 text-slate-900 font-semibold'
@@ -749,8 +770,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => handleToggleEmployee(emp.id)}
-                        className="peer sr-only"
+                        readOnly
+                        className="peer sr-only pointer-events-none"
                       />
                       <span
                         aria-hidden="true"
@@ -766,7 +787,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                           ({emp.employeeCode})
                         </span>
                       </div>
-                    </label>
+                    </div>
                   );
                 })
               )}
