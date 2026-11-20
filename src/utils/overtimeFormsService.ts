@@ -58,6 +58,7 @@ export interface OvertimeFormRecord {
   status: string;
   created_by?: string | null;
   created_at: string;
+  updated_at?: string | null;
   deleted_at: string | null;
 }
 
@@ -232,27 +233,28 @@ export function calculateHoursBetween(
 }
 
 /**
- * Pure helper: generates a readable unique overtime form code: TC-YYYYMMDD-XXX.
+ * Pure helper: generates the canonical overtime form code `TC-YYYYMMDD`
+ * (strictly 1 active form per calendar day, no -001/-002 sequence suffix).
  */
 export function generateOvertimeFormCode(
   dateStr: string,
-  existingCodes: string[] = []
+  _existingCodes: string[] = []
 ): string {
   const digits = (dateStr || '').replace(/\D/g, '');
   const datePart = digits.length === 8 ? digits : '20261116';
-  const prefix = `TC-${datePart}-`;
-  let maxSeq = 0;
+  return `TC-${datePart}`;
+}
 
-  for (const code of existingCodes) {
-    if (typeof code === 'string' && code.startsWith(prefix)) {
-      const suffix = parseInt(code.slice(prefix.length), 10);
-      if (!Number.isNaN(suffix) && suffix > maxSeq) {
-        maxSeq = suffix;
-      }
-    }
-  }
-
-  return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+/**
+ * Pure helper: formats a stored form code for display as `TC-YYYYMMDD`,
+ * stripping any legacy `-001`, `-002` numeric sequence suffix.
+ */
+export function formatOvertimeFormCodeDisplay(formCode: string): string {
+  const clean = (formCode || '').trim();
+  if (!clean) return '';
+  const match = clean.match(/^(TC-\d{8})(?:-\d+)?$/i);
+  if (match) return match[1].toUpperCase();
+  return clean;
 }
 
 /**
@@ -497,7 +499,7 @@ export function filterOvertimeForms(
         Array.isArray(form.overtime_dates) && form.overtime_dates.length > 0
           ? form.overtime_dates
           : [form.overtime_date];
-      if (!dates.includes(cleanDate)) {
+      if (form.overtime_date !== cleanDate && !dates.includes(cleanDate)) {
         return false;
       }
     }
@@ -563,7 +565,7 @@ function createSampleOvertimeForms(): OvertimeFormWithItems[] {
   return [
     {
       id: form1Id,
-      form_code: 'TC-20261116-001',
+      form_code: 'TC-20261116',
       department: 'Kỹ Thuật',
       overtime_date: '2026-11-16',
       overtime_dates: ['2026-11-16', '2026-11-17'],
@@ -642,7 +644,7 @@ function createSampleOvertimeForms(): OvertimeFormWithItems[] {
     },
     {
       id: form2Id,
-      form_code: 'TC-20261114-001',
+      form_code: 'TC-20261114',
       department: 'Sản Xuất',
       overtime_date: '2026-11-14',
       overtime_dates: ['2026-11-14'],
@@ -786,6 +788,86 @@ function clearLocalUpdatedForm(formId: string): void {
 }
 
 /**
+ * Pure helper: returns local calendar date in YYYY-MM-DD format without UTC shift.
+ */
+export function getLocalTodayIsoDate(now: Date = new Date()): string {
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
+ * Pure helper: extracts sorted unique non-empty ISO dates from committed task blocks.
+ */
+export function extractUniqueBlockDates(blocks: OvertimeBlockInput[]): string[] {
+  const dateSet = new Set<string>();
+  for (const block of blocks) {
+    const clean = (block?.overtimeDate || '').trim();
+    if (clean) dateSet.add(clean);
+  }
+  return Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Pure helper: resolves the representative `overtime_date` for `overtime_forms`.
+ * - Single unique date in blocks -> that exact date.
+ * - Two or more unique dates in blocks -> today's date (`todayIso`, local YYYY-MM-DD).
+ */
+export function resolveRepresentativeOvertimeDate(
+  blocks: OvertimeBlockInput[],
+  fallbackDate?: string,
+  todayIso?: string
+): string {
+  const uniqueDates = extractUniqueBlockDates(blocks);
+  if (uniqueDates.length >= 2) {
+    return todayIso || getLocalTodayIsoDate();
+  }
+  if (uniqueDates.length === 1) {
+    return uniqueDates[0];
+  }
+  return (fallbackDate || '').trim() || todayIso || getLocalTodayIsoDate();
+}
+
+/**
+ * Pure helper: normalizes department name for accent/case-insensitive equality.
+ */
+export function normalizeDepartmentKey(department: string): string {
+  return normalizeSearchText(department || '');
+}
+
+/**
+ * Pure helper: extracts actual active work dates recorded on an existing overtime form.
+ * Uses non-deleted line items first so a multi-day form's representative date does not
+ * falsely mark an unworked day as occupied.
+ */
+export function extractActiveFormWorkDates(
+  form: OvertimeFormWithItems
+): string[] {
+  if (!form || form.deleted_at) return [];
+  const activeItemDates = Array.isArray(form.items)
+    ? form.items
+        .filter((item) => item && !item.deleted_at && item.overtime_date)
+        .map((item) => item.overtime_date.trim())
+        .filter(Boolean)
+    : [];
+
+  if (activeItemDates.length > 0) {
+    return Array.from(new Set(activeItemDates)).sort((a, b) =>
+      a.localeCompare(b)
+    );
+  }
+
+  if (Array.isArray(form.overtime_dates) && form.overtime_dates.length > 0) {
+    return Array.from(
+      new Set(form.overtime_dates.map((d) => (d || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+  }
+
+  return form.overtime_date?.trim() ? [form.overtime_date.trim()] : [];
+}
+
+/**
  * Pure helper: resolves a clean department display name from selection or employees.
  */
 export function resolveDepartmentLabel(
@@ -811,22 +893,234 @@ export function resolveDepartmentLabel(
   return matchedDepts.size === 1 ? Array.from(matchedDepts)[0] : 'Kỹ Thuật';
 }
 
+export interface OvertimeDateConflictMatch {
+  date: string;
+  forms: Array<{
+    id: string;
+    form_code: string;
+    department: string;
+    overtime_date: string;
+  }>;
+}
+
+export type OvertimeDateConflictMode =
+  | 'none'
+  | 'single_day_blocked'
+  | 'representative_date_blocked'
+  | 'multi_day_reminder';
+
+export interface OvertimeDateConflictEvaluation {
+  mode: OvertimeDateConflictMode;
+  isBlocked: boolean;
+  uniqueDates: string[];
+  representativeDate: string;
+  resolvedDepartment: string;
+  conflicts: OvertimeDateConflictMatch[];
+  conflictingForms: OvertimeFormWithItems[];
+}
+
+export interface EvaluateOvertimeDateConflictParams {
+  blocks: OvertimeBlockInput[];
+  selectedDepartment: string;
+  employees: Employee[];
+  existingForms: OvertimeFormWithItems[];
+  editingFormId?: string | null;
+  fallbackDate?: string;
+  todayIso?: string;
+}
+
+/**
+ * Pure helper: finds all active (non-soft-deleted, non-self) forms occupying `targetDate`
+ * (either via representative `overtime_date` or active line-item dates), across ALL departments.
+ */
+export function findActiveFormsByDate(
+  existingForms: OvertimeFormWithItems[],
+  targetDate: string,
+  editingFormId?: string | null
+): OvertimeFormWithItems[] {
+  const cleanTarget = (targetDate || '').trim();
+  if (!cleanTarget) return [];
+  return (existingForms || []).filter((form) => {
+    if (!form || form.deleted_at) return false;
+    if (editingFormId && form.id === editingFormId) return false;
+    if ((form.overtime_date || '').trim() === cleanTarget) return true;
+    return extractActiveFormWorkDates(form).includes(cleanTarget);
+  });
+}
+
+/**
+ * Pure helper: evaluates duplicate overtime dates globally across ALL active forms
+ * (1 calendar day can only have 1 active form in the system, regardless of department).
+ * - Excludes soft-deleted forms (`deleted_at != null`) and the currently edited form (`editingFormId`).
+ * - Case A (`uniqueDates.length === 1` with conflict): BLOCKS save (`isBlocked: true`).
+ * - Case B (`uniqueDates.length >= 2`):
+ *   + Representative date becomes today (`todayIso`).
+ *   + If an active form already exists with representative date === `todayIso`: BLOCKS save
+ *     (`representative_date_blocked`, `isBlocked: true`) so 1 day never has 2 forms.
+ *   + Otherwise, if any included work date overlaps an earlier form: ALLOWS save
+ *     (`multi_day_reminder`, `isBlocked: false`) with soft reminder.
+ */
+export function evaluateOvertimeDateConflict({
+  blocks,
+  selectedDepartment,
+  employees,
+  existingForms,
+  editingFormId = null,
+  fallbackDate,
+  todayIso,
+}: EvaluateOvertimeDateConflictParams): OvertimeDateConflictEvaluation {
+  const uniqueDates = extractUniqueBlockDates(blocks);
+  const representativeDate = resolveRepresentativeOvertimeDate(
+    blocks,
+    fallbackDate,
+    todayIso
+  );
+  const resolvedDepartment = resolveDepartmentLabel(
+    selectedDepartment,
+    blocks,
+    employees
+  );
+
+  if (uniqueDates.length === 0) {
+    return {
+      mode: 'none',
+      isBlocked: false,
+      uniqueDates,
+      representativeDate,
+      resolvedDepartment,
+      conflicts: [],
+      conflictingForms: [],
+    };
+  }
+
+  const activeForms = (existingForms || []).filter((form) => {
+    if (!form || form.deleted_at) return false;
+    if (editingFormId && form.id === editingFormId) return false;
+    return true;
+  });
+
+  const conflicts: OvertimeDateConflictMatch[] = [];
+  const conflictingFormMap = new Map<string, OvertimeFormWithItems>();
+
+  for (const date of uniqueDates) {
+    const matchedForms = activeForms.filter(
+      (form) =>
+        (form.overtime_date || '').trim() === date ||
+        extractActiveFormWorkDates(form).includes(date)
+    );
+    if (matchedForms.length > 0) {
+      conflicts.push({
+        date,
+        forms: matchedForms.map((f) => ({
+          id: f.id,
+          form_code: formatOvertimeFormCodeDisplay(f.form_code),
+          department: f.department,
+          overtime_date: f.overtime_date,
+        })),
+      });
+      for (const f of matchedForms) {
+        conflictingFormMap.set(f.id, f);
+      }
+    }
+  }
+
+  const conflictingForms = Array.from(conflictingFormMap.values());
+
+  // Case A: Single-day form -> block if that date already exists in ANY active form
+  if (uniqueDates.length === 1) {
+    if (conflicts.length > 0) {
+      return {
+        mode: 'single_day_blocked',
+        isBlocked: true,
+        uniqueDates,
+        representativeDate,
+        resolvedDepartment,
+        conflicts,
+        conflictingForms,
+      };
+    }
+    return {
+      mode: 'none',
+      isBlocked: false,
+      uniqueDates,
+      representativeDate,
+      resolvedDepartment,
+      conflicts: [],
+      conflictingForms: [],
+    };
+  }
+
+  // Case B: Multi-day form (>= 2 unique dates) -> representativeDate is today.
+  // Block if today's representative form code / date already exists as an active form.
+  const repCode = generateOvertimeFormCode(representativeDate);
+  const repDateForms = activeForms.filter(
+    (form) =>
+      (form.overtime_date || '').trim() === representativeDate ||
+      formatOvertimeFormCodeDisplay(form.form_code) === repCode
+  );
+  if (repDateForms.length > 0) {
+    return {
+      mode: 'representative_date_blocked',
+      isBlocked: true,
+      uniqueDates,
+      representativeDate,
+      resolvedDepartment,
+      conflicts: [
+        {
+          date: representativeDate,
+          forms: repDateForms.map((f) => ({
+            id: f.id,
+            form_code: formatOvertimeFormCodeDisplay(f.form_code),
+            department: f.department,
+            overtime_date: f.overtime_date,
+          })),
+        },
+      ],
+      conflictingForms: repDateForms,
+    };
+  }
+
+  if (conflicts.length > 0) {
+    return {
+      mode: 'multi_day_reminder',
+      isBlocked: false,
+      uniqueDates,
+      representativeDate,
+      resolvedDepartment,
+      conflicts,
+      conflictingForms,
+    };
+  }
+
+  return {
+    mode: 'none',
+    isBlocked: false,
+    uniqueDates,
+    representativeDate,
+    resolvedDepartment,
+    conflicts: [],
+    conflictingForms: [],
+  };
+}
+
 /**
  * Pure helper: produces an updated OvertimeFormWithItems preserving id, form_code, and created_at.
  */
 export function buildUpdatedOvertimeForm(
   existingForm: OvertimeFormWithItems,
-  input: SaveOvertimeFormInput
+  input: SaveOvertimeFormInput,
+  todayIso?: string
 ): OvertimeFormWithItems {
-  const primaryDate =
+  const fallbackDate =
     input.blocks[0]?.overtimeDate ||
     input.overtimeDate ||
     existingForm.overtime_date ||
-    '2026-11-16';
-  const uniqueDates = Array.from(
-    new Set(
-      input.blocks.map((b) => b.overtimeDate || primaryDate).filter(Boolean)
-    )
+    getLocalTodayIsoDate();
+  const uniqueDates = extractUniqueBlockDates(input.blocks);
+  const representativeDate = resolveRepresentativeOvertimeDate(
+    input.blocks,
+    fallbackDate,
+    todayIso
   );
   const departmentLabel = resolveDepartmentLabel(
     input.department,
@@ -837,20 +1131,22 @@ export function buildUpdatedOvertimeForm(
     existingForm.id,
     input.blocks,
     input.employees,
-    primaryDate
+    fallbackDate
   );
   const totalHours = Number(
     items.reduce((sum, item) => sum + item.total_hours, 0).toFixed(2)
   );
+  const nowIso = new Date().toISOString();
 
   return {
     ...existingForm,
     department: departmentLabel,
-    overtime_date: primaryDate,
-    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [primaryDate],
+    overtime_date: representativeDate,
+    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [representativeDate],
     total_blocks: input.blocks.length,
     total_participants: items.length,
     total_hours: totalHours,
+    updated_at: nowIso,
     items,
   };
 }
@@ -918,6 +1214,7 @@ export async function fetchOvertimeForms(): Promise<{
           status: f.status || 'Đã lưu',
           created_by: f.created_by ?? null,
           created_at: f.created_at,
+          updated_at: f.updated_at ?? null,
           deleted_at: f.deleted_at,
           items: formItems,
         };
@@ -945,83 +1242,73 @@ export async function saveOvertimeFormToHistory(
   input: SaveOvertimeFormInput
 ): Promise<OvertimeFormWithItems> {
   const existingLocal = readLocalForms(false);
-  const primaryDate =
-    input.blocks[0]?.overtimeDate || input.overtimeDate || '2026-11-16';
-  const uniqueDates = Array.from(
-    new Set(
-      input.blocks.map((b) => b.overtimeDate || primaryDate).filter(Boolean)
-    )
+  const fallbackDate =
+    input.blocks[0]?.overtimeDate || input.overtimeDate || getLocalTodayIsoDate();
+  const uniqueDates = extractUniqueBlockDates(input.blocks);
+  const representativeDate = resolveRepresentativeOvertimeDate(
+    input.blocks,
+    fallbackDate
   );
-  let departmentLabel =
-    input.department && input.department !== 'ALL'
-      ? input.department.trim()
-      : '';
-  if (!departmentLabel) {
-    const empById = new Map(input.employees.map((e) => [e.id, e]));
-    const matchedDepts = new Set<string>();
-    for (const block of input.blocks) {
-      const ids =
-        block.participants?.length > 0
-          ? block.participants.map((p) => p.employeeId)
-          : block.selectedEmployeeIds;
-      for (const id of ids) {
-        const dept = empById.get(id)?.department?.trim();
-        if (dept) matchedDepts.add(dept);
-      }
-    }
-    departmentLabel =
-      matchedDepts.size === 1 ? Array.from(matchedDepts)[0] : 'Kỹ Thuật';
-  }
+  const departmentLabel = resolveDepartmentLabel(
+    input.department,
+    input.blocks,
+    input.employees
+  );
 
   const formId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `ot-form-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  let existingCodes = existingLocal.map((f) => f.form_code);
-  try {
-    const remoteCodes = await overtimeSupabase.request<
-      Array<{ form_code: string }>
-    >('overtime_forms?select=form_code');
-    if (Array.isArray(remoteCodes)) {
-      existingCodes = [
-        ...existingCodes,
-        ...remoteCodes.map((r) => r.form_code).filter(Boolean),
-      ];
-    }
-  } catch {
-    // Ignore if offline
-  }
-  const formCode = generateOvertimeFormCode(primaryDate, existingCodes);
+  const formCode = generateOvertimeFormCode(representativeDate);
 
   const items = buildOvertimeFormItemsFromBlocks(
     formId,
     input.blocks,
     input.employees,
-    primaryDate
+    fallbackDate
   );
 
   const totalHours = Number(
     items.reduce((sum, item) => sum + item.total_hours, 0).toFixed(2)
   );
+  const nowIso = new Date().toISOString();
 
   const newForm: OvertimeFormWithItems = {
     id: formId,
     form_code: formCode,
     department: departmentLabel,
-    overtime_date: primaryDate,
-    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [primaryDate],
+    overtime_date: representativeDate,
+    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [representativeDate],
     total_blocks: input.blocks.length,
     total_participants: items.length,
     total_hours: totalHours,
     status: 'Đã lưu',
     created_by: input.createdBy ?? null,
-    created_at: new Date().toISOString(),
+    created_at: nowIso,
+    updated_at: nowIso,
     deleted_at: null,
     items,
   };
 
   try {
+    // Free canonical form_code if held by a previously soft-deleted row in Supabase
+    try {
+      await overtimeSupabase.request<void>(
+        `overtime_forms?form_code=eq.${encodeURIComponent(
+          newForm.form_code
+        )}&deleted_at=not.is.null`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            form_code: `${newForm.form_code}-DEL-${Date.now()}`,
+          }),
+        }
+      );
+    } catch {
+      // Non-fatal: proceed to insert
+    }
+
     const insertedForms = await overtimeSupabase.request<
       SupabaseOvertimeFormRow[]
     >('overtime_forms?select=*', {
@@ -1111,7 +1398,7 @@ export async function updateOvertimeFormInHistory(
           total_blocks: updatedForm.total_blocks,
           total_employees: updatedForm.total_participants,
           total_hours: updatedForm.total_hours,
-          updated_at: new Date().toISOString(),
+          updated_at: updatedForm.updated_at || new Date().toISOString(),
         }),
       }
     );

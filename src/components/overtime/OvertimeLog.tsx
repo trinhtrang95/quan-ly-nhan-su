@@ -29,6 +29,7 @@ import {
   buildPrintableDateGroupsFromItems,
   filterOvertimeForms,
   formatCreatedAtVN,
+  formatOvertimeFormCodeDisplay,
   isOvertimeTimeBold,
   OvertimeFormWithItems,
   reconstructBlocksFromItems,
@@ -102,7 +103,11 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         blocks,
         employees: mergedEmployees,
       });
-      onShowToast?.(`Đã xuất file Excel cho phiếu ${form.form_code}.`);
+      onShowToast?.(
+        `Đã xuất file Excel cho phiếu ${formatOvertimeFormCodeDisplay(
+          form.form_code
+        )}.`
+      );
     } catch (error: unknown) {
       if (error instanceof Error && error.name === 'AbortError') {
         onShowToast?.('Đã hủy chọn thư mục lưu file.');
@@ -129,7 +134,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     if (!deletingForm || !isDeleteConfirmed) return;
     setIsDeleting(true);
     try {
-      const code = deletingForm.form_code;
+      const code = formatOvertimeFormCodeDisplay(deletingForm.form_code);
       const targetId = deletingForm.id;
       await onSoftDelete(targetId);
       if (viewingForm?.id === targetId) {
@@ -328,7 +333,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       {/* 2. Mã phiếu / Ngày tạo */}
                       <td className="py-3 px-3.5">
                         <div className="font-mono font-semibold text-[#14539E] tabular-nums">
-                          {form.form_code}
+                          {formatOvertimeFormCodeDisplay(form.form_code)}
                         </div>
                         <div className="text-[11px] text-slate-500 tabular-nums mt-0.5">
                           Tạo: {formatCreatedAtVN(form.created_at)}
@@ -337,16 +342,21 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                       {/* 3. Ngày tăng ca */}
                       <td className="py-3 px-3.5">
-                        <div className="font-mono text-slate-800 font-medium tabular-nums">
-                          {datesList
-                            .slice(0, 2)
-                            .map((d) => formatDateToFormStyle(d))
-                            .join(' • ')}
+                        <div className="font-mono text-slate-800 font-semibold tabular-nums">
+                          {formatDateToFormStyle(
+                            form.overtime_date || datesList[0] || ''
+                          )}
                         </div>
-                        {datesList.length > 2 && (
-                          <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-                            +{formatNumberVN(datesList.length - 2)} ngày khác (
-                            {formatNumberVN(datesList.length)} ngày)
+                        {datesList.length >= 2 && (
+                          <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums font-mono">
+                            Gồm:{' '}
+                            {datesList
+                              .slice(0, 2)
+                              .map((d) => formatDateToFormStyle(d))
+                              .join(', ')}
+                            {datesList.length > 2
+                              ? ` (+${formatNumberVN(datesList.length - 2)})`
+                              : ''}
                           </div>
                         )}
                       </td>
@@ -450,7 +460,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   className="text-sm font-bold text-slate-900 flex items-center gap-2"
                 >
                   <span className="font-mono text-[#14539E]">
-                    {viewingForm.form_code}
+                    {formatOvertimeFormCodeDisplay(viewingForm.form_code)}
                   </span>
                   <span className="text-slate-300">•</span>
                   <span className="truncate">{viewingForm.department}</span>
@@ -532,6 +542,12 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     </div>
                     <div className="text-base font-bold leading-snug">
                       잔업. 특근 신청서
+                    </div>
+                    <div className="text-[11px] mt-1 font-normal text-black">
+                      Ngày phiếu / 작성일:{' '}
+                      <span className="font-bold">
+                        {formatDateToFormStyle(viewingForm.overtime_date)}
+                      </span>
                     </div>
                   </div>
                   <table className="border-collapse border border-black text-[11px] text-center">
@@ -775,7 +791,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-500">Mã phiếu:</span>
                 <span className="font-mono font-bold text-[#14539E]">
-                  {deletingForm.form_code}
+                  {formatOvertimeFormCodeDisplay(deletingForm.form_code)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -804,7 +820,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               <span className="text-xs text-slate-700 leading-snug">
                 Tôi xác nhận muốn xóa phiếu tăng ca{' '}
                 <strong className="font-mono text-slate-900">
-                  {deletingForm.form_code}
+                  {formatOvertimeFormCodeDisplay(deletingForm.form_code)}
                 </strong>{' '}
                 khỏi nhật ký.
               </span>

@@ -87,10 +87,24 @@ export function parseIsoDateParts(
 }
 
 /**
+ * Resolves the effective timestamp (ms) of an overtime form using updated_at first, then created_at.
+ */
+export function getFormEffectiveTimestamp(form: OvertimeFormWithItems): number {
+  const updatedMs = form.updated_at ? Date.parse(form.updated_at) : Number.NaN;
+  if (Number.isFinite(updatedMs)) return updatedMs;
+  const createdMs = form.created_at ? Date.parse(form.created_at) : Number.NaN;
+  if (Number.isFinite(createdMs)) return createdMs;
+  return 0;
+}
+
+/**
  * Pure aggregation engine for the Monthly Overtime Hours Report ("Giờ Tăng ca").
  * - Aggregates saved `overtime_forms` + `overtime_form_items`
  * - Strictly excludes soft-deleted forms and items (`deleted_at != null`)
- * - Sums multiple shifts/turns for the same employee on the same calendar day
+ * - Sums multiple shifts/turns for the same employee on the same day within the same form
+ * - When an employee appears on the same day in multiple forms (e.g. an earlier form and
+ *   a later multi-day adjustment form), prioritizes the latest form by `updated_at` / `created_at`
+ *   to avoid double-counting revised hours.
  * - Computes per-member totals, per-day totals, and grand total
  */
 export function calculateMonthlyOvertimeReport({
@@ -122,7 +136,16 @@ export function calculateMonthlyOvertimeReport({
     totalHours: number;
   }
 
+  interface FormDayCandidate {
+    hours: number;
+    timestamp: number;
+    isMultiDay: boolean;
+    order: number;
+  }
+
   const buckets = new Map<string, MemberBucket>();
+  // Tracks the winning (latest) form record per (bucketKey -> day)
+  const winningFormByMemberDay = new Map<string, Map<number, FormDayCandidate>>();
 
   // Seed buckets with all current employees so everyone in the selected group is visible
   const sortedEmployees = [...employees].sort(compareEmployeesByDefaultPriority);
@@ -138,9 +161,22 @@ export function calculateMonthlyOvertimeReport({
   }
 
   // Aggregate active (non-soft-deleted) overtime forms and items
-  for (const form of forms) {
-    if (!form || form.deleted_at) continue;
+  forms.forEach((form, formIndex) => {
+    if (!form || form.deleted_at) return;
     const formItems = Array.isArray(form.items) ? form.items : [];
+    const activeFormDates = new Set<string>();
+    for (const item of formItems) {
+      if (!item || item.deleted_at) continue;
+      const d = (item.overtime_date || form.overtime_date || '').trim();
+      if (d) activeFormDates.add(d);
+    }
+    const isMultiDay =
+      activeFormDates.size >= 2 ||
+      (Array.isArray(form.overtime_dates) && form.overtime_dates.length >= 2);
+    const formTimestamp = getFormEffectiveTimestamp(form);
+
+    // Step 1: Sum turns within THIS form per (bucketKey, day)
+    const perFormMemberDay = new Map<string, Map<number, number>>();
 
     for (const item of formItems) {
       if (!item || item.deleted_at) continue;
@@ -167,7 +203,9 @@ export function calculateMonthlyOvertimeReport({
       const bucketKey = matchedEmp
         ? matchedEmp.id
         : item.employee_id ||
-          (normalizedCode ? `code:${normalizedCode}` : `name:${(item.employee_name || '').trim().toLowerCase()}`);
+          (normalizedCode
+            ? `code:${normalizedCode}`
+            : `name:${(item.employee_name || '').trim().toLowerCase()}`);
 
       let bucket = buckets.get(bucketKey);
       if (!bucket) {
@@ -182,11 +220,55 @@ export function calculateMonthlyOvertimeReport({
         buckets.set(bucketKey, bucket);
       }
 
-      const prevDayHours = bucket.dailyHours[parsedDate.day] || 0;
-      bucket.dailyHours[parsedDate.day] = roundHours(prevDayHours + itemHours);
-      bucket.totalHours = roundHours(bucket.totalHours + itemHours);
+      if (!perFormMemberDay.has(bucketKey)) {
+        perFormMemberDay.set(bucketKey, new Map());
+      }
+      const dayMap = perFormMemberDay.get(bucketKey)!;
+      dayMap.set(
+        parsedDate.day,
+        roundHours((dayMap.get(parsedDate.day) || 0) + itemHours)
+      );
     }
-  }
+
+    // Step 2: Reconcile against previously seen forms — latest updated_at/created_at wins per (member, day)
+    perFormMemberDay.forEach((dayMap, bucketKey) => {
+      if (!winningFormByMemberDay.has(bucketKey)) {
+        winningFormByMemberDay.set(bucketKey, new Map());
+      }
+      const memberWinners = winningFormByMemberDay.get(bucketKey)!;
+
+      dayMap.forEach((hoursForDay, day) => {
+        const existing = memberWinners.get(day);
+        const shouldReplace =
+          !existing ||
+          formTimestamp > existing.timestamp ||
+          (formTimestamp === existing.timestamp &&
+            ((isMultiDay && !existing.isMultiDay) ||
+              (isMultiDay === existing.isMultiDay && formIndex > existing.order)));
+
+        if (shouldReplace) {
+          memberWinners.set(day, {
+            hours: hoursForDay,
+            timestamp: formTimestamp,
+            isMultiDay,
+            order: formIndex,
+          });
+        }
+      });
+    });
+  });
+
+  // Step 3: Materialize winning daily hours and per-member totals into buckets
+  winningFormByMemberDay.forEach((memberWinners, bucketKey) => {
+    const bucket = buckets.get(bucketKey);
+    if (!bucket) return;
+    let memberTotal = 0;
+    memberWinners.forEach((winner, day) => {
+      bucket.dailyHours[day] = roundHours(winner.hours);
+      memberTotal = roundHours(memberTotal + winner.hours);
+    });
+    bucket.totalHours = memberTotal;
+  });
 
   const normalizedDept = (departmentFilter || 'ALL').trim();
   const normalizedQuery = (searchQuery || '').trim().toLowerCase();

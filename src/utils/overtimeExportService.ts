@@ -191,7 +191,25 @@ export class OvertimeExportService {
 
     worksheet.mergeCells('A2:C6');
     const titleCell = worksheet.getCell('A2');
-    titleCell.value = 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서';
+    const repDateLabel = formatDateToFormStyle(overtimeDate || sortedDates[0] || '');
+    titleCell.value = repDateLabel
+      ? {
+          richText: [
+            {
+              font: { name: FONT_NAME, size: 14, bold: true },
+              text: 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서\n',
+            },
+            {
+              font: { name: FONT_NAME, size: 10, bold: false },
+              text: 'Ngày phiếu / 작성일: ',
+            },
+            {
+              font: { name: FONT_NAME, size: 10, bold: true },
+              text: repDateLabel,
+            },
+          ],
+        }
+      : 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서';
     titleCell.font = { name: FONT_NAME, size: 14, bold: true };
     titleCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
 

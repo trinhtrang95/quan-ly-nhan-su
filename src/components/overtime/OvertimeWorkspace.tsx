@@ -3,7 +3,9 @@ import { ClipboardList, FilePlus2, Pencil } from 'lucide-react';
 import { DepartmentGroup, Employee } from '../../types/hr';
 import { formatNumberVN } from '../../utils/errorAndSecurityService';
 import {
+  evaluateOvertimeDateConflict,
   fetchOvertimeForms,
+  formatOvertimeFormCodeDisplay,
   OvertimeFormWithItems,
   saveOvertimeFormToHistory,
   softDeleteOvertimeForm,
@@ -52,10 +54,44 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   }, [loadForms]);
 
   const handleSaveForm = async (payload: CreateOvertimeFormPayload) => {
+    // Re-sync with latest active forms before saving so stale state can never bypass duplicate blocking
+    let latestForms = forms;
+    try {
+      const refreshed = await fetchOvertimeForms();
+      latestForms = refreshed.forms;
+      setForms(refreshed.forms);
+    } catch {
+      // Fallback to in-memory forms
+    }
+
+    const conflictEval = evaluateOvertimeDateConflict({
+      blocks: payload.blocks,
+      selectedDepartment: payload.department,
+      employees,
+      existingForms: latestForms,
+      editingFormId: editingForm?.id ?? null,
+      fallbackDate: payload.overtimeDate,
+    });
+
+    if (conflictEval.isBlocked) {
+      const codes = Array.from(
+        new Set(
+          conflictEval.conflictingForms.map((f) =>
+            formatOvertimeFormCodeDisplay(f.form_code)
+          )
+        )
+      ).join(', ');
+      throw new Error(
+        `Không thể lưu: ngày tăng ca đã tồn tại trong Nhật ký (${codes}). Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu cũ để sửa hoặc gộp từ 2 ngày trở lên (nếu hôm nay chưa có phiếu).`
+      );
+    }
+
+    const effectiveDate = conflictEval.representativeDate;
+
     if (editingForm) {
       const updated = await updateOvertimeFormInHistory(editingForm, {
         department: payload.department,
-        overtimeDate: payload.overtimeDate,
+        overtimeDate: effectiveDate,
         blocks: payload.blocks,
         employees,
       });
@@ -64,9 +100,9 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       );
       setEditingForm(null);
       onShowToast?.(
-        `Đã cập nhật phiếu tăng ca ${updated.form_code} (${formatNumberVN(
-          updated.total_participants
-        )} lượt).`
+        `Đã cập nhật phiếu tăng ca ${formatOvertimeFormCodeDisplay(
+          updated.form_code
+        )} (${formatNumberVN(updated.total_participants)} lượt).`
       );
       setActiveTab('log');
       return;
@@ -74,16 +110,16 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
 
     const saved = await saveOvertimeFormToHistory({
       department: payload.department,
-      overtimeDate: payload.overtimeDate,
+      overtimeDate: effectiveDate,
       blocks: payload.blocks,
       employees,
     });
 
     setForms((prev) => [saved, ...prev.filter((f) => f.id !== saved.id)]);
     onShowToast?.(
-      `Đã lưu phiếu tăng ca ${saved.form_code} (${formatNumberVN(
-        saved.total_participants
-      )} lượt) vào Nhật ký.`
+      `Đã lưu phiếu tăng ca ${formatOvertimeFormCodeDisplay(
+        saved.form_code
+      )} (${formatNumberVN(saved.total_participants)} lượt) vào Nhật ký.`
     );
     setActiveTab('log');
   };
@@ -135,7 +171,9 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             )}
             <span>
               {editingForm
-                ? `Đang sửa: ${editingForm.form_code}`
+                ? `Đang sửa: ${formatOvertimeFormCodeDisplay(
+                    editingForm.form_code
+                  )}`
                 : 'Tạo phiếu tăng ca'}
             </span>
           </button>
@@ -181,7 +219,10 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             key={editingForm ? `edit-${editingForm.id}` : 'create-new'}
             employees={employees}
             groups={groups}
+            existingForms={forms}
+            isCheckingExistingForms={isLoadingForms}
             editingForm={editingForm}
+            onOpenExistingForm={handleStartEditForm}
             onCancelEdit={handleCancelEdit}
             onSaveOnly={handleSaveForm}
           />

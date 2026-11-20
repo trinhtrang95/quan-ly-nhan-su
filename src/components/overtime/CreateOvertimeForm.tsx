@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   BookmarkPlus,
   BookOpen,
   Calendar,
@@ -9,6 +10,7 @@ import {
   ChevronDown,
   Clock,
   FileSpreadsheet,
+  Info,
   Save,
   Loader2,
   Pencil,
@@ -25,6 +27,10 @@ import {
   getFriendlyErrorMessage,
 } from '../../utils/errorAndSecurityService';
 import {
+  evaluateOvertimeDateConflict,
+  findActiveFormsByDate,
+  formatOvertimeFormCodeDisplay,
+  getLocalTodayIsoDate,
   OvertimeFormWithItems,
   reconstructBlocksFromItems,
 } from '../../utils/overtimeFormsService';
@@ -71,9 +77,12 @@ export interface CreateOvertimeFormPayload {
 export interface CreateOvertimeFormProps {
   employees?: Employee[];
   groups?: DepartmentGroup[];
+  existingForms?: OvertimeFormWithItems[];
+  isCheckingExistingForms?: boolean;
   initialDepartment?: string;
   initialDate?: string;
   editingForm?: OvertimeFormWithItems | null;
+  onOpenExistingForm?: (form: OvertimeFormWithItems) => void;
   onCancelEdit?: () => void;
   onSaveOnly?: (payload: CreateOvertimeFormPayload) => Promise<void> | void;
 }
@@ -159,9 +168,12 @@ const DRAFT_STORAGE_KEY = 'ot_form_draft_v1';
 export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   employees = INITIAL_EMPLOYEES,
   groups = INITIAL_DEPARTMENT_GROUPS,
+  existingForms = [],
+  isCheckingExistingForms = false,
   initialDepartment = 'ALL',
-  initialDate = '2026-11-16',
+  initialDate = getLocalTodayIsoDate(),
   editingForm = null,
+  onOpenExistingForm,
   onCancelEdit,
   onSaveOnly,
 }) => {
@@ -342,6 +354,47 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       datesCount: dateSet.size || (previewData.length > 0 ? 1 : 0),
     };
   }, [previewData]);
+
+  // Kiểm tra trùng ngày tăng ca & xác định ngày đại diện của phiếu (1 ngày vs >= 2 ngày)
+  const dateConflictEval = useMemo(
+    () =>
+      evaluateOvertimeDateConflict({
+        blocks: previewData,
+        selectedDepartment,
+        employees,
+        existingForms,
+        editingFormId: editingForm?.id ?? null,
+        fallbackDate: overtimeDate,
+      }),
+    [
+      previewData,
+      selectedDepartment,
+      employees,
+      existingForms,
+      editingForm?.id,
+      overtimeDate,
+    ]
+  );
+
+  const representativeOvertimeDate = dateConflictEval.representativeDate;
+
+  // Cảnh báo sớm ngay khi chọn ngày làm thêm đã có phiếu trong Nhật ký
+  const selectedDateExistingForms = useMemo(
+    () => findActiveFormsByDate(existingForms, overtimeDate, editingForm?.id ?? null),
+    [existingForms, overtimeDate, editingForm?.id]
+  );
+
+  const uniqueConflictCodes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          dateConflictEval.conflictingForms.map((f) =>
+            formatOvertimeFormCodeDisplay(f.form_code)
+          )
+        )
+      ),
+    [dateConflictEval.conflictingForms]
+  );
 
   const handleSelectGlossaryTemplate = (entryId: string) => {
     if (!entryId) return;
@@ -588,9 +641,29 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       showToast('Vui lòng ghi nhận ít nhất một nhóm công việc trước khi Lưu.');
       return;
     }
+    if (isCheckingExistingForms) {
+      showToast('Đang tải dữ liệu Nhật ký để kiểm tra trùng ngày, vui lòng thử lại sau giây lát.');
+      return;
+    }
+    if (dateConflictEval.isBlocked) {
+      const codes = uniqueConflictCodes.join(', ');
+      const targetDateFormatted = formatDateToFormStyle(
+        dateConflictEval.mode === 'representative_date_blocked'
+          ? dateConflictEval.representativeDate
+          : dateConflictEval.uniqueDates[0]
+      );
+      showToast(
+        `Không thể lưu: ngày ${targetDateFormatted} đã có phiếu (${codes}). Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu cũ để sửa.`
+      );
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await onSaveOnly?.({ department: selectedDepartment, overtimeDate, blocks: previewData });
+      await onSaveOnly?.({
+        department: selectedDepartment,
+        overtimeDate: representativeOvertimeDate,
+        blocks: previewData,
+      });
       if (!editingForm) {
         setPreviewData([]);
         localStorage.removeItem(`${DRAFT_STORAGE_KEY}_preview`);
@@ -616,7 +689,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     try {
       await overtimeExportService.exportExcel({
         department: selectedDepartment,
-        overtimeDate,
+        overtimeDate: representativeOvertimeDate,
         blocks: previewData,
         employees,
       });
@@ -708,7 +781,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       <div className="w-full lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:h-full min-h-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0 bg-slate-50/50">
           <h2 className="text-base font-bold text-[#14539E] truncate">
-            {editingForm ? `Sửa phiếu ${editingForm.form_code}` : 'Tạo phiếu tăng ca'}
+            {editingForm
+              ? `Sửa phiếu ${formatOvertimeFormCodeDisplay(editingForm.form_code)}`
+              : 'Tạo phiếu tăng ca'}
           </h2>
           {editingForm && onCancelEdit ? (
             <button
@@ -758,11 +833,49 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   type="date"
                   value={overtimeDate}
                   onChange={(e) => setOvertimeDate(e.target.value)}
-                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
+                  className={`w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border bg-white focus:outline-none cursor-pointer ${
+                    selectedDateExistingForms.length > 0
+                      ? 'border-amber-400 focus:border-red-500'
+                      : 'border-slate-200 focus:border-[#14539E]'
+                  }`}
                 />
               </div>
             </div>
           </div>
+
+          {selectedDateExistingForms.length > 0 && (
+            <div
+              data-testid="overtime-date-input-notice"
+              className="rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-1.5 text-[11px] text-amber-900 flex items-start justify-between gap-2 leading-snug"
+            >
+              <div className="flex items-start gap-1.5 min-w-0">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  Ngày{' '}
+                  <strong className="font-mono">
+                    {formatDateToFormStyle(overtimeDate)}
+                  </strong>{' '}
+                  đã có phiếu{' '}
+                  <strong className="font-mono">
+                    {formatOvertimeFormCodeDisplay(
+                      selectedDateExistingForms[0].form_code
+                    )}
+                  </strong>
+                  . Phiếu 1 ngày sẽ bị chặn lưu (chỉ lưu được nếu sửa phiếu cũ hoặc
+                  gộp ≥ 2 ngày).
+                </span>
+              </div>
+              {onOpenExistingForm && (
+                <button
+                  type="button"
+                  onClick={() => onOpenExistingForm(selectedDateExistingForms[0])}
+                  className="text-[10px] font-semibold text-[#14539E] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Sửa phiếu cũ
+                </button>
+              )}
+            </div>
+          )}
 
           {/* HÀNG 2 */}
           <div className="grid grid-cols-2 gap-2.5">
@@ -1313,6 +1426,15 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               <div className="pt-3">
                 <div className="text-lg font-bold leading-snug">PHIẾU ĐỀ NGHỊ LÀM THÊM</div>
                 <div className="text-base font-bold leading-snug">잔업. 특근 신청서</div>
+                <div
+                  data-testid="tv-psgc-header-date"
+                  className="text-[11px] mt-1 font-normal text-black"
+                >
+                  Ngày phiếu / 작성일:{' '}
+                  <span className="font-bold">
+                    {formatDateToFormStyle(representativeOvertimeDate)}
+                  </span>
+                </div>
               </div>
               <table className="border-collapse border border-black text-[11px] text-center">
                 <thead>
@@ -1397,18 +1519,138 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           </div>
         </div>
 
+        {/* CẢNH BÁO / NHẮC NHỞ TRÙNG NGÀY & QUY TẮC NGÀY ĐẠI DIỆN */}
+        {(dateConflictEval.mode === 'single_day_blocked' ||
+          dateConflictEval.mode === 'representative_date_blocked') && (
+          <div
+            role="alert"
+            data-testid="overtime-duplicate-block-banner"
+            className="shrink-0 bg-red-50 border-t border-red-200 px-4 sm:px-5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+          >
+            <div className="flex items-start gap-2.5 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-red-900 leading-relaxed">
+                {dateConflictEval.mode === 'single_day_blocked' ? (
+                  <>
+                    <span className="font-bold">
+                      Ngày {formatDateToFormStyle(dateConflictEval.uniqueDates[0])} đã
+                      tồn tại trong Nhật ký
+                    </span>{' '}
+                    — mã phiếu:{' '}
+                    <span className="font-mono font-bold text-red-700">
+                      {uniqueConflictCodes.join(', ')}
+                    </span>
+                    . Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu cũ để chỉnh
+                    sửa, hoặc ghi nhận thêm ngày tăng ca khác (từ 2 ngày trở lên) nếu
+                    cần lập phiếu điều chỉnh phát sinh giờ.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold">
+                      Ngày lập phiếu hôm nay (
+                      {formatDateToFormStyle(representativeOvertimeDate)}) đã có phiếu
+                    </span>{' '}
+                    — mã phiếu:{' '}
+                    <span className="font-mono font-bold text-red-700">
+                      {uniqueConflictCodes.join(', ')}
+                    </span>
+                    . Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu hôm nay để
+                    bổ sung/điều chỉnh trực tiếp.
+                  </>
+                )}
+              </div>
+            </div>
+            {onOpenExistingForm && dateConflictEval.conflictingForms[0] && (
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenExistingForm(dateConflictEval.conflictingForms[0])
+                }
+                className="h-8 px-3 rounded-lg border border-red-300 bg-white hover:bg-red-100 text-red-700 text-[11px] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-center"
+              >
+                <Pencil className="w-3 h-3" />
+                <span>Mở phiếu cũ để sửa</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {dateConflictEval.mode === 'multi_day_reminder' && (
+          <div
+            role="status"
+            data-testid="overtime-multiday-reminder-banner"
+            className="shrink-0 bg-amber-50 border-t border-amber-200 px-4 sm:px-5 py-2 flex items-start gap-2.5"
+          >
+            <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-900 leading-relaxed">
+              <span className="font-semibold">
+                Phiếu gộp {formatNumberVN(dateConflictEval.uniqueDates.length)} ngày (cho phép lưu):
+              </span>{' '}
+              Ngày{' '}
+              <span className="font-mono font-semibold">
+                {dateConflictEval.conflicts
+                  .map(
+                    (c) =>
+                      `${formatDateToFormStyle(c.date)} (${Array.from(
+                        new Set(c.forms.map((f) => f.form_code))
+                      ).join(', ')})`
+                  )
+                  .join('; ')}
+              </span>{' '}
+              đã có phiếu trước đó. Ngày đại diện của phiếu tự động gán là hôm nay (
+              <strong className="font-mono">
+                {formatDateToFormStyle(representativeOvertimeDate)}
+              </strong>
+              ); báo cáo Giờ Tăng ca sẽ ưu tiên giờ của phiếu mới nhất cho ngày trùng để tránh cộng đúp.
+            </div>
+          </div>
+        )}
+
+        {dateConflictEval.mode === 'none' &&
+          dateConflictEval.uniqueDates.length >= 2 && (
+            <div
+              data-testid="overtime-multiday-date-info"
+              className="shrink-0 bg-blue-50/70 border-t border-blue-200/80 px-4 sm:px-5 py-2 flex items-center gap-2 text-xs text-[#14539E]"
+            >
+              <Info className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                Phiếu gồm{' '}
+                <strong>{formatNumberVN(dateConflictEval.uniqueDates.length)} ngày</strong>: ngày
+                đại diện của phiếu tự động ghi nhận hôm nay (
+                <strong className="font-mono">
+                  {formatDateToFormStyle(representativeOvertimeDate)}
+                </strong>
+                ), từng nhóm vẫn giữ nguyên ngày tăng ca thực tế.
+              </span>
+            </div>
+          )}
+
         {/* CÁC NÚT FOOTER ĐÃ ĐƯỢC CẬP NHẬT (LƯU & XUẤT EXCEL RIÊNG BIỆT) */}
         <div className="py-3 px-4 sm:px-5 bg-white border-t border-slate-200 flex items-center justify-between gap-3 shrink-0 shadow-sm">
           <div className="text-xs text-slate-500 min-w-0 truncate">
-            Biểu mẫu: <strong className="font-mono text-slate-700">TV-PSGC2022</strong> • Tổng số nhóm:{' '}
+            Biểu mẫu: <strong className="font-mono text-slate-700">TV-PSGC2022</strong> • Ngày phiếu:{' '}
+            <strong className="font-mono text-[#14539E]">
+              {formatDateToFormStyle(representativeOvertimeDate)}
+            </strong>{' '}
+            • Tổng số nhóm:{' '}
             <strong className="font-mono text-slate-700">{formatNumberVN(summaryStats.blockCount)}</strong> ({formatNumberVN(summaryStats.totalParticipants)} lượt • {summaryStats.datesCount} ngày)
           </div>
           <div className="flex items-center gap-2.5 shrink-0">
             
             <button
               type="button"
-              disabled={isSubmitting || previewData.length === 0}
+              disabled={
+                isCheckingExistingForms ||
+                isSubmitting ||
+                previewData.length === 0 ||
+                dateConflictEval.isBlocked
+              }
               onClick={handleSaveOnly}
+              title={
+                dateConflictEval.isBlocked
+                  ? 'Bị chặn do trùng ngày tăng ca (mỗi ngày chỉ được tạo 1 phiếu)'
+                  : undefined
+              }
               className="h-9 px-4 sm:px-5 rounded-lg border border-[#14539E] bg-[#14539E] text-white hover:bg-[#0F3E77] text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
             >
               {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -1430,7 +1672,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       </div>
 
       {toastMessage && (
-        <div role="status" className="fixed bottom-20 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg border border-slate-700 flex items-center gap-2.5 text-xs font-medium max-w-md animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div role="status" className="fixed top-16 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg border border-slate-700 flex items-center gap-2.5 text-xs font-medium max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span className="flex-1">{toastMessage}</span>
           <button type="button" onClick={() => setToastMessage(null)} className="p-1 text-slate-400 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
