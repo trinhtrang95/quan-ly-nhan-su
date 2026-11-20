@@ -3,6 +3,8 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  ChevronUp,
+  ChevronDown,
   Clock,
   FileSpreadsheet,
   FileText,
@@ -11,7 +13,7 @@ import {
   Search,
   Trash2,
   X,
-} from 'lucide-react';
+} from 'lucide-react';  
 import { DepartmentGroup, Employee } from '../../types/hr';
 import { INITIAL_DEPARTMENT_GROUPS, INITIAL_EMPLOYEES } from '../../data/mockData';
 import {
@@ -481,10 +483,21 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     );
   };
 
-  // Xóa một block khỏi previewData
-  const handleRemovePreviewBlock = (index: number) => {
-    setPreviewData((prev) => prev.filter((_, idx) => idx !== index));
-    showToast('Đã xóa nhóm công việc khỏi bản xem trước.');
+  // Đổi vị trí block trong danh sách
+  const handleMoveBlock = (index: number, direction: 'up' | 'down') => {
+    setPreviewData((prev) => {
+      const newData = [...prev];
+      if (direction === 'up' && index > 0) {
+        const temp = newData[index];
+        newData[index] = newData[index - 1];
+        newData[index - 1] = temp;
+      } else if (direction === 'down' && index < newData.length - 1) {
+        const temp = newData[index];
+        newData[index] = newData[index + 1];
+        newData[index + 1] = temp;
+      }
+      return newData;
+    });
   };
 
   const buildPayload = (): CreateOvertimeFormPayload => ({
@@ -1192,14 +1205,34 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                         {b.selectedEmployeeIds.length} nhân sự • {b.startTime}-{b.endTime}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePreviewBlock(idx)}
-                      className="p-1.5 rounded text-red-500 hover:bg-red-50 cursor-pointer transition-colors"
-                      title="Xóa nhóm này"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleMoveBlock(idx, 'up')}
+                        disabled={idx === 0}
+                        className="p-1 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                        title="Di chuyển lên"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMoveBlock(idx, 'down')}
+                        disabled={idx === previewData.length - 1}
+                        className="p-1 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                        title="Di chuyển xuống"
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePreviewBlock(idx)}
+                        className="p-1 rounded text-red-500 hover:bg-red-50 cursor-pointer ml-1"
+                        title="Xóa nhóm này"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1218,7 +1251,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             style={{
               fontFamily: "'Times New Roman', 'Malgun Gothic', Arial, sans-serif",
             }}
-            className="bg-white shadow-2xl p-6 sm:p-8 max-w-4xl w-full mx-auto text-black rounded-lg space-y-4"
+            className="bg-white shadow-2xl p-6 sm:p-8 w-full max-w-[794px] min-h-[1123px] mx-auto text-black rounded-sm space-y-4 flex flex-col"
           >
             {/* Dòng 1: Tên công ty (trái) & Mã biểu mẫu (phải) */}
             <div className="flex items-center justify-between text-xs mb-2">
