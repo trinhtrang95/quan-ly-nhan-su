@@ -1538,6 +1538,7 @@ export default function App() {
       <div
         className={`flex-1 min-w-0 flex flex-col h-screen ${
           activeModule === 'dashboard' ||
+          activeModule === 'overtime' ||
           (activeModule === 'leave_logs' && leaveSubTab === 'leave_requests')
             ? 'overflow-y-auto lg:overflow-hidden pb-20 md:pb-8 lg:pb-0'
             : 'overflow-y-auto pb-20 md:pb-8'
@@ -1545,7 +1546,7 @@ export default function App() {
       >
         <div
           className={`w-full max-w-[1600px] mx-auto flex-1 ${
-            activeModule === 'dashboard'
+            activeModule === 'dashboard' || activeModule === 'overtime'
               ? 'px-0 pt-0 min-h-0'
               : activeModule === 'leave_logs' &&
                   leaveSubTab === 'leave_requests'
@@ -1558,6 +1559,7 @@ export default function App() {
             aria-label="Nội dung phân hệ chính"
             className={
               activeModule === 'dashboard' ||
+              activeModule === 'overtime' ||
               (activeModule === 'leave_logs' &&
                 leaveSubTab === 'leave_requests')
                 ? 'h-full min-h-0 flex flex-col'

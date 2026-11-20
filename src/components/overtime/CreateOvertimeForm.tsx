@@ -494,11 +494,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   }, [previewData, employeeMap, currentStartTime, currentEndTime]);
 
   return (
-    <div className="grid grid-cols-12 gap-6 h-[calc(100vh-4rem)] overflow-hidden p-4 bg-slate-50 text-slate-800">
+    <div className="flex flex-col lg:flex-row w-full h-[calc(100vh-80px)] overflow-hidden p-4 gap-4 bg-slate-50 text-slate-800">
       {/* ===================================================================
           CỘT TRÁI (1/3) - BẢNG ĐIỀU KHIỂN / FORM NHẬP LIỆU (col-span-4)
       =================================================================== */}
-      <div className="col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
+      <div className="w-full lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full overflow-y-auto">
         {/* Hàng 1: Tiêu đề */}
         <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50/50">
           <h2 className="text-xl font-bold text-[#14539E]">Tạo phiếu tăng ca</h2>
@@ -508,7 +508,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         </div>
 
         {/* Form cuộn dọc */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+        <div className="p-4 sm:p-5 space-y-4">
           {/* Hàng 2: Chọn Ngày làm thêm & Bộ phận */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -842,8 +842,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       {/* ===================================================================
           CỘT PHẢI (2/3) - KHỐI PREVIEW (col-span-8)
       =================================================================== */}
-      <div className="col-span-8 bg-slate-100 rounded-2xl border border-slate-200 shadow-inner flex flex-col h-full overflow-hidden relative">
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-start">
+      <div className="w-full lg:w-2/3 bg-slate-100 rounded-2xl border border-slate-200 shadow-inner flex flex-col h-full overflow-y-auto relative">
+        <div className="p-6 flex flex-col items-center justify-start">
           {/* Thẻ div mô phỏng tờ giấy A4 ở giữa */}
           <div className="bg-white shadow-2xl p-8 max-w-4xl w-full mx-auto font-serif text-black rounded-lg space-y-4">
             {/* Dòng 1: Tên công ty (trái) & Mã biểu mẫu (phải) */}
