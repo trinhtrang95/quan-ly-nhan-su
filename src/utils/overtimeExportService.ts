@@ -35,7 +35,6 @@ const THIN_BLACK_BORDER: Partial<ExcelJS.Borders> = {
   right: { style: 'thin', color: { argb: 'FF000000' } },
 };
 
-// Hàm kiểm tra giờ để bôi đậm trên Excel (>= 20:10)
 const isTimeBold = (timeStr: string) => {
   if (!timeStr) return false;
   const cleanTime = timeStr.replace('h', ':');
@@ -129,22 +128,18 @@ export class OvertimeExportService {
       views: [{ showGridLines: true }],
     });
 
-    // =========================================================================
-    // LƯỚI 9 CỘT - ĐÃ CĂN CHỈNH KÍCH THƯỚC ĐỂ Ô XÁC NHẬN (CỘT D) SIÊU HẸP
-    // =========================================================================
     worksheet.columns = [
-      { key: 'colA', width: 6 },  // A: No
-      { key: 'colB', width: 22 }, // B: Danh sách
-      { key: 'colC', width: 22 }, // C: Lý do (Phần 1)
-      { key: 'colD', width: 5.5 },// D: Xác nhận (Rất hẹp giống trong ảnh)
-      { key: 'colE', width: 11.5 }, // E: Người lập
-      { key: 'colF', width: 11.5 }, // F: Kiểm tra
-      { key: 'colG', width: 11.5 }, // G: Kiểm tra
-      { key: 'colH', width: 11.5 }, // H: Kiểm tra
-      { key: 'colI', width: 11.5 }, // I: Phê duyệt
+      { key: 'colA', width: 6 },
+      { key: 'colB', width: 22 },
+      { key: 'colC', width: 22 },
+      { key: 'colD', width: 5.5 },
+      { key: 'colE', width: 11.5 },
+      { key: 'colF', width: 11.5 },
+      { key: 'colG', width: 11.5 },
+      { key: 'colH', width: 11.5 },
+      { key: 'colI', width: 11.5 },
     ];
 
-    // Dòng 1: Header Công ty & Mã Biểu mẫu
     worksheet.mergeCells('A1:C1');
     const compCell = worksheet.getCell('A1');
     compCell.value = 'Transon Viet nam Co., Ltd';
@@ -158,52 +153,42 @@ export class OvertimeExportService {
     formCodeCell.alignment = { vertical: 'middle', horizontal: 'right' };
     worksheet.getRow(1).height = 18;
 
-    // =========================================================================
-    // VẼ BẢNG CHỮ KÝ GÓC PHẢI (CHUẨN 100% THEO ẢNH YÊU CẦU MỚI NHẤT)
-    // =========================================================================
     worksheet.getRow(2).height = 16;
     worksheet.getRow(3).height = 16;
     worksheet.getRow(4).height = 18;
     worksheet.getRow(5).height = 18;
     worksheet.getRow(6).height = 18;
 
-    // 1. Cột D (Xác nhận - Ô hẹp gộp nguyên 1 khối từ trên xuống dưới)
     worksheet.mergeCells('D2:D6');
     const cellD2 = worksheet.getCell('D2');
     cellD2.value = '결\nxác\nnhận\n재';
     cellD2.font = { name: FONT_NAME, size: 10 };
     cellD2.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-    cellD2.border = THIN_BLACK_BORDER; // Kẻ khung liền toàn bộ
+    cellD2.border = THIN_BLACK_BORDER;
 
-    // 2. Các cột E đến I (Người lập -> Phê duyệt)
     const signatureCols = ['E', 'F', 'G', 'H', 'I'];
     const krHeaders = ['작성', '검사', '검사', '검사', '승인'];
     const viHeaders = ['Người lập', 'Kiểm tra', 'Kiểm tra', 'Kiểm tra', 'Phê duyệt'];
 
     for (let c = 0; c < 5; c++) {
       const col = signatureCols[c];
-
-      // Hàng Tiếng Hàn (Dòng 2)
       const cellKr = worksheet.getCell(`${col}2`);
       cellKr.value = krHeaders[c];
       cellKr.font = { name: FONT_NAME, size: 10 };
       cellKr.alignment = { vertical: 'middle', horizontal: 'center' };
       cellKr.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'dotted' } };
 
-      // Hàng Tiếng Việt (Dòng 3)
       const cellVi = worksheet.getCell(`${col}3`);
       cellVi.value = viHeaders[c];
       cellVi.font = { name: FONT_NAME, size: 10 };
       cellVi.alignment = { vertical: 'middle', horizontal: 'center' };
       cellVi.border = { top: { style: 'dotted' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
 
-      // Hộp ký trắng (Gộp Dòng 4-6)
       worksheet.mergeCells(`${col}4:${col}6`);
       const cellSign = worksheet.getCell(`${col}4`);
       cellSign.border = THIN_BLACK_BORDER;
     }
 
-    // Góc trái: Tiêu đề Phiếu (A2:C6)
     worksheet.mergeCells('A2:C6');
     const titleCell = worksheet.getCell('A2');
     titleCell.value = 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서';
@@ -216,22 +201,20 @@ export class OvertimeExportService {
       const curDate = sortedDates[dateIdx];
       const dateBlocks = mapByDate.get(curDate) || [];
 
-      // Dòng Phân tách Ngày/Bộ phận
       worksheet.getRow(currentRowIndex).height = dateIdx === 0 ? 20 : 24;
-      worksheet.mergeCells(`A${currentRowIndex}:D${currentRowIndex}`); // Trái
+      worksheet.mergeCells(`A${currentRowIndex}:D${currentRowIndex}`);
       const deptCell = worksheet.getCell(`A${currentRowIndex}`);
       deptCell.value = dateIdx === 0 ? formatDepartmentHeaderLabel(department) : '';
       deptCell.font = { name: FONT_NAME, size: 11, bold: false };
       deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
 
-      worksheet.mergeCells(`E${currentRowIndex}:I${currentRowIndex}`); // Phải
+      worksheet.mergeCells(`E${currentRowIndex}:I${currentRowIndex}`);
       const dateCell = worksheet.getCell(`E${currentRowIndex}`);
       dateCell.value = formatDateToFormStyle(curDate);
       dateCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: 'FF000000' } };
       dateCell.alignment = { vertical: 'middle', horizontal: 'center' };
       currentRowIndex += 1;
 
-      // Header Bảng: Kẻ khung full 9 cột trước
       const headerRowVi = worksheet.getRow(currentRowIndex);
       headerRowVi.height = 18;
       const headerRowKr = worksheet.getRow(currentRowIndex + 1);
@@ -242,7 +225,6 @@ export class OvertimeExportService {
         headerRowKr.getCell(colIdx).border = THIN_BLACK_BORDER;
       }
 
-      // Đổ Tiêu đề vào các ô
       const mapHeader = (col: string, vi: string, kr: string) => {
         const cVi = headerRowVi.getCell(col);
         cVi.value = vi;
@@ -263,7 +245,6 @@ export class OvertimeExportService {
       mapHeader('H', 'Tổng thời gian', '총 시간');
       mapHeader('I', 'Ký nhận', '싸인');
 
-      // Gộp 3 ô (C, D, E) thành cột Lý do
       worksheet.mergeCells(`C${currentRowIndex}:E${currentRowIndex}`);
       worksheet.mergeCells(`C${currentRowIndex + 1}:E${currentRowIndex + 1}`);
       currentRowIndex += 2;
@@ -288,7 +269,6 @@ export class OvertimeExportService {
           const row = worksheet.getRow(currentRowIndex + i);
           row.height = 24;
 
-          // Kẻ viền nền cho đủ 9 ô
           for (let colIdx = 1; colIdx <= 9; colIdx += 1) {
             row.getCell(colIdx).border = THIN_BLACK_BORDER;
           }
@@ -302,8 +282,7 @@ export class OvertimeExportService {
 
           setCell('A', sequentialNo);
           setCell('B', emp ? emp.fullName : '', false, 'left');
-          setCell('C', combinedReason, false, 'left', true); // Sẽ gộp với D, E sau
-          
+          setCell('C', combinedReason, false, 'left', true);
           setCell('F', formatTimeToFormStyle(p.startTime || block.startTime), isTimeBold(p.startTime || block.startTime));
           setCell('G', formatTimeToFormStyle(p.endTime || block.endTime), isTimeBold(p.endTime || block.endTime));
           setCell('H', '');
@@ -312,7 +291,6 @@ export class OvertimeExportService {
           sequentialNo += 1;
         }
 
-        // Gộp Cột Lý do (C:E)
         if (endRow >= startRow) {
           worksheet.mergeCells(`C${startRow}:E${endRow}`);
         }
@@ -320,9 +298,6 @@ export class OvertimeExportService {
       }
     }
 
-    // =========================================================================
-    // FOOTER: Ghi chú
-    // =========================================================================
     const renderNote = (rowIdx: number, text: string) => {
       worksheet.mergeCells(`A${rowIdx}:I${rowIdx}`);
       const c = worksheet.getCell(`A${rowIdx}`);
@@ -336,14 +311,37 @@ export class OvertimeExportService {
     renderNote(currentRowIndex + 1, '1) Nếu phát sinh dài hạn ghi rõ vào đây: từ năm 2022/........./............~ 2022/........./ ............');
     renderNote(currentRowIndex + 2, 'Phát sinh giờ ghi ở biểu trên/ 긴시간 발생할 경우 는 여기서 기록할것');
 
-    // Xuất Buffer
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const dateSuffix = sortedDates.length > 1
       ? `${sortedDates[0].replace(/[^0-9-]/g, '')}_den_${sortedDates[sortedDates.length - 1].replace(/[^0-9-]/g, '')}`
       : (sortedDates[0] || '2026-11-16').replace(/[^0-9-]/g, '');
     
-    saveAs(blob, `Phieu_Tang_Ca_TV-PSGC2022_${dateSuffix}.xlsx`);
+    const fileName = `Phieu_Tang_Ca_TV-PSGC2022_${dateSuffix}.xlsx`;
+
+    // Nâng cấp: Mở cửa sổ chọn thư mục thông minh, tự nhớ vị trí cho lần sau
+    try {
+      if ('showSaveFilePicker' in window) {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{
+            description: 'Excel File',
+            accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } else {
+        saveAs(blob, fileName);
+      }
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        saveAs(blob, fileName);
+      } else {
+        throw error; // Ném lỗi ra để hiển thị thông báo "Đã hủy"
+      }
+    }
   }
 }
 
