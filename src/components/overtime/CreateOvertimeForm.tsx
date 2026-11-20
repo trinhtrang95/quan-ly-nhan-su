@@ -66,7 +66,7 @@ export interface CreateOvertimeFormProps {
 }
 
 /**
- * Từ điển các cụm từ tăng ca phổ biến trong nhà máy để dịch tức thì
+- Từ điển các cụm từ tăng ca phổ biến trong nhà máy để dịch tức thì
  */
 const FACTORY_DICTIONARY: Record<string, string> = {
   'trực sản xuất': '생산 당직',
@@ -81,7 +81,7 @@ const FACTORY_DICTIONARY: Record<string, string> = {
 };
 
 /**
- * Hàm dịch thực tế Tiếng Việt -> Tiếng Hàn qua Từ điển nhà máy hoặc Google Translate API
+- Hàm dịch thực tế Tiếng Việt -> Tiếng Hàn qua Từ điển nhà máy hoặc Google Translate API
  */
 const translateVnToKr = async (text: string): Promise<string> => {
   if (!text) return '';
@@ -105,7 +105,7 @@ const translateVnToKr = async (text: string): Promise<string> => {
 };
 
 /**
- * Lớp dịch vụ xử lý logic nghiệp vụ Phiếu tăng ca (OOP Domain Service)
+- Lớp dịch vụ xử lý logic nghiệp vụ Phiếu tăng ca (OOP Domain Service)
  */
 class OvertimeFormService {
   static createEmptyBlock(defaultDate = '2026-11-16'): OvertimeTaskBlock {
@@ -414,6 +414,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     }
   };
 
+  // Xóa một block khỏi previewData
+  const handleRemovePreviewBlock = (index: number) => {
+    setPreviewData((prev) => prev.filter((_, idx) => idx !== index));
+    showToast('Đã xóa nhóm công việc khỏi bản xem trước.');
+  };
+
   // =========================================================================
   // 2. HÀNG 5: HÀNH ĐỘNG GHI NHẬN VÀO DANH SÁCH XEM TRƯỚC
   // =========================================================================
@@ -498,6 +504,15 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       }
       return newData;
     });
+  };
+
+  // Hàm kiểm tra giờ: Lớn hơn hoặc bằng 20:10 thì trả về true (để bôi đậm)
+  const isTimeBold = (timeStr: string) => {
+    if (!timeStr) return false;
+    const cleanTime = timeStr.replace('h', ':');
+    const [hours, minutes] = cleanTime.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return false;
+    return (hours * 60 + minutes) >= 1210; // 1210 phút là 20h10
   };
 
   const buildPayload = (): CreateOvertimeFormPayload => ({
@@ -1374,12 +1389,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                               {row.combinedReason}
                             </td>
                           )}
-                          {/* Cột (4): Giờ bắt đầu - In chính xác giờ của từng cá nhân */}
-                          <td className="border border-black px-2 py-1 text-center font-bold align-middle">
+                          {/* Cột (4): Giờ bắt đầu - In đậm nếu >= 20:10 */}
+                          <td className={`border border-black px-2 py-1 text-center align-middle ${isTimeBold(row.startTimeFormatted) ? 'font-bold' : 'font-normal'}`}>
                             {row.startTimeFormatted}
                           </td>
-                          {/* Cột (5): Giờ kết thúc - In chính xác giờ của từng cá nhân */}
-                          <td className="border border-black px-2 py-1 text-center font-bold align-middle">
+                          {/* Cột (5): Giờ kết thúc - In đậm nếu >= 20:10 */}
+                          <td className={`border border-black px-2 py-1 text-center align-middle ${isTimeBold(row.endTimeFormatted) ? 'font-bold' : 'font-normal'}`}>
                             {row.endTimeFormatted}
                           </td>
                           {/* Cột (6): Tổng thời gian - Từng dòng nhân viên */}
