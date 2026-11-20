@@ -1077,74 +1077,52 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               </table>
             </div>
 
-            {/* Dòng Bộ phận & Ngày làm thêm (Ngày đầu tiên) */}
-            <div className="flex items-center justify-between text-xs mb-1.5">
-              <span>{formatDepartmentHeaderLabel(selectedDepartment)}</span>
-              <span className="font-bold pr-24">
-                {printableDateGroups[0]?.formattedDate || formatDateToFormStyle(overtimeDate)}
-              </span>
-            </div>
-
             {/* Bảng chính 7 cột chuẩn: Lặp lại tiêu đề và phân cách theo từng ngày */}
-            <table className="w-full border-collapse border border-black text-[11px]">
+            <table className="w-full border-collapse text-[11px]">
               <tbody>
                 {printableDateGroups.map((dateGroup, dateIdx) => (
                   <React.Fragment key={dateGroup.date}>
-                    {/* Nếu là ngày đầu tiên: Hiển thị 2 dòng tiêu đề cột */}
-                    {dateIdx === 0 ? (
-                      <>
-                        <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-1 w-8 font-normal">No</th>
-                          <th className="border border-black px-2 py-1 w-44 font-normal">Danh sách làm thêm</th>
-                          <th className="border border-black px-2 py-1 font-normal">Lý do làm thêm</th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">Giờ bắt đầu</th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">Giờ kết thúc</th>
-                          <th className="border border-black px-2 py-1 w-24 font-normal">Tổng thời gian</th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">Ký nhận</th>
-                        </tr>
-                        <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-1 font-normal" />
-                          <th className="border border-black px-2 py-1 font-normal">명단</th>
-                          <th className="border border-black px-2 py-1 font-normal">잔업. 특근사유</th>
-                          <th className="border border-black px-2 py-1 font-normal">시작</th>
-                          <th className="border border-black px-2 py-1 font-normal">종료</th>
-                          <th className="border border-black px-2 py-1 font-normal">총 시간</th>
-                          <th className="border border-black px-2 py-1 font-normal">싸인</th>
-                        </tr>
-                      </>
-                    ) : (
-                      <>
-                        {/* Với các ngày tiếp theo: Tự động chèn 1 hàng phân cách hiển thị ngày [DD/MM/YYYY] căn phải */}
-                        <tr className="h-8">
-                          <td colSpan={3} className="border-0 p-0" />
-                          <td
-                            colSpan={4}
-                            className="border-0 text-right font-bold pr-24 pt-3 pb-1 text-xs"
-                          >
-                            {dateGroup.formattedDate}
-                          </td>
-                        </tr>
-                        {/* Ngay bên dưới lặp lại 2 dòng tiêu đề cột của bảng */}
-                        <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-1 w-8 font-normal">No</th>
-                          <th className="border border-black px-2 py-1 w-44 font-normal">Danh sách làm thêm</th>
-                          <th className="border border-black px-2 py-1 font-normal">Lý do làm thêm</th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">Giờ bắt đầu</th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">Giờ kết thúc</th>
-                          <th className="border border-black px-2 py-1 w-24 font-normal">Tổng thời gian</th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">Ký nhận</th>
-                        </tr>
-                        <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-1 font-normal" />
-                          <th className="border border-black px-2 py-1 font-normal">명단</th>
-                          <th className="border border-black px-2 py-1 font-normal">잔업. 특근사유</th>
-                          <th className="border border-black px-2 py-1 font-normal">시작</th>
-                          <th className="border border-black px-2 py-1 font-normal">종료</th>
-                          <th className="border border-black px-2 py-1 font-normal">총 시간</th>
-                          <th className="border border-black px-2 py-1 font-normal">싸인</th>
-                        </tr>
-                      </>
-                    )}
+                    {/* Hàng Tiêu đề Ngày & Bộ phận: chia thành 2 ô gộp (colSpan 4 & colSpan 3) để căn thẳng hàng dọc 100% */}
+                    <tr className={dateIdx === 0 ? 'h-7' : 'h-9'}>
+                      <td
+                        colSpan={4}
+                        className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${
+                          dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'
+                        }`}
+                      >
+                        {dateIdx === 0
+                          ? formatDepartmentHeaderLabel(selectedDepartment)
+                          : ''}
+                      </td>
+                      <td
+                        colSpan={3}
+                        className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${
+                          dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'
+                        }`}
+                      >
+                        {dateGroup.formattedDate}
+                      </td>
+                    </tr>
+
+                    {/* 2 dòng tiêu đề cột của bảng */}
+                    <tr className="text-center font-normal">
+                      <th className="border border-black px-1.5 py-1 w-8 font-normal">No</th>
+                      <th className="border border-black px-2 py-1 w-44 font-normal">Danh sách làm thêm</th>
+                      <th className="border border-black px-2 py-1 font-normal">Lý do làm thêm</th>
+                      <th className="border border-black px-2 py-1 w-20 font-normal">Giờ bắt đầu</th>
+                      <th className="border border-black px-2 py-1 w-20 font-normal">Giờ kết thúc</th>
+                      <th className="border border-black px-2 py-1 w-24 font-normal">Tổng thời gian</th>
+                      <th className="border border-black px-2 py-1 w-20 font-normal">Ký nhận</th>
+                    </tr>
+                    <tr className="text-center font-normal">
+                      <th className="border border-black px-1.5 py-1 font-normal" />
+                      <th className="border border-black px-2 py-1 font-normal">명단</th>
+                      <th className="border border-black px-2 py-1 font-normal">잔업. 특근사유</th>
+                      <th className="border border-black px-2 py-1 font-normal">시작</th>
+                      <th className="border border-black px-2 py-1 font-normal">종료</th>
+                      <th className="border border-black px-2 py-1 font-normal">총 시간</th>
+                      <th className="border border-black px-2 py-1 font-normal">싸인</th>
+                    </tr>
 
                     {/* Dữ liệu các dòng của ngày này với No reset đếm lại từ 1 */}
                     {dateGroup.blocks.map((group) =>

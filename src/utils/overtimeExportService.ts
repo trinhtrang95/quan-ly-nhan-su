@@ -265,31 +265,29 @@ export class OvertimeExportService {
       const curDate = sortedDates[dateIdx];
       const dateBlocks = mapByDate.get(curDate) || [];
 
-      if (dateIdx === 0) {
-        // Dòng Bộ phận (trái) và Ngày làm thêm (phải) cho ngày đầu tiên
-        worksheet.getRow(currentRowIndex).height = 20;
-        worksheet.mergeCells(`A${currentRowIndex}:C${currentRowIndex}`);
-        const deptCell = worksheet.getCell(`A${currentRowIndex}`);
-        deptCell.value = formatDepartmentHeaderLabel(department);
-        deptCell.font = { name: FONT_NAME, size: 11, bold: false };
-        deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
+      // Hàng Tiêu đề Ngày & Bộ phận: chia thành 2 ô gộp: ô trái A:D (colSpan 4) và ô phải E:G (colSpan 3)
+      worksheet.getRow(currentRowIndex).height = dateIdx === 0 ? 20 : 24;
 
-        worksheet.mergeCells(`D${currentRowIndex}:G${currentRowIndex}`);
-        const dateCell = worksheet.getCell(`D${currentRowIndex}`);
-        dateCell.value = formatDateToFormStyle(curDate);
-        dateCell.font = { name: FONT_NAME, size: 11, bold: true };
-        dateCell.alignment = { vertical: 'middle', horizontal: 'right' };
-        currentRowIndex += 1;
-      } else {
-        // Với các ngày tiếp theo: Tự động chèn 1 hàng phân cách hiển thị ngày [DD/MM/YYYY] căn phải
-        worksheet.getRow(currentRowIndex).height = 22;
-        worksheet.mergeCells(`D${currentRowIndex}:G${currentRowIndex}`);
-        const subDateCell = worksheet.getCell(`D${currentRowIndex}`);
-        subDateCell.value = formatDateToFormStyle(curDate);
-        subDateCell.font = { name: FONT_NAME, size: 11, bold: true };
-        subDateCell.alignment = { vertical: 'middle', horizontal: 'right' };
-        currentRowIndex += 1;
-      }
+      // Ô trái colSpan={4} (cột A:D): chứa Bộ phận ở ngày đầu hoặc để trống ở các ngày sau
+      worksheet.mergeCells(`A${currentRowIndex}:D${currentRowIndex}`);
+      const deptCell = worksheet.getCell(`A${currentRowIndex}`);
+      deptCell.value =
+        dateIdx === 0 ? formatDepartmentHeaderLabel(department) : '';
+      deptCell.font = { name: FONT_NAME, size: 11, bold: false };
+      deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
+
+      // Ô phải colSpan={3} (cột E:G): chứa ngày DD/MM/YYYY nằm chính giữa vùng 3 cột cuối (Giờ kết thúc, Tổng thời gian, Ký nhận)
+      worksheet.mergeCells(`E${currentRowIndex}:G${currentRowIndex}`);
+      const dateCell = worksheet.getCell(`E${currentRowIndex}`);
+      dateCell.value = formatDateToFormStyle(curDate);
+      dateCell.font = {
+        name: FONT_NAME,
+        size: 11,
+        bold: true,
+        color: { argb: 'FF000000' },
+      };
+      dateCell.alignment = { vertical: 'middle', horizontal: 'center' };
+      currentRowIndex += 1;
 
       // Ngay bên dưới lặp lại 2 dòng tiêu đề cột của bảng
       const headerRowVi = worksheet.getRow(currentRowIndex);
