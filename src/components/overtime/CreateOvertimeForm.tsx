@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Check,
@@ -6,12 +6,10 @@ import {
   Clock,
   FileSpreadsheet,
   FileText,
-  Languages,
   Loader2,
   Plus,
   Search,
   Trash2,
-  Users,
   X,
 } from 'lucide-react';
 import { DepartmentGroup, Employee } from '../../types/hr';
@@ -58,66 +56,21 @@ export interface CreateOvertimeFormProps {
 }
 
 /**
- * Từ điển đối chiếu bản dịch mẫu Tiếng Việt -> Tiếng Hàn chuẩn nghiệp vụ sản xuất (TV-PSGC2022)
+ * Hàm dịch thực tế Tiếng Việt -> Tiếng Hàn qua API miễn phí của Google Translate
  */
-const MOCK_VI_TO_KR_DICTIONARY: Array<{ keywords: string[]; kr: string }> = [
-  {
-    keywords: ['trực sản xuất', 'truc san xuat'],
-    kr: '생산 당직',
-  },
-  {
-    keywords: ['sự cố trên line', 'su co tren line', 'xử lý sự cố', 'sử lý sự cố'],
-    kr: '라인 이상 조치',
-  },
-  {
-    keywords: ['3d5s', 'u-line', 'thẩm định'],
-    kr: 'U-Line 3D5S 관련 작업 진행',
-  },
-  {
-    keywords: ['quấn core', 'pq50', 'datbike'],
-    kr: 'PQ50 DATBIKE 코어 권선기 조립',
-  },
-  {
-    keywords: ['jig auto'],
-    kr: '심사 준비를 위한 AUTO JIG 조치',
-  },
-  {
-    keywords: ['atq2815', 'cài đặt chuyền'],
-    kr: 'ATQ2815 2IN1 라인 셋업',
-  },
-  {
-    keywords: ['sq2118', 'lắp máy tự động'],
-    kr: 'SQ2118 자동화 설비 1호기 설치',
-  },
-  {
-    keywords: ['eol', 'motor fan', 'cải tiến máy'],
-    kr: 'Motor Fan EOL 설비 개선',
-  },
-  {
-    keywords: ['setup motor fan'],
-    kr: 'Motor Fan 라인 셋업 작업 진행',
-  },
-  {
-    keywords: ['đối sách motor fan'],
-    kr: 'Motor Fan 대책 항목',
-  },
-  {
-    keywords: ['đơn hàng mới', 'theo dõi đơn hàng'],
-    kr: '신규 발주 건 모니터링',
-  },
-  {
-    keywords: ['tỷ lệ đạt st', 'kiểm tra tỷ lệ'],
-    kr: '10월 ST 달성률 확인',
-  },
-  {
-    keywords: ['solum audit', 'chuẩn bị tài liệu'],
-    kr: 'SOLUM Audit 대응 자료 준비',
-  },
-  {
-    keywords: ['theo dõi dữ liệu', 'u, c, e line'],
-    kr: 'U, C, E LINE 데이터 모니터링',
-  },
-];
+const translateVnToKr = async (text: string): Promise<string> => {
+  if (!text) return '';
+  try {
+    const response = await fetch(
+      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=vi&tl=ko&dt=t&q=${encodeURIComponent(text)}`
+    );
+    const data = await response.json();
+    return data[0].map((item: [string]) => item[0]).join('');
+  } catch (error) {
+    console.error('Lỗi dịch thuật:', error);
+    return 'Lỗi dịch...';
+  }
+};
 
 /**
  * Lớp dịch vụ xử lý logic nghiệp vụ Phiếu tăng ca (OOP Domain Service)
@@ -133,29 +86,6 @@ class OvertimeFormService {
       selectedEmployeeIds: [],
       isTranslating: false,
     };
-  }
-
-  static translateReasonToKorean(reasonVi: string): string {
-    const trimmed = reasonVi.trim();
-    if (!trimmed) return '';
-
-    const lines = trimmed
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    const translatedLines = lines.map((line) => {
-      const normalized = line.toLowerCase();
-      const matched = MOCK_VI_TO_KR_DICTIONARY.find((entry) =>
-        entry.keywords.some((kw) => normalized.includes(kw))
-      );
-      if (matched) {
-        return matched.kr;
-      }
-      return `[KR] ${line.replace(/^\d+[\.\)]\s*/, '')} 관련 잔업 진행`;
-    });
-
-    return translatedLines.join('\n');
   }
 
   static calculateDurationHours(startTime: string, endTime: string): number {
@@ -176,6 +106,37 @@ class OvertimeFormService {
     if (diffMinutes <= 0) return 0;
     return Number((diffMinutes / 60).toFixed(2));
   }
+
+  static sanitize24hTimeInput(raw: string): string {
+    const cleaned = raw.replace(/[^\d:]/g, '');
+    const colonIdx = cleaned.indexOf(':');
+    if (colonIdx !== -1) {
+      const before = cleaned.slice(0, colonIdx).slice(0, 2);
+      const after = cleaned
+        .slice(colonIdx + 1)
+        .replace(/:/g, '')
+        .slice(0, 2);
+      return `${before}:${after}`;
+    }
+    const digitsOnly = cleaned.slice(0, 4);
+    if (digitsOnly.length >= 3) {
+      return `${digitsOnly.slice(0, 2)}:${digitsOnly.slice(2)}`;
+    }
+    return digitsOnly;
+  }
+
+  static normalize24hTime(raw: string, fallback: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) return fallback;
+    const match = trimmed.match(/^(\d{1,2}):?(\d{0,2})$/);
+    if (!match) return fallback;
+    const rawHours = parseInt(match[1], 10);
+    const rawMinutes = match[2] ? parseInt(match[2].padEnd(2, '0'), 10) : 0;
+    if (Number.isNaN(rawHours) || Number.isNaN(rawMinutes)) return fallback;
+    const clampedHours = Math.min(23, Math.max(0, rawHours));
+    const clampedMinutes = Math.min(59, Math.max(0, rawMinutes));
+    return `${String(clampedHours).padStart(2, '0')}:${String(clampedMinutes).padStart(2, '0')}`;
+  }
 }
 
 export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
@@ -194,10 +155,13 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   // Form input states for current entry
   const [currentReasonVi, setCurrentReasonVi] = useState<string>('Trực sản xuất');
   const [currentReasonKr, setCurrentReasonKr] = useState<string>('생산 당직');
+  const [isAutoTranslating, setIsAutoTranslating] = useState<boolean>(false);
   const [currentStartTime, setCurrentStartTime] = useState<string>('16:10');
   const [currentEndTime, setCurrentEndTime] = useState<string>('20:10');
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
+  const [employeeGroupFilter, setEmployeeGroupFilter] = useState<string>(initialDepartment);
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState<string>('');
+  const isInitialReasonMountRef = useRef<boolean>(true);
 
   // Mảng State previewData chứa danh sách các Block đã được "Ghi nhận"
   const [previewData, setPreviewData] = useState<OvertimeTaskBlock[]>(() => [
@@ -231,24 +195,34 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     [employees]
   );
 
-  // Danh sách nhân sự khả dụng theo Bộ phận đã chọn trên Header
-  const availableEmployees = useMemo(() => {
-    if (!selectedDepartment || selectedDepartment === 'ALL') {
-      return employees;
-    }
-    return employees.filter((emp) => emp.department === selectedDepartment);
-  }, [employees, selectedDepartment]);
+  // Danh sách bộ phận/nhóm duy nhất cho dropdown lọc nhân sự
+  const departmentFilterOptions = useMemo(() => {
+    const names = new Set<string>();
+    groups.forEach((g) => {
+      if (g.name?.trim()) names.add(g.name.trim());
+    });
+    employees.forEach((emp) => {
+      if (emp.department?.trim()) names.add(emp.department.trim());
+    });
+    return Array.from(names);
+  }, [groups, employees]);
 
+  // Danh sách nhân sự khả dụng theo Bộ lọc Nhóm & ô tìm kiếm
   const filteredEmployeesForInput = useMemo(() => {
+    const byGroup =
+      !employeeGroupFilter || employeeGroupFilter === 'ALL'
+        ? employees
+        : employees.filter((emp) => emp.department === employeeGroupFilter);
+
     const query = employeeSearchQuery.trim().toLowerCase();
-    if (!query) return availableEmployees;
-    return availableEmployees.filter(
+    if (!query) return byGroup;
+    return byGroup.filter(
       (emp) =>
         emp.fullName.toLowerCase().includes(query) ||
         emp.employeeCode.toLowerCase().includes(query) ||
         emp.department.toLowerCase().includes(query)
     );
-  }, [availableEmployees, employeeSearchQuery]);
+  }, [employees, employeeGroupFilter, employeeSearchQuery]);
 
   // Tổng số lượt nhân sự và tổng số giờ tăng ca dự kiến từ previewData
   const summaryStats = useMemo(() => {
@@ -270,18 +244,46 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     };
   }, [previewData]);
 
-  // Hàm dịch tự động Tiếng Việt -> Tiếng Hàn
-  const handleTranslate = () => {
-    if (!currentReasonVi.trim()) {
-      showToast('Vui lòng nhập Lý do (Tiếng Việt) trước khi dịch tự động.');
-      return;
+  // Hàm dịch tự động Tiếng Việt -> Tiếng Hàn qua Google Translate API
+  const handleTranslate = async (sourceReasonVi: string): Promise<string> => {
+    if (!sourceReasonVi.trim()) {
+      setCurrentReasonKr('');
+      return '';
     }
-    const translatedText = OvertimeFormService.translateReasonToKorean(currentReasonVi);
-    setCurrentReasonKr(translatedText);
-    showToast('Đã dịch tự động lý do tăng ca sang Tiếng Hàn.');
+    const translatedText = await translateVnToKr(sourceReasonVi.trim());
+    return translatedText;
   };
 
-  // Toggle chọn nhân viên trong form nhập liệu hiện tại
+  // Real-time Translation với Debounce 500ms khi người dùng nhập Lý do (Tiếng Việt)
+  useEffect(() => {
+    if (isInitialReasonMountRef.current) {
+      isInitialReasonMountRef.current = false;
+      return;
+    }
+
+    if (!currentReasonVi.trim()) {
+      setIsAutoTranslating(false);
+      setCurrentReasonKr('');
+      return;
+    }
+
+    let isCancelled = false;
+    setIsAutoTranslating(true);
+    const debounceTimer = window.setTimeout(async () => {
+      const translatedText = await handleTranslate(currentReasonVi);
+      if (!isCancelled) {
+        setCurrentReasonKr(translatedText);
+        setIsAutoTranslating(false);
+      }
+    }, 500);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(debounceTimer);
+    };
+  }, [currentReasonVi]);
+
+  // Toggle chọn nhân viên trong form nhập liệu hiện tại (Immutability)
   const handleToggleEmployee = (empId: string) => {
     setCurrentSelectedEmployeeIds((prev) =>
       prev.includes(empId) ? prev.filter((id) => id !== empId) : [...prev, empId]
@@ -306,7 +308,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   };
 
   // Hành động Hàng 6: Nút "Ghi nhận"
-  const handleCommitBlock = () => {
+  const handleCommitBlock = async () => {
     if (currentSelectedEmployeeIds.length === 0) {
       showToast('Vui lòng chọn ít nhất một nhân sự tham gia nhóm công việc này.');
       return;
@@ -316,13 +318,28 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       return;
     }
 
+    const normalizedStart = OvertimeFormService.normalize24hTime(
+      currentStartTime,
+      '16:10'
+    );
+    const normalizedEnd = OvertimeFormService.normalize24hTime(
+      currentEndTime,
+      '20:10'
+    );
+    setCurrentStartTime(normalizedStart);
+    setCurrentEndTime(normalizedEnd);
+
+    const finalReasonKr =
+      currentReasonKr.trim() ||
+      (await translateVnToKr(currentReasonVi.trim()));
+
     const newBlock: OvertimeTaskBlock = {
       id: `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       reasonVi: currentReasonVi,
-      reasonKr: currentReasonKr,
-      startTime: currentStartTime,
-      endTime: currentEndTime,
-      selectedEmployeeIds: currentSelectedEmployeeIds,
+      reasonKr: finalReasonKr,
+      startTime: normalizedStart,
+      endTime: normalizedEnd,
+      selectedEmployeeIds: [...currentSelectedEmployeeIds],
       isTranslating: false,
     };
 
@@ -487,7 +504,10 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               <select
                 id="overtime-department-select"
                 value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
+                onChange={(e) => {
+                  setSelectedDepartment(e.target.value);
+                  setEmployeeGroupFilter(e.target.value);
+                }}
                 className="w-full h-10 px-3 py-2 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
               >
                 <option value="ALL">Tất cả bộ phận</option>
@@ -519,20 +539,18 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             </div>
           </div>
 
-          {/* Hàng 3 (Nhóm công việc): Lý do (Tiếng Việt) + Nút Dịch tự động + Lý do (Tiếng Hàn) */}
+          {/* Hàng 3 (Nhóm công việc): Lý do (Tiếng Việt) tự động dịch Debounce 500ms -> Lý do (Tiếng Hàn) */}
           <div className="space-y-3 p-3.5 rounded-xl border border-slate-200 bg-slate-50/50">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-700">
+              <span className="text-xs font-bold text-slate-700">
                 Nội dung / Lý do công việc
-              </label>
-              <button
-                type="button"
-                onClick={handleTranslate}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-[#14539E] text-xs font-medium transition-colors cursor-pointer border border-blue-200"
-              >
-                <Languages className="w-3.5 h-3.5" />
-                <span>Dịch tự động</span>
-              </button>
+              </span>
+              {isAutoTranslating && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#14539E]">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Đang dịch...</span>
+                </span>
+              )}
             </div>
 
             <div>
@@ -564,29 +582,44 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 rows={2}
                 value={currentReasonKr}
                 onChange={(e) => setCurrentReasonKr(e.target.value)}
-                placeholder="잔업. 특근사유..."
+                placeholder="잔업. 특근사유 (Tự động dịch sau khi dừng gõ)..."
                 className="w-full p-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
               />
             </div>
           </div>
 
-          {/* Hàng 4 (Thời gian): Giờ bắt đầu & Giờ kết thúc */}
+          {/* Hàng 4 (Thời gian): Giờ bắt đầu & Giờ kết thúc (Định dạng 24h HH:mm, không AM/PM) */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="start-time-input"
                 className="block text-xs font-semibold text-slate-600 mb-1.5"
               >
-                Giờ bắt đầu
+                Giờ bắt đầu (24h)
               </label>
               <div className="relative">
                 <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   id="start-time-input"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{2}:[0-9]{2}"
+                  maxLength={5}
+                  list="overtime-24h-slots"
+                  placeholder="16:10"
+                  title="Định dạng 24 giờ (HH:mm), ví dụ: 16:10"
                   value={currentStartTime}
-                  onChange={(e) => setCurrentStartTime(e.target.value)}
-                  className="w-full h-10 pl-8 pr-2 py-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
+                  onChange={(e) =>
+                    setCurrentStartTime(
+                      OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                    )
+                  }
+                  onBlur={() =>
+                    setCurrentStartTime((prev) =>
+                      OvertimeFormService.normalize24hTime(prev, '16:10')
+                    )
+                  }
+                  className="w-full h-10 pl-8 pr-2 py-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
                 />
               </div>
             </div>
@@ -596,27 +629,62 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 htmlFor="end-time-input"
                 className="block text-xs font-semibold text-slate-600 mb-1.5"
               >
-                Giờ kết thúc
+                Giờ kết thúc (24h)
               </label>
               <div className="relative">
                 <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   id="end-time-input"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{2}:[0-9]{2}"
+                  maxLength={5}
+                  list="overtime-24h-slots"
+                  placeholder="20:10"
+                  title="Định dạng 24 giờ (HH:mm), ví dụ: 20:10"
                   value={currentEndTime}
-                  onChange={(e) => setCurrentEndTime(e.target.value)}
-                  className="w-full h-10 pl-8 pr-2 py-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all cursor-pointer"
+                  onChange={(e) =>
+                    setCurrentEndTime(
+                      OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                    )
+                  }
+                  onBlur={() =>
+                    setCurrentEndTime((prev) =>
+                      OvertimeFormService.normalize24hTime(prev, '20:10')
+                    )
+                  }
+                  className="w-full h-10 pl-8 pr-2 py-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 transition-all"
                 />
               </div>
             </div>
+
+            <datalist id="overtime-24h-slots">
+              <option value="07:00" />
+              <option value="08:00" />
+              <option value="12:00" />
+              <option value="16:10" />
+              <option value="17:00" />
+              <option value="17:30" />
+              <option value="18:00" />
+              <option value="18:30" />
+              <option value="19:00" />
+              <option value="19:30" />
+              <option value="20:00" />
+              <option value="20:10" />
+              <option value="20:30" />
+              <option value="21:00" />
+              <option value="21:30" />
+              <option value="22:00" />
+              <option value="23:00" />
+            </datalist>
           </div>
 
-          {/* Hàng 5 (Nhân sự): Chọn nhiều nhân sự / Multi-select với ô tìm kiếm */}
+          {/* Hàng 5 (Nhân sự): Bộ lọc Nhóm + Tìm kiếm + Multi-select Checkbox */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-600">
+              <span className="text-xs font-semibold text-slate-600">
                 Chọn nhân sự tham gia ({currentSelectedEmployeeIds.length} đã chọn)
-              </label>
+              </span>
               <button
                 type="button"
                 onClick={handleSelectAllFiltered}
@@ -631,15 +699,34 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               </button>
             </div>
 
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={employeeSearchQuery}
-                onChange={(e) => setEmployeeSearchQuery(e.target.value)}
-                placeholder="Tìm kiếm mã NV, họ tên..."
-                className="w-full h-9 pl-8 pr-3 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-              />
+            {/* Bộ lọc Nhóm & Ô tìm kiếm nhân sự */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <select
+                id="employee-group-filter"
+                aria-label="Chọn theo bộ phận/nhóm"
+                value={employeeGroupFilter}
+                onChange={(e) => setEmployeeGroupFilter(e.target.value)}
+                className="w-full h-9 px-2.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
+              >
+                <option value="ALL">Chọn theo bộ phận/nhóm (Tất cả)</option>
+                {departmentFilterOptions.map((deptName) => (
+                  <option key={deptName} value={deptName}>
+                    {deptName}
+                  </option>
+                ))}
+              </select>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  aria-label="Tìm kiếm mã NV, họ tên"
+                  value={employeeSearchQuery}
+                  onChange={(e) => setEmployeeSearchQuery(e.target.value)}
+                  placeholder="Tìm mã NV, họ tên..."
+                  className="w-full h-9 pl-8 pr-3 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                />
+              </div>
             </div>
 
             <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-1.5">
@@ -653,7 +740,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   return (
                     <label
                       key={emp.id}
-                      onClick={() => handleToggleEmployee(emp.id)}
                       className={`flex items-center gap-2 p-2 rounded-md text-xs cursor-pointer transition-colors select-none ${
                         isSelected
                           ? 'bg-blue-50 border border-blue-200 text-slate-900 font-semibold'
@@ -663,11 +749,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => {}}
-                        className="sr-only"
+                        onChange={() => handleToggleEmployee(emp.id)}
+                        className="peer sr-only"
                       />
                       <span
-                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white ${
+                        aria-hidden="true"
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 peer-focus-visible:ring-2 peer-focus-visible:ring-[#14539E]/40 ${
                           isSelected ? 'bg-[#14539E] border-[#14539E]' : 'border-slate-300 bg-white'
                         }`}
                       >
