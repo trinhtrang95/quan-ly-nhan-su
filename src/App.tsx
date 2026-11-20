@@ -81,7 +81,7 @@ import { ReportDashboard } from './components/ReportDashboard';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
-import { CreateOvertimeForm } from './components/overtime/CreateOvertimeForm';
+import { OvertimeWorkspace } from './components/overtime/OvertimeWorkspace';
 import { EmployeeColumnId } from './utils/employeeColumns';
 import {
   applyThemeToDocument,
@@ -1802,15 +1802,10 @@ export default function App() {
             )}
 
             {activeModule === 'overtime' && (
-              <CreateOvertimeForm
+              <OvertimeWorkspace
                 employees={companyEmployees}
                 groups={effectiveGroups}
-                onSaveAndExportPDF={(payload) => {
-                  showToast(`Đã tạo và xuất Phiếu Tăng Ca PDF cho bộ phận ${payload.department} (${payload.blocks.length} nội dung).`);
-                }}
-                onSaveAndExportExcel={(payload) => {
-                  showToast(`Đã tạo và xuất Phiếu Tăng Ca Excel cho bộ phận ${payload.department} (${payload.blocks.length} nội dung).`);
-                }}
+                onShowToast={showToast}
               />
             )}
 

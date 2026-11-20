@@ -21,10 +21,6 @@ import {
   getFriendlyErrorMessage,
 } from '../../utils/errorAndSecurityService';
 import {
-  flattenOvertimeBlocksToRecords,
-  insertOvertimeRecords,
-} from '../../utils/supabaseService';
-import {
   buildCombinedReasonText,
   formatDateToFormStyle,
   formatDepartmentHeaderLabel,
@@ -61,7 +57,7 @@ export interface CreateOvertimeFormProps {
   groups?: DepartmentGroup[];
   initialDepartment?: string;
   initialDate?: string;
-  onSaveOnly?: (payload: CreateOvertimeFormPayload) => void;
+  onSaveOnly?: (payload: CreateOvertimeFormPayload) => Promise<void> | void;
 }
 
 const FACTORY_DICTIONARY: Record<string, string> = {
@@ -410,7 +406,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     return (hours * 60 + minutes) >= 1210;
   };
 
-  // NÚT 1: LƯU (Đẩy sang tab tiếp theo)
+  // NÚT 1: LƯU (Lưu vào Nhật ký phiếu tăng ca)
   const handleSaveOnly = async () => {
     if (previewData.length === 0) {
       showToast('Vui lòng ghi nhận ít nhất một nhóm công việc trước khi Lưu.');
@@ -418,9 +414,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     }
     setIsSubmitting(true);
     try {
-      // Logic sau này để đẩy sang tab tiếp theo
-      onSaveOnly?.({ department: selectedDepartment, overtimeDate, blocks: previewData });
-      showToast('Đã lưu dữ liệu tạm thời! Sẵn sàng chuyển sang tab tiếp theo.');
+      await onSaveOnly?.({ department: selectedDepartment, overtimeDate, blocks: previewData });
+      setPreviewData([]);
+      localStorage.removeItem(`${DRAFT_STORAGE_KEY}_preview`);
+      if (!onSaveOnly) {
+        showToast('Đã lưu phiếu tăng ca thành công!');
+      }
     } catch (error) {
       showToast(getFriendlyErrorMessage(error));
     } finally {

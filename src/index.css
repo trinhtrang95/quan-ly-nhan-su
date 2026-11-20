@@ -168,15 +168,41 @@ html[data-dark-mode="true"] ::-webkit-scrollbar-thumb {
 
 @media print {
   @page {
-    size: A4 landscape;
+    size: A4 portrait;
     margin: 10mm;
   }
   body {
     background: #FFFFFF !important;
     color: #000000 !important;
   }
-  .no-print {
+  .no-print,
+  aside,
+  header {
     display: none !important;
+  }
+  .overtime-print-modal-root {
+    position: static !important;
+    inset: auto !important;
+    background: #FFFFFF !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .overtime-print-container,
+  .overtime-print-scroll {
+    max-width: none !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+  }
+  .overtime-print-sheet {
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    min-height: auto !important;
   }
 }
 
