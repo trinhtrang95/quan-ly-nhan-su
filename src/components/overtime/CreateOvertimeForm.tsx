@@ -260,12 +260,37 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     return Array.from(names);
   }, [groups, employees]);
 
-  // Danh sách nhân sự khả dụng theo Bộ lọc Nhóm & ô tìm kiếm
+  // 1. Tìm danh sách nhân sự đã được ghi nhận trong cùng ngày (overtimeDate đang chọn)
+  const alreadyRecordedIdsForCurrentDate = useMemo(() => {
+    const set = new Set<string>();
+    for (const block of previewData) {
+      if ((block.overtimeDate || '') === overtimeDate) {
+        if (Array.isArray(block.participants) && block.participants.length > 0) {
+          for (const p of block.participants) {
+            if (p.employeeId) set.add(p.employeeId);
+          }
+        }
+        if (Array.isArray(block.selectedEmployeeIds)) {
+          for (const id of block.selectedEmployeeIds) {
+            if (id) set.add(id);
+          }
+        }
+      }
+    }
+    return set;
+  }, [previewData, overtimeDate]);
+
+  // 2. Danh sách nhân sự khả dụng theo Bộ lọc Nhóm & ô tìm kiếm (Loại trừ người đã ghi nhận hôm nay)
   const filteredEmployeesForInput = useMemo(() => {
+    // Loại trừ các nhân sự đã được ghi nhận trong cùng ngày overtimeDate
+    const available = employees.filter(
+      (emp) => !alreadyRecordedIdsForCurrentDate.has(emp.id)
+    );
+
     const byGroup =
       !employeeGroupFilter || employeeGroupFilter === 'ALL'
-        ? employees
-        : employees.filter((emp) => emp.department === employeeGroupFilter);
+        ? available
+        : available.filter((emp) => emp.department === employeeGroupFilter);
 
     const query = employeeSearchQuery.trim().toLowerCase();
     if (!query) return byGroup;
@@ -275,7 +300,22 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         emp.employeeCode.toLowerCase().includes(query) ||
         emp.department.toLowerCase().includes(query)
     );
-  }, [employees, employeeGroupFilter, employeeSearchQuery]);
+  }, [
+    employees,
+    employeeGroupFilter,
+    employeeSearchQuery,
+    alreadyRecordedIdsForCurrentDate,
+  ]);
+
+  // Tự động dọn dẹp các ID đã chọn nếu chúng đã nằm trong danh sách đã ghi nhận của ngày này
+  useEffect(() => {
+    setCurrentSelectedEmployeeIds((prev) => {
+      const valid = prev.filter(
+        (id) => !alreadyRecordedIdsForCurrentDate.has(id)
+      );
+      return valid.length === prev.length ? prev : valid;
+    });
+  }, [alreadyRecordedIdsForCurrentDate]);
 
   // Thống kê tổng số nhóm, tổng số lượt nhân sự và số ngày tăng ca
   const summaryStats = useMemo(() => {
@@ -835,6 +875,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-slate-600">
                 Nhân sự tham gia ({currentSelectedEmployeeIds.length} đã chọn)
+                {alreadyRecordedIdsForCurrentDate.size > 0 && (
+                  <span className="text-slate-400 font-normal ml-1">
+                    ({alreadyRecordedIdsForCurrentDate.size} đã ghi nhận)
+                  </span>
+                )}
               </span>
               <button
                 type="button"
@@ -884,7 +929,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-1.5 space-y-1">
               {filteredEmployeesForInput.length === 0 ? (
                 <div className="text-center py-3 text-xs text-slate-400">
-                  Không tìm thấy nhân sự phù hợp.
+                  {alreadyRecordedIdsForCurrentDate.size > 0
+                    ? `Nhân sự đã được ghi nhận vào ngày ${formatDateToFormStyle(overtimeDate)}.`
+                    : 'Không tìm thấy nhân sự phù hợp.'}
                 </div>
               ) : (
                 filteredEmployeesForInput.map((emp) => {
