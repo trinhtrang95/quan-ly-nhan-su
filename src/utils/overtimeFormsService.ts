@@ -328,55 +328,21 @@ export function calculateHoursBetween(
   return Number((diffMinutes / 60).toFixed(2));
 }
 
-const FORM_CODE_ALPHABET = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-
-function generateShortUniqueSuffix(length = 4): string {
-  const timePart = (Date.now() % 1296).toString(36).toUpperCase().padStart(2, '0');
-  let randomPart = '';
-  for (let i = 0; i < Math.max(0, length - 2); i += 1) {
-    let idx: number;
-    if (
-      typeof crypto !== 'undefined' &&
-      typeof crypto.getRandomValues === 'function'
-    ) {
-      const buf = new Uint32Array(1);
-      crypto.getRandomValues(buf);
-      idx = buf[0] % FORM_CODE_ALPHABET.length;
-    } else {
-      idx = Math.floor(Math.random() * FORM_CODE_ALPHABET.length);
-    }
-    randomPart += FORM_CODE_ALPHABET[idx];
-  }
-  return `${timePart.slice(-2)}${randomPart}`.slice(0, length);
-}
-
 /**
- * Pure helper: generates a globally unique overtime form code `TC-YYYYMMDD-XXXX`
- * combining the primary overtime date and a short timestamp+random suffix so soft-deleted
- * rows never cause unique key collisions on Supabase.
+ * Pure helper: generates canonical overtime form code `TC-YYYYMMDD`
+ * (fixed per date, e.g. `TC-20261121`).
  */
 export function generateOvertimeFormCode(
   dateStr: string,
-  existingCodes: string[] = []
+  _existingCodes: string[] = []
 ): string {
   const digits = (dateStr || '').replace(/\D/g, '');
   const datePart = digits.length === 8 ? digits : '20261116';
-  const base = `TC-${datePart}`;
-  const existingSet = new Set(
-    (existingCodes || []).map((c) => (c || '').trim().toUpperCase())
-  );
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const candidate = `${base}-${generateShortUniqueSuffix(4)}`;
-    if (!existingSet.has(candidate)) {
-      return candidate;
-    }
-  }
-  return `${base}-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+  return `TC-${datePart}`;
 }
 
 /**
- * Pure helper: formats a stored form code for display (preserving `TC-YYYYMMDD-XXXX`
+ * Pure helper: formats a stored form code for display (preserving canonical `TC-YYYYMMDD`
  * while stripping any internal `-DEL-<timestamp>` soft-delete suffix).
  */
 export function formatOvertimeFormCodeDisplay(formCode: string): string {
@@ -1287,22 +1253,19 @@ export function evaluateOvertimeDateConflict({
 }
 
 /**
- * Pure helper: produces an updated OvertimeFormWithItems preserving id, form_code, and created_at.
+ * Pure helper: produces an updated OvertimeFormWithItems preserving id, form_code, fixed shell overtime_date, and created_at.
  */
 export function buildUpdatedOvertimeForm(
   existingForm: OvertimeFormWithItems,
   input: SaveOvertimeFormInput,
-  todayIso?: string
+  _todayIso?: string
 ): OvertimeFormWithItems {
-  const fallbackDate =
+  const fixedShellDate =
+    (existingForm.overtime_date || '').trim() ||
     (input.overtimeDate || '').trim() ||
     input.blocks[0]?.overtimeDate ||
-    existingForm.overtime_date ||
     getLocalTodayIsoDate();
   const uniqueDates = extractUniqueBlockDates(input.blocks);
-  const representativeDate =
-    (input.overtimeDate || '').trim() ||
-    resolveRepresentativeOvertimeDate(input.blocks, fallbackDate, todayIso);
   const departmentLabel = resolveDepartmentLabel(
     input.department,
     input.blocks,
@@ -1313,7 +1276,7 @@ export function buildUpdatedOvertimeForm(
     existingForm.id,
     input.blocks,
     input.employees,
-    fallbackDate
+    fixedShellDate
   );
   const totalHours = Number(
     items.reduce((sum, item) => sum + item.total_hours, 0).toFixed(2)
@@ -1323,11 +1286,12 @@ export function buildUpdatedOvertimeForm(
   return {
     ...existingForm,
     department: departmentLabel,
-    overtime_date: representativeDate,
-    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [representativeDate],
+    overtime_date: fixedShellDate,
+    overtime_dates: uniqueDates.length > 0 ? uniqueDates : [fixedShellDate],
     total_blocks: input.blocks.length,
     total_participants: items.length,
     total_hours: totalHours,
+    status: items.length > 0 ? 'Đã lưu' : 'Mới tạo',
     updated_at: nowIso,
     items,
   };
@@ -1699,6 +1663,255 @@ export async function saveOvertimeFormToHistory(
   return newForm;
 }
 
+export type CreateOrOpenShellAction =
+  | 'created_new'
+  | 'opened_existing'
+  | 'restored_deleted';
+
+export interface CreateOrOpenOvertimeShellResult {
+  form: OvertimeFormWithItems;
+  action: CreateOrOpenShellAction;
+}
+
+/**
+ * Creates or opens an overtime form shell (`TC-YYYYMMDD`) for a selected date.
+ * 1. If an active (`deleted_at is null`) form already exists for `overtimeDate` or `TC-YYYYMMDD`,
+ *    does NOT create a duplicate — fetches and returns it with `action: 'opened_existing'`.
+ * 2. If a soft-deleted (`deleted_at != null`) record with `form_code = TC-YYYYMMDD` exists,
+ *    restores/resets it (`deleted_at = null`, clears old items, zeroes totals) with `action: 'restored_deleted'`.
+ * 3. Otherwise inserts a brand-new empty shell row (`total_employees = 0`, `total_hours = 0`)
+ *    with `action: 'created_new'`.
+ */
+export async function createOrOpenOvertimeShell(
+  overtimeDate: string,
+  options?: {
+    department?: string;
+    knownSubGroups?: string[];
+    createdBy?: string | null;
+  }
+): Promise<CreateOrOpenOvertimeShellResult> {
+  const client = getOvertimeSupabaseClient();
+  const cleanDate = (overtimeDate || '').trim() || getLocalTodayIsoDate();
+  const canonicalCode = generateOvertimeFormCode(cleanDate);
+  const departmentLabel = resolveOvertimeMainDepartment(
+    options?.department || DEFAULT_OVERTIME_DEPARTMENT,
+    options?.knownSubGroups || []
+  );
+  const nowIso = new Date().toISOString();
+
+  const upsertLocalShell = (shell: OvertimeFormWithItems) => {
+    clearLocalUpdatedForm(shell.id);
+    const localForms = readLocalForms(false).filter((f) => f.id !== shell.id);
+    writeLocalForms([shell, ...localForms]);
+  };
+
+  const restoreDeletedRow = async (
+    deletedRow: SupabaseOvertimeFormRow
+  ): Promise<OvertimeFormWithItems> => {
+    // Clear old items for the restored shell (hard-delete first, fallback to soft-delete)
+    const hardDeleteItems = await client
+      .from('overtime_form_items')
+      .delete()
+      .eq('form_id', deletedRow.id);
+
+    if (hardDeleteItems.error) {
+      await client
+        .from('overtime_form_items')
+        .update({ deleted_at: nowIso })
+        .eq('form_id', deletedRow.id)
+        .is('deleted_at', null);
+    }
+
+    const restoreRes = await client
+      .from('overtime_forms')
+      .update({
+        form_code: canonicalCode,
+        department: departmentLabel,
+        overtime_date: cleanDate,
+        total_blocks: 0,
+        total_employees: 0,
+        total_hours: 0,
+        status: 'Mới tạo',
+        deleted_at: null,
+        updated_at: nowIso,
+      })
+      .eq('id', deletedRow.id)
+      .select('*')
+      .single();
+
+    if (restoreRes.error) {
+      const code = restoreRes.error.code;
+      const isRls =
+        code === '42501' ||
+        restoreRes.error.message.toLowerCase().includes('row-level security');
+      if (isRls) {
+        throw new OvertimeSupabaseActionError(
+          'Supabase RLS đang chặn khôi phục vỏ phiếu trên bảng overtime_forms (lỗi 42501). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.',
+          code,
+          true
+        );
+      }
+      throw restoreRes.error;
+    }
+
+    const hydrated = hydrateOvertimeFormRow(
+      restoreRes.data as SupabaseOvertimeFormRow,
+      []
+    );
+    upsertLocalShell(hydrated);
+    return hydrated;
+  };
+
+  try {
+    // 1. Check active (`deleted_at is null`) forms for this date or canonical code
+    const activeRes = await client
+      .from('overtime_forms')
+      .select('*')
+      .is('deleted_at', null)
+      .or(`overtime_date.eq.${cleanDate},form_code.eq.${canonicalCode}`)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (activeRes.error) {
+      throw activeRes.error;
+    }
+
+    const existingActiveRow = (activeRes.data || [])[0] as
+      | SupabaseOvertimeFormRow
+      | undefined;
+
+    if (existingActiveRow) {
+      const fullForm =
+        (await fetchOvertimeFormById(existingActiveRow.id)) ||
+        hydrateOvertimeFormRow(existingActiveRow, []);
+      upsertLocalShell(fullForm);
+      return { form: fullForm, action: 'opened_existing' };
+    }
+
+    // 2. Check for soft-deleted record holding canonical `TC-YYYYMMDD`
+    const deletedByCodeRes = await client
+      .from('overtime_forms')
+      .select('*')
+      .eq('form_code', canonicalCode)
+      .not('deleted_at', 'is', null)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (!deletedByCodeRes.error && deletedByCodeRes.data?.length) {
+      const restored = await restoreDeletedRow(
+        deletedByCodeRes.data[0] as SupabaseOvertimeFormRow
+      );
+      return { form: restored, action: 'restored_deleted' };
+    }
+
+    // 3. Insert fresh empty shell (`TC-YYYYMMDD`)
+    const formId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `ot-form-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const insertRes = await client
+      .from('overtime_forms')
+      .insert({
+        id: formId,
+        form_code: canonicalCode,
+        department: departmentLabel,
+        overtime_date: cleanDate,
+        total_blocks: 0,
+        total_employees: 0,
+        total_hours: 0,
+        status: 'Mới tạo',
+        created_by: options?.createdBy ?? null,
+      })
+      .select('*')
+      .single();
+
+    if (insertRes.error) {
+      // Handle race condition or unique constraint collision on `form_code`
+      if (insertRes.error.code === '23505') {
+        const collisionRes = await client
+          .from('overtime_forms')
+          .select('*')
+          .eq('form_code', canonicalCode)
+          .limit(1);
+        const collidedRow = (collisionRes.data || [])[0] as
+          | SupabaseOvertimeFormRow
+          | undefined;
+        if (collidedRow) {
+          if (collidedRow.deleted_at) {
+            const restored = await restoreDeletedRow(collidedRow);
+            return { form: restored, action: 'restored_deleted' };
+          }
+          const fullForm =
+            (await fetchOvertimeFormById(collidedRow.id)) ||
+            hydrateOvertimeFormRow(collidedRow, []);
+          upsertLocalShell(fullForm);
+          return { form: fullForm, action: 'opened_existing' };
+        }
+      }
+
+      const code = insertRes.error.code;
+      const isRls =
+        code === '42501' ||
+        insertRes.error.message.toLowerCase().includes('row-level security');
+      if (isRls) {
+        throw new OvertimeSupabaseActionError(
+          'Supabase RLS đang chặn tạo vỏ phiếu mới trên bảng overtime_forms (lỗi 42501). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.',
+          code,
+          true
+        );
+      }
+      throw insertRes.error;
+    }
+
+    const created = hydrateOvertimeFormRow(
+      insertRes.data as SupabaseOvertimeFormRow,
+      []
+    );
+    upsertLocalShell(created);
+    return { form: created, action: 'created_new' };
+  } catch (err) {
+    if (err instanceof OvertimeSupabaseActionError) {
+      throw err;
+    }
+
+    // Offline / local fallback
+    const localForms = readLocalForms(false);
+    const localActive = localForms.find(
+      (f) =>
+        !f.deleted_at &&
+        ((f.overtime_date || '').trim() === cleanDate ||
+          formatOvertimeFormCodeDisplay(f.form_code) === canonicalCode)
+    );
+    if (localActive) {
+      return { form: localActive, action: 'opened_existing' };
+    }
+
+    const fallbackId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `ot-form-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const localShell: OvertimeFormWithItems = {
+      id: fallbackId,
+      form_code: canonicalCode,
+      department: departmentLabel,
+      overtime_date: cleanDate,
+      overtime_dates: [cleanDate],
+      total_blocks: 0,
+      total_participants: 0,
+      total_hours: 0,
+      status: 'Mới tạo',
+      created_by: options?.createdBy ?? null,
+      created_at: nowIso,
+      updated_at: nowIso,
+      deleted_at: null,
+      items: [],
+    };
+    upsertLocalShell(localShell);
+    return { form: localShell, action: 'created_new' };
+  }
+}
+
 /**
  * Updates an existing overtime form header and replaces its active items in Supabase
  * (soft-deleting previous active items when `deleted_at` column is present).
@@ -1721,6 +1934,7 @@ export async function updateOvertimeFormInHistory(
         total_blocks: updatedForm.total_blocks,
         total_employees: updatedForm.total_participants,
         total_hours: updatedForm.total_hours,
+        status: updatedForm.status,
         updated_at: nowIso,
       })
       .eq('id', existingForm.id)

@@ -6,11 +6,11 @@ import {
   Copy,
   Database,
   Eye,
+  FilePlus2,
   FileSpreadsheet,
   FileText,
   Loader2,
   Pencil,
-  Plus,
   Printer,
   RefreshCw,
   Search,
@@ -34,6 +34,8 @@ import {
   filterOvertimeForms,
   formatCreatedAtVN,
   formatOvertimeFormCodeDisplay,
+  generateOvertimeFormCode,
+  getLocalTodayIsoDate,
   isOvertimeTimeBold,
   OvertimeFormWithItems,
   OvertimeSupabaseActionError,
@@ -49,6 +51,7 @@ export interface OvertimeLogProps {
   isLoading: boolean;
   schemaNeedsMigration?: boolean;
   onRefresh: () => Promise<void> | void;
+  onCreateOrOpenShell?: (overtimeDate: string) => Promise<void> | void;
   onEdit: (form: OvertimeFormWithItems) => void;
   onSoftDelete: (formIds: string[]) => Promise<void>;
   onSwitchToCreate?: () => void;
@@ -62,11 +65,16 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   isLoading,
   schemaNeedsMigration = false,
   onRefresh,
+  onCreateOrOpenShell,
   onEdit,
   onSoftDelete,
   onSwitchToCreate,
   onShowToast,
 }) => {
+  const [createShellDate, setCreateShellDate] = useState<string>(() =>
+    getLocalTodayIsoDate()
+  );
+  const [isCreatingShell, setIsCreatingShell] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -157,6 +165,45 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       await onRefresh();
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const targetShellCode = useMemo(
+    () => generateOvertimeFormCode(createShellDate || getLocalTodayIsoDate()),
+    [createShellDate]
+  );
+
+  const existingActiveShellForSelectedDate = useMemo(() => {
+    const cleanDate = (createShellDate || '').trim();
+    return forms.find(
+      (f) =>
+        !f.deleted_at &&
+        ((f.overtime_date || '').trim() === cleanDate ||
+          formatOvertimeFormCodeDisplay(f.form_code) === targetShellCode)
+    );
+  }, [forms, createShellDate, targetShellCode]);
+
+  const handleCreateShellClick = async () => {
+    if (isCreatingShell) return;
+    if (!onCreateOrOpenShell) {
+      onSwitchToCreate?.();
+      return;
+    }
+    setIsCreatingShell(true);
+    try {
+      await onCreateOrOpenShell(createShellDate || getLocalTodayIsoDate());
+    } catch (error) {
+      if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
+        setSqlErrorContext(error.message);
+        setIsSqlModalOpen(true);
+        onShowToast?.(error.message);
+      } else if (error instanceof OvertimeSupabaseActionError) {
+        onShowToast?.(error.message);
+      } else {
+        onShowToast?.(getFriendlyErrorMessage(error));
+      }
+    } finally {
+      setIsCreatingShell(false);
     }
   };
 
@@ -341,6 +388,60 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
+      {/* Thanh Tạo vỏ phiếu tăng ca mới theo ngày */}
+      <div className="bg-white border border-blue-200/80 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-2xs no-print">
+        <div className="flex flex-wrap items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="overtime-shell-date-input"
+              className="text-xs font-bold text-[#14539E] whitespace-nowrap"
+            >
+              Ngày phiếu:
+            </label>
+            <div className="relative w-40">
+              <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="overtime-shell-date-input"
+                type="date"
+                value={createShellDate}
+                onChange={(e) => setCreateShellDate(e.target.value)}
+                className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-600 flex items-center gap-2">
+            <span>Mã phiếu:</span>
+            <span className="font-mono font-bold text-[#14539E] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+              {targetShellCode}
+            </span>
+            {existingActiveShellForSelectedDate ? (
+              <span className="text-[11px] font-medium text-amber-700">
+                (Đã tồn tại — bấm nút để mở chỉnh sửa)
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-400">
+                (Tạo vỏ phiếu trống cho ngày {formatDateToFormStyle(createShellDate)})
+              </span>
+            )}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          disabled={isCreatingShell}
+          onClick={() => void handleCreateShellClick()}
+          className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+        >
+          {isCreatingShell ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <FilePlus2 className="w-3.5 h-3.5" />
+          )}
+          <span>+ Tạo phiếu tăng ca mới</span>
+        </button>
+      </div>
+
       {/* Filter Toolbar */}
       <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 no-print">
         <div className="flex flex-1 flex-wrap items-center gap-2.5">
@@ -453,7 +554,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   Số lượng
                 </th>
                 <th className="py-3 px-3.5 w-32 text-center">Trạng thái</th>
-                <th className="py-3 px-3.5 w-60 text-right">Thao tác</th>
+                <th className="py-3 px-3.5 w-80 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -500,16 +601,21 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       <p className="text-xs text-slate-500 mt-1">
                         {hasActiveFilters
                           ? 'Thử thay đổi từ khóa bộ phận, mã phiếu hoặc ngày tăng ca.'
-                          : 'Phiếu tăng ca sau khi nhấn "Lưu" ở tab Tạo phiếu tăng ca sẽ xuất hiện tại đây.'}
+                          : 'Chọn Ngày phiếu ở thanh trên và bấm "+ Tạo phiếu tăng ca mới" để tạo vỏ phiếu theo ngày.'}
                       </p>
-                      {!hasActiveFilters && onSwitchToCreate && (
+                      {!hasActiveFilters && (onCreateOrOpenShell || onSwitchToCreate) && (
                         <button
                           type="button"
-                          onClick={onSwitchToCreate}
-                          className="mt-4 h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          disabled={isCreatingShell}
+                          onClick={() => void handleCreateShellClick()}
+                          className="mt-4 h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                         >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Tạo phiếu tăng ca đầu tiên</span>
+                          {isCreatingShell ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <FilePlus2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>+ Tạo phiếu tăng ca mới</span>
                         </button>
                       )}
                     </div>
@@ -602,10 +708,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                       {/* 6. Trạng thái */}
                       <td className="py-3 px-3.5 text-center">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                          {form.status || 'Đã lưu'}
-                        </span>
+                        {form.status === 'Mới tạo' ||
+                        form.total_participants === 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#14539E]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#14539E]" />
+                            Mới tạo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                            {form.status || 'Đã lưu'}
+                          </span>
+                        )}
                       </td>
 
                       {/* 7. Thao tác */}
@@ -615,7 +729,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             type="button"
                             disabled={isViewingLoading}
                             onClick={() => void handleViewForm(form)}
-                            className="h-8 px-2.5 rounded-lg border border-[#14539E]/30 text-[#14539E] hover:bg-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                            className="h-8 px-2.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
                             title="Xem tờ phiếu A4 chuẩn TV-PSGC2022"
                           >
                             {isViewingLoading ? (
@@ -629,11 +743,12 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           <button
                             type="button"
                             onClick={() => onEdit(form)}
-                            className="h-8 w-8 rounded-lg border border-slate-200 text-[#14539E] hover:bg-blue-50 hover:border-[#14539E]/40 inline-flex items-center justify-center transition-colors cursor-pointer"
-                            title="Sửa phiếu"
-                            aria-label={`Sửa phiếu ${form.form_code}`}
+                            className="h-8 px-2.5 rounded-lg border border-[#14539E]/30 bg-blue-50/60 text-[#14539E] hover:bg-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                            title="Sửa / Nhập chi tiết lượt tăng ca"
+                            aria-label={`Sửa / Nhập chi tiết phiếu ${form.form_code}`}
                           >
                             <Pencil className="w-3.5 h-3.5" />
+                            <span>Sửa / Nhập chi tiết</span>
                           </button>
 
                           <button
@@ -713,7 +828,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   className="h-9 px-3.5 rounded-lg border border-[#14539E] text-[#14539E] hover:bg-blue-50 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Pencil className="w-3.5 h-3.5" />
-                  <span>Sửa phiếu</span>
+                  <span>Sửa / Nhập chi tiết</span>
                 </button>
 
                 <button

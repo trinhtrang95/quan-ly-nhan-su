@@ -76,18 +76,17 @@ describe('overtimeFormsService pure logic', () => {
     assert.equal(calculateHoursBetween('', '20:10'), 0);
   });
 
-  it('generates globally unique TC-YYYYMMDD-XXXX form codes and preserves them on display while stripping soft-delete suffixes', () => {
+  it('generates canonical TC-YYYYMMDD form codes and preserves them on display while stripping soft-delete suffixes', () => {
     const code1 = generateOvertimeFormCode('2026-11-16', []);
-    assert.match(code1, /^TC-20261116-[0-9A-Z]{4}$/);
+    assert.equal(code1, 'TC-20261116');
 
-    const code2 = generateOvertimeFormCode('2026-11-16', [code1]);
-    assert.match(code2, /^TC-20261116-[0-9A-Z]{4}$/);
-    assert.notEqual(code2, code1);
+    const code2 = generateOvertimeFormCode('2026-11-21', [code1]);
+    assert.equal(code2, 'TC-20261121');
 
-    assert.equal(formatOvertimeFormCodeDisplay('TC-20261116-A1B2'), 'TC-20261116-A1B2');
+    assert.equal(formatOvertimeFormCodeDisplay('TC-20261116'), 'TC-20261116');
     assert.equal(
-      formatOvertimeFormCodeDisplay('TC-20261116-A1B2-DEL-1763600000000'),
-      'TC-20261116-A1B2'
+      formatOvertimeFormCodeDisplay('TC-20261116-DEL-1763600000000'),
+      'TC-20261116'
     );
   });
 
@@ -296,15 +295,15 @@ describe('overtimeFormsService pure logic', () => {
 
     const existing: OvertimeFormWithItems = {
       id: 'form-multi-edit',
-      form_code: 'TC-20261119-001',
+      form_code: 'TC-20261120',
       department: 'Kỹ Thuật',
-      overtime_date: '2026-11-19',
-      overtime_dates: ['2026-11-19'],
-      total_blocks: 1,
-      total_participants: 1,
-      total_hours: 4,
-      status: 'Đã lưu',
-      created_at: '2026-11-19T08:00:00.000Z',
+      overtime_date: '2026-11-20',
+      overtime_dates: ['2026-11-20'],
+      total_blocks: 0,
+      total_participants: 0,
+      total_hours: 0,
+      status: 'Mới tạo',
+      created_at: '2026-11-20T08:00:00.000Z',
       deleted_at: null,
       items: [],
     };
@@ -312,16 +311,28 @@ describe('overtimeFormsService pure logic', () => {
       existing,
       {
         department: 'Kỹ Thuật',
-        overtimeDate: '2026-11-20',
+        overtimeDate: '2026-11-19',
         blocks: multiDayBlocks,
         employees: sampleEmployees,
       },
       '2026-11-20'
     );
     assert.equal(updatedMulti.overtime_date, '2026-11-20');
+    assert.equal(updatedMulti.status, 'Đã lưu');
     assert.deepEqual(updatedMulti.overtime_dates, ['2026-11-19', '2026-11-20']);
     assert.equal(updatedMulti.items[0].overtime_date, '2026-11-19');
     assert.equal(updatedMulti.items[1].overtime_date, '2026-11-20');
+
+    const emptiedShell = buildUpdatedOvertimeForm(updatedMulti, {
+      department: 'Kỹ Thuật',
+      overtimeDate: '2026-11-20',
+      blocks: [],
+      employees: sampleEmployees,
+    });
+    assert.equal(emptiedShell.overtime_date, '2026-11-20');
+    assert.equal(emptiedShell.status, 'Mới tạo');
+    assert.equal(emptiedShell.total_participants, 0);
+    assert.equal(emptiedShell.total_hours, 0);
 
     // resolveDefaultPrimaryOvertimeDate picks today if present in block dates, else latest block date
     assert.equal(
