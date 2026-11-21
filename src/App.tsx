@@ -1795,6 +1795,7 @@ export default function App() {
               <OvertimeWorkspace
                 employees={companyEmployees}
                 groups={effectiveGroups}
+                leaveRecords={companyRecords}
                 onShowToast={showToast}
               />
             )}

@@ -3,8 +3,13 @@ import {
   RealtimePostgresChangesPayload,
   SupabaseClient,
 } from '@supabase/supabase-js';
-import { Employee } from '../types/hr';
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabaseService';
+import { Employee, LeaveRecord, LeaveRecordType } from '../types/hr';
+import {
+  mapSupabaseRowToLeaveRecord,
+  SUPABASE_ANON_KEY,
+  SUPABASE_URL,
+  SupabaseLeaveLogRow,
+} from './supabaseService';
 
 function formatDateToFormStyleLocal(isoDate: string): string {
   if (!isoDate) return '';
@@ -2195,3 +2200,210 @@ export function subscribeToOvertimeRealtime(
     void client.removeChannel(channel);
   };
 }
+
+export interface OvertimeLeaveCheckEntry extends LeaveRecord {
+  employeeCode?: string;
+  deletedAt?: string | null;
+  isDeleted?: boolean;
+}
+
+function normalizeIsoDateOnly(value?: string | null): string {
+  const clean = (value || '').trim();
+  if (!clean) return '';
+  const match = clean.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : clean.slice(0, 10);
+}
+
+const OVERTIME_LEAVE_TYPE_LABELS: Record<LeaveRecordType, string> = {
+  annual_leave: 'Nghỉ Phép năm',
+  unpaid_leave: 'Nghỉ Không lương',
+  regime_leave: 'Nghỉ Chế độ',
+  late_early: 'Đi muộn / Về sớm',
+};
+
+/**
+ * Pure helper: returns a concise Vietnamese label for a leave record type.
+ */
+export function getLeaveTypeShortLabel(
+  record: Pick<OvertimeLeaveCheckEntry, 'type' | 'regimeSubtype'>
+): string {
+  const baseLabel = OVERTIME_LEAVE_TYPE_LABELS[record.type] || 'Đang nghỉ';
+  if (record.type === 'regime_leave' && record.regimeSubtype) {
+    return `${baseLabel} (${record.regimeSubtype})`;
+  }
+  return baseLabel;
+}
+
+/**
+ * Pure helper: returns true when an active (non-deleted), non-late/early leave record
+ * covers `workDate` (`startDate <= workDate <= endDate`, using `startDate` when `endDate` is missing).
+ */
+export function isLeaveRecordCoveringDate(
+  record: Pick<
+    OvertimeLeaveCheckEntry,
+    'type' | 'startDate' | 'endDate' | 'deletedAt' | 'isDeleted'
+  >,
+  workDate: string
+): boolean {
+  const targetDate = normalizeIsoDateOnly(workDate);
+  if (!targetDate || !record) return false;
+  if (record.deletedAt || record.isDeleted) return false;
+  if (record.type === 'late_early') return false;
+
+  const startDate = normalizeIsoDateOnly(record.startDate);
+  if (!startDate) return false;
+  const rawEndDate = normalizeIsoDateOnly(record.endDate);
+  const endDate = rawEndDate && rawEndDate >= startDate ? rawEndDate : startDate;
+
+  return targetDate >= startDate && targetDate <= endDate;
+}
+
+/**
+ * Pure helper: builds a map of `employee.id -> OvertimeLeaveCheckEntry` for all employees
+ * who have an active leave record covering `workDate`.
+ * Matches employees by either `employee_id` or normalized `employee_code`.
+ */
+export function buildOnLeaveEmployeeMapForDate(
+  workDate: string,
+  leaveRecords: OvertimeLeaveCheckEntry[],
+  employees: Employee[]
+): Map<string, OvertimeLeaveCheckEntry> {
+  const result = new Map<string, OvertimeLeaveCheckEntry>();
+  const targetDate = normalizeIsoDateOnly(workDate);
+  if (!targetDate || !Array.isArray(leaveRecords) || !Array.isArray(employees)) {
+    return result;
+  }
+
+  const empById = new Map<string, Employee>();
+  const employeesByCode = new Map<string, Employee[]>();
+  for (const emp of employees) {
+    if (!emp?.id) continue;
+    empById.set(emp.id, emp);
+    const codeKey = (emp.employeeCode || '').trim().toUpperCase();
+    if (codeKey) {
+      const list = employeesByCode.get(codeKey) || [];
+      list.push(emp);
+      employeesByCode.set(codeKey, list);
+    }
+  }
+
+  for (const rec of leaveRecords) {
+    if (!isLeaveRecordCoveringDate(rec, targetDate)) continue;
+
+    const matchedIds = new Set<string>();
+    const recEmpId = (rec.employeeId || '').trim();
+    if (recEmpId && empById.has(recEmpId)) {
+      matchedIds.add(recEmpId);
+      const matchedCode = (empById.get(recEmpId)?.employeeCode || '')
+        .trim()
+        .toUpperCase();
+      if (matchedCode && employeesByCode.has(matchedCode)) {
+        for (const sameCodeEmp of employeesByCode.get(matchedCode)!) {
+          matchedIds.add(sameCodeEmp.id);
+        }
+      }
+    }
+
+    const recCode = (rec.employeeCode || '').trim().toUpperCase();
+    if (recCode && employeesByCode.has(recCode)) {
+      for (const sameCodeEmp of employeesByCode.get(recCode)!) {
+        matchedIds.add(sameCodeEmp.id);
+      }
+    }
+
+    for (const empId of matchedIds) {
+      if (!result.has(empId)) {
+        result.set(empId, rec);
+      }
+    }
+  }
+
+  return result;
+}
+
+interface SupabaseLeaveLogQueryRow extends SupabaseLeaveLogRow {
+  employee_code?: string | null;
+  deleted_at?: string | null;
+  is_deleted?: boolean | null;
+}
+
+/**
+ * Fetches all active (`deleted_at is null` and `is_deleted !== true`) leave records
+ * directly from Supabase `leave_logs` for cross-checking against overtime scheduling.
+ * Gracefully falls back when `deleted_at` column is absent on legacy schemas.
+ */
+export async function fetchActiveLeaveRecordsForOvertimeCheck(
+  employees: Employee[] = []
+): Promise<{
+  records: OvertimeLeaveCheckEntry[];
+  source: 'supabase' | 'error';
+}> {
+  const client = getOvertimeSupabaseClient();
+  const empMap = new Map<string, Employee>(
+    (employees || []).map((e) => [e.id, e])
+  );
+
+  try {
+    let queryRes = await client
+      .from('leave_logs')
+      .select('*')
+      .is('deleted_at', null);
+
+    if (queryRes.error && isUndefinedColumnError(queryRes.error)) {
+      queryRes = await client.from('leave_logs').select('*');
+    }
+
+    if (queryRes.error) {
+      throw queryRes.error;
+    }
+
+    const rawRows = (queryRes.data || []) as SupabaseLeaveLogQueryRow[];
+    const activeRows = rawRows.filter(
+      (row) => !row.deleted_at && row.is_deleted !== true
+    );
+
+    const records: OvertimeLeaveCheckEntry[] = activeRows.map((row) => {
+      const mapped = mapSupabaseRowToLeaveRecord(row, empMap);
+      const emp = empMap.get(mapped.employeeId);
+      return {
+        ...mapped,
+        employeeCode: row.employee_code || emp?.employeeCode || undefined,
+        deletedAt: row.deleted_at ?? null,
+        isDeleted: Boolean(row.is_deleted),
+      };
+    });
+
+    return { records, source: 'supabase' };
+  } catch {
+    return { records: [], source: 'error' };
+  }
+}
+
+/**
+ * Subscribes to Supabase Realtime changes on `leave_logs` so overtime editors
+ * immediately reflect newly created or deleted leave requests.
+ */
+export function subscribeToLeaveLogsRealtime(onChange: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const client = getOvertimeSupabaseClient();
+  const channelName = `overtime-leave-logs-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+
+  const channel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'leave_logs' },
+      () => onChange()
+    )
+    .subscribe();
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}
+

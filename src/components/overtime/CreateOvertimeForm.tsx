@@ -17,19 +17,23 @@ import {
   Trash2,
   X,
 } from 'lucide-react';  
-import { DepartmentGroup, Employee } from '../../types/hr';
+import { DepartmentGroup, Employee, LeaveRecord } from '../../types/hr';
 import { INITIAL_DEPARTMENT_GROUPS, INITIAL_EMPLOYEES } from '../../data/mockData';
 import {
   formatNumberVN,
   getFriendlyErrorMessage,
 } from '../../utils/errorAndSecurityService';
 import {
+  buildOnLeaveEmployeeMapForDate,
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
+  fetchActiveLeaveRecordsForOvertimeCheck,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
+  getLeaveTypeShortLabel,
   getLocalTodayIsoDate,
   OvertimeFormWithItems,
+  OvertimeLeaveCheckEntry,
   reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
 } from '../../utils/overtimeFormsService';
@@ -76,6 +80,7 @@ export interface CreateOvertimeFormPayload {
 export interface CreateOvertimeFormProps {
   employees?: Employee[];
   groups?: DepartmentGroup[];
+  leaveRecords?: LeaveRecord[];
   existingForms?: OvertimeFormWithItems[];
   isCheckingExistingForms?: boolean;
   initialDepartment?: string;
@@ -167,6 +172,7 @@ const DRAFT_STORAGE_KEY = 'ot_form_draft_v1';
 export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   employees = INITIAL_EMPLOYEES,
   groups = INITIAL_DEPARTMENT_GROUPS,
+  leaveRecords: propLeaveRecords = [],
   existingForms = [],
   isCheckingExistingForms = false,
   initialDepartment = DEFAULT_OVERTIME_DEPARTMENT,
@@ -228,6 +234,10 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const [isAutoTranslating, setIsAutoTranslating] = useState<boolean>(false);
   const isInitialReasonMountRef = useRef<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isCommittingBlock, setIsCommittingBlock] = useState<boolean>(false);
+  const [liveLeaveRecords, setLiveLeaveRecords] = useState<
+    OvertimeLeaveCheckEntry[] | null
+  >(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Nạp & đồng bộ nhẹ từ điển nội bộ (localStorage + Supabase overtime_glossary nếu có)
@@ -240,6 +250,19 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       active = false;
     };
   }, []);
+
+  // Kiểm tra trực tiếp bảng `leave_logs` trên Supabase mỗi khi đổi "Ngày làm thêm" hoặc dữ liệu đơn nghỉ cập nhật
+  useEffect(() => {
+    let active = true;
+    void fetchActiveLeaveRecordsForOvertimeCheck(employees).then((res) => {
+      if (active && res.source === 'supabase') {
+        setLiveLeaveRecords(res.records);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [blockOvertimeDate, employees, propLeaveRecords]);
 
   // Đồng bộ dữ liệu khi chuyển vỏ phiếu cần biên tập
   useEffect(() => {
@@ -336,6 +359,22 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     return set;
   }, [previewData, blockOvertimeDate, editingBlockId]);
 
+  const effectiveLeaveRecords = useMemo<OvertimeLeaveCheckEntry[]>(
+    () => (liveLeaveRecords !== null ? liveLeaveRecords : propLeaveRecords),
+    [liveLeaveRecords, propLeaveRecords]
+  );
+
+  // Danh sách nhân sự có đơn nghỉ hiệu lực (không tính đi muộn/về sớm & bản ghi đã xóa mềm) trùng với "Ngày làm thêm"
+  const onLeaveMapForCurrentDate = useMemo(
+    () =>
+      buildOnLeaveEmployeeMapForDate(
+        blockOvertimeDate,
+        effectiveLeaveRecords,
+        employees
+      ),
+    [blockOvertimeDate, effectiveLeaveRecords, employees]
+  );
+
   const filteredEmployeesForInput = useMemo(() => {
     const available = employees.filter((emp) => !alreadyRecordedIdsForCurrentDate.has(emp.id));
     const normalizedGroup = (selectedGroupFilter || '').trim();
@@ -351,12 +390,57 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     );
   }, [employees, selectedGroupFilter, employeeSearchQuery, alreadyRecordedIdsForCurrentDate]);
 
+  const selectableFilteredEmployees = useMemo(
+    () =>
+      filteredEmployeesForInput.filter(
+        (emp) => !onLeaveMapForCurrentDate.has(emp.id)
+      ),
+    [filteredEmployeesForInput, onLeaveMapForCurrentDate]
+  );
+
+  const onLeaveCountInFiltered =
+    filteredEmployeesForInput.length - selectableFilteredEmployees.length;
+
   useEffect(() => {
     setCurrentSelectedEmployeeIds((prev) => {
       const valid = prev.filter((id) => !alreadyRecordedIdsForCurrentDate.has(id));
       return valid.length === prev.length ? prev : valid;
     });
   }, [alreadyRecordedIdsForCurrentDate]);
+
+  // Tự động bỏ chọn các nhân sự đã tích nếu đổi "Ngày làm thêm" sang ngày nhân sự đó có đơn nghỉ
+  useEffect(() => {
+    if (onLeaveMapForCurrentDate.size === 0 || currentSelectedEmployeeIds.length === 0) {
+      return;
+    }
+    const conflictingSelectedIds = currentSelectedEmployeeIds.filter((id) =>
+      onLeaveMapForCurrentDate.has(id)
+    );
+    if (conflictingSelectedIds.length === 0) {
+      return;
+    }
+    const conflictSet = new Set(conflictingSelectedIds);
+    setCurrentSelectedEmployeeIds((prev) =>
+      prev.filter((id) => !conflictSet.has(id))
+    );
+    setCustomTimes((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of conflictingSelectedIds) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setEditingTimeEmpId((prev) => (prev && conflictSet.has(prev) ? null : prev));
+    showToast(
+      `Đã tự động bỏ chọn ${conflictingSelectedIds.length} nhân sự do có đơn nghỉ ngày ${formatDateToFormStyle(
+        blockOvertimeDate
+      )}.`
+    );
+  }, [onLeaveMapForCurrentDate, blockOvertimeDate, currentSelectedEmployeeIds]);
 
   const summaryStats = useMemo(() => {
     let totalParticipants = 0;
@@ -497,11 +581,14 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   }, [currentReasonVi, glossaryEntries, isReasonKrManuallyEdited]);
 
   const handleToggleEmployee = (empId: string) => {
+    if (onLeaveMapForCurrentDate.has(empId)) {
+      return;
+    }
     setCurrentSelectedEmployeeIds((prev) => prev.includes(empId) ? prev.filter((id) => id !== empId) : [...prev, empId]);
   };
 
   const handleSelectAllFiltered = () => {
-    const filteredIds = filteredEmployeesForInput.map((e) => e.id);
+    const filteredIds = selectableFilteredEmployees.map((e) => e.id);
     const allSelected = filteredIds.length > 0 && filteredIds.every((id) => currentSelectedEmployeeIds.includes(id));
     if (allSelected) {
       setCurrentSelectedEmployeeIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
@@ -563,67 +650,119 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       return;
     }
 
-    const normalizedStart = OvertimeFormService.normalize24hTime(currentStartTime, '16:10');
-    const normalizedEnd = OvertimeFormService.normalize24hTime(currentEndTime, '18:10');
-    setCurrentStartTime(normalizedStart);
-    setCurrentEndTime(normalizedEnd);
-
-    const cleanReasonVi = currentReasonVi.trim();
-    const finalReasonKr = currentReasonKr.trim()
-      ? currentReasonKr.trim()
-      : (await suggestFactoryKoreanTranslation(cleanReasonVi, glossaryEntries)).translation;
-
-    // Tự động học/cập nhật cặp (reasonVi, reasonKr) vào từ điển nội bộ khi ghi nhận
-    if (cleanReasonVi && finalReasonKr.trim()) {
-      void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim()).then(
-        ({ entries }) => setGlossaryEntries(entries)
-      );
-    }
-
-    const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map((empId) => {
-      const custom = customTimes[empId];
-      return {
-        employeeId: empId,
-        startTime: custom?.startTime ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart) : normalizedStart,
-        endTime: custom?.endTime ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd) : normalizedEnd,
-      };
-    });
-
     const resolvedBlockDate = blockOvertimeDate || shellOvertimeDate || getLocalTodayIsoDate();
 
-    const newBlock: OvertimeTaskBlock = {
-      id: editingBlockId || `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      overtimeDate: resolvedBlockDate,
-      reasonVi: cleanReasonVi,
-      reasonKr: finalReasonKr.trim(),
-      startTime: normalizedStart,
-      endTime: normalizedEnd,
-      selectedEmployeeIds: [...currentSelectedEmployeeIds],
-      participants,
-      isTranslating: false,
-    };
+    setIsCommittingBlock(true);
+    try {
+      // Kiểm tra lại lần cuối trực tiếp trên Supabase để đảm bảo không ghi nhận nhân sự trùng đơn nghỉ
+      const latestLeaveCheck = await fetchActiveLeaveRecordsForOvertimeCheck(employees);
+      const recordsToCheck =
+        latestLeaveCheck.source === 'supabase'
+          ? latestLeaveCheck.records
+          : effectiveLeaveRecords;
+      if (latestLeaveCheck.source === 'supabase') {
+        setLiveLeaveRecords(latestLeaveCheck.records);
+      }
 
-    if (editingBlockId) {
-      setPreviewData((prev) =>
-        prev.map((b) => (b.id === editingBlockId ? newBlock : b))
+      const latestOnLeaveMap = buildOnLeaveEmployeeMapForDate(
+        resolvedBlockDate,
+        recordsToCheck,
+        employees
       );
-      setEditingBlockId(null);
-      showToast(`Đã cập nhật nhóm [${formatDateToFormStyle(newBlock.overtimeDate)}]!`);
-    } else {
-      setPreviewData((prev) => [...prev, newBlock]);
-      showToast(`Đã ghi nhận nhóm [${formatDateToFormStyle(newBlock.overtimeDate)}] vào danh sách xem trước!`);
-    }
+      const conflictingIds = currentSelectedEmployeeIds.filter((id) =>
+        latestOnLeaveMap.has(id)
+      );
+      if (conflictingIds.length > 0) {
+        const conflictSet = new Set(conflictingIds);
+        setCurrentSelectedEmployeeIds((prev) =>
+          prev.filter((id) => !conflictSet.has(id))
+        );
+        setCustomTimes((prev) => {
+          const next = { ...prev };
+          for (const id of conflictingIds) delete next[id];
+          return next;
+        });
+        setEditingTimeEmpId((prev) =>
+          prev && conflictSet.has(prev) ? null : prev
+        );
+        const conflictNames = conflictingIds
+          .slice(0, 3)
+          .map((id) => employeeMap.get(id)?.fullName || id)
+          .join(', ');
+        const extraSuffix =
+          conflictingIds.length > 3
+            ? ` và ${conflictingIds.length - 3} người khác`
+            : '';
+        showToast(
+          `Không thể ghi nhận: ${conflictNames}${extraSuffix} đang có đơn nghỉ ngày ${formatDateToFormStyle(
+            resolvedBlockDate
+          )}. Đã tự động bỏ chọn.`
+        );
+        return;
+      }
 
-    // Sau khi ghi nhận lượt, Ngày làm thêm tiếp theo mặc định lấy lại theo Ngày phiếu cố định
-    setBlockOvertimeDate(shellOvertimeDate || getLocalTodayIsoDate());
-    setCurrentReasonVi('');
-    setCurrentReasonKr('');
-    setIsReasonKrManuallyEdited(false);
-    setCurrentSelectedEmployeeIds([]);
-    setCustomTimes({});
-    setEditingTimeEmpId(null);
-    setEmployeeSearchQuery('');
-    setIsEmployeeDropdownOpen(false);
+      const normalizedStart = OvertimeFormService.normalize24hTime(currentStartTime, '16:10');
+      const normalizedEnd = OvertimeFormService.normalize24hTime(currentEndTime, '18:10');
+      setCurrentStartTime(normalizedStart);
+      setCurrentEndTime(normalizedEnd);
+
+      const cleanReasonVi = currentReasonVi.trim();
+      const finalReasonKr = currentReasonKr.trim()
+        ? currentReasonKr.trim()
+        : (await suggestFactoryKoreanTranslation(cleanReasonVi, glossaryEntries)).translation;
+
+      // Tự động học/cập nhật cặp (reasonVi, reasonKr) vào từ điển nội bộ khi ghi nhận
+      if (cleanReasonVi && finalReasonKr.trim()) {
+        void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim()).then(
+          ({ entries }) => setGlossaryEntries(entries)
+        );
+      }
+
+      const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map((empId) => {
+        const custom = customTimes[empId];
+        return {
+          employeeId: empId,
+          startTime: custom?.startTime ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart) : normalizedStart,
+          endTime: custom?.endTime ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd) : normalizedEnd,
+        };
+      });
+
+      const newBlock: OvertimeTaskBlock = {
+        id: editingBlockId || `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        overtimeDate: resolvedBlockDate,
+        reasonVi: cleanReasonVi,
+        reasonKr: finalReasonKr.trim(),
+        startTime: normalizedStart,
+        endTime: normalizedEnd,
+        selectedEmployeeIds: [...currentSelectedEmployeeIds],
+        participants,
+        isTranslating: false,
+      };
+
+      if (editingBlockId) {
+        setPreviewData((prev) =>
+          prev.map((b) => (b.id === editingBlockId ? newBlock : b))
+        );
+        setEditingBlockId(null);
+        showToast(`Đã cập nhật nhóm [${formatDateToFormStyle(newBlock.overtimeDate)}]!`);
+      } else {
+        setPreviewData((prev) => [...prev, newBlock]);
+        showToast(`Đã ghi nhận nhóm [${formatDateToFormStyle(newBlock.overtimeDate)}] vào danh sách xem trước!`);
+      }
+
+      // Sau khi ghi nhận lượt, Ngày làm thêm tiếp theo mặc định lấy lại theo Ngày phiếu cố định
+      setBlockOvertimeDate(shellOvertimeDate || getLocalTodayIsoDate());
+      setCurrentReasonVi('');
+      setCurrentReasonKr('');
+      setIsReasonKrManuallyEdited(false);
+      setCurrentSelectedEmployeeIds([]);
+      setCustomTimes({});
+      setEditingTimeEmpId(null);
+      setEmployeeSearchQuery('');
+      setIsEmployeeDropdownOpen(false);
+    } finally {
+      setIsCommittingBlock(false);
+    }
   };
 
   const handleMoveBlock = (index: number, direction: 'up' | 'down') => {
@@ -977,6 +1116,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                     ({alreadyRecordedIdsForCurrentDate.size} đã lên lịch)
                   </span>
                 )}
+                {onLeaveMapForCurrentDate.size > 0 && (
+                  <span className="text-rose-600 font-normal ml-1">
+                    ({onLeaveMapForCurrentDate.size} đang nghỉ)
+                  </span>
+                )}
               </label>
               {currentSelectedEmployeeIds.length > 0 && (
                 <button
@@ -1059,20 +1203,25 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                     <span className="text-slate-500 truncate">
                       {selectedGroupFilter && selectedGroupFilter !== 'ALL' ? (
                         <>
-                          Nhóm <strong className="text-slate-700">{selectedGroupFilter}</strong> • {filteredEmployeesForInput.length} người
+                          Nhóm <strong className="text-slate-700">{selectedGroupFilter}</strong> • {selectableFilteredEmployees.length} khả dụng
                         </>
                       ) : (
-                        <>Tất cả nhóm ({formDepartment}) • {filteredEmployeesForInput.length} người</>
+                        <>Tất cả nhóm ({formDepartment}) • {selectableFilteredEmployees.length} khả dụng</>
+                      )}
+                      {onLeaveCountInFiltered > 0 && (
+                        <span className="text-rose-600 ml-1">
+                          ({onLeaveCountInFiltered} đang nghỉ)
+                        </span>
                       )}
                     </span>
                     <button
                       type="button"
-                      disabled={filteredEmployeesForInput.length === 0}
+                      disabled={selectableFilteredEmployees.length === 0}
                       onClick={handleSelectAllFiltered}
                       className="font-semibold text-[#14539E] hover:underline cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {filteredEmployeesForInput.length > 0 &&
-                      filteredEmployeesForInput.every((e) =>
+                      {selectableFilteredEmployees.length > 0 &&
+                      selectableFilteredEmployees.every((e) =>
                         currentSelectedEmployeeIds.includes(e.id)
                       )
                         ? 'Bỏ chọn tất cả'
@@ -1088,43 +1237,74 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                       </div>
                     ) : (
                       filteredEmployeesForInput.map((emp) => {
-                        const isSelected = currentSelectedEmployeeIds.includes(emp.id);
+                        const leaveConflict = onLeaveMapForCurrentDate.get(emp.id);
+                        const isOnLeave = Boolean(leaveConflict);
+                        const isSelected = !isOnLeave && currentSelectedEmployeeIds.includes(emp.id);
+                        const leaveTooltip = leaveConflict
+                          ? `${emp.fullName} đang có đơn ${getLeaveTypeShortLabel(
+                              leaveConflict
+                            )} (${formatDateToFormStyle(
+                              leaveConflict.startDate
+                            )} - ${formatDateToFormStyle(
+                              leaveConflict.endDate || leaveConflict.startDate
+                            )})`
+                          : undefined;
+
                         return (
                           <button
                             key={emp.id}
                             type="button"
                             role="option"
                             aria-selected={isSelected}
+                            aria-disabled={isOnLeave}
+                            disabled={isOnLeave}
+                            title={leaveTooltip}
                             onClick={() => handleToggleEmployee(emp.id)}
-                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors select-none ${
-                              isSelected
-                                ? 'bg-blue-50/90 border border-blue-200 text-slate-900 font-semibold'
-                                : 'bg-white border border-transparent text-slate-700 hover:bg-slate-100'
+                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs transition-colors select-none ${
+                              isOnLeave
+                                ? 'bg-slate-50/90 border border-slate-200/70 text-slate-400 cursor-not-allowed opacity-80'
+                                : isSelected
+                                  ? 'bg-blue-50/90 border border-blue-200 text-slate-900 font-semibold cursor-pointer'
+                                  : 'bg-white border border-transparent text-slate-700 hover:bg-slate-100 cursor-pointer'
                             }`}
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               <span
                                 aria-hidden="true"
                                 className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-white shrink-0 ${
-                                  isSelected
-                                    ? 'bg-[#14539E] border-[#14539E]'
-                                    : 'border-slate-300 bg-white'
+                                  isOnLeave
+                                    ? 'border-slate-200 bg-slate-100'
+                                    : isSelected
+                                      ? 'bg-[#14539E] border-[#14539E]'
+                                      : 'border-slate-300 bg-white'
                                 }`}
                               >
                                 {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                               </span>
                               <div className="min-w-0 flex-1 truncate">
-                                <span>{emp.fullName}</span>
+                                <span className={isOnLeave ? 'line-through decoration-slate-300' : ''}>
+                                  {emp.fullName}
+                                </span>
                                 <span className="text-slate-400 text-[10px] font-mono ml-1">
                                   ({emp.employeeCode})
                                 </span>
                               </div>
                             </div>
-                            {(!selectedGroupFilter || selectedGroupFilter === 'ALL') && emp.department && (
-                              <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0 max-w-[90px] truncate">
-                                {emp.department}
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isOnLeave && (
+                                <span
+                                  data-testid={`employee-on-leave-badge-${emp.id}`}
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-semibold shrink-0"
+                                >
+                                  Đang nghỉ
+                                </span>
+                              )}
+                              {(!selectedGroupFilter || selectedGroupFilter === 'ALL') && emp.department && (
+                                <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0 max-w-[90px] truncate">
+                                  {emp.department}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         );
                       })
@@ -1309,8 +1489,19 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         <div className="shrink-0 border-t border-slate-200 bg-slate-50/60 p-3.5 space-y-2.5">
           {/* HÀNG 5 */}
           <div className="flex items-center gap-2">
-            <button type="button" onClick={handleCommitBlock} className="flex-1 h-10 rounded-xl bg-[#14539E] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-[0.99] whitespace-nowrap">
-              {editingBlockId ? <Check className="w-4 h-4 stroke-[2.5]" /> : <Plus className="w-4 h-4 stroke-[2.5]" />}
+            <button
+              type="button"
+              disabled={isCommittingBlock}
+              onClick={handleCommitBlock}
+              className="flex-1 h-10 rounded-xl bg-[#14539E] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-[0.99] whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
+            >
+              {isCommittingBlock ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : editingBlockId ? (
+                <Check className="w-4 h-4 stroke-[2.5]" />
+              ) : (
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+              )}
               <span>{editingBlockId ? 'Cập nhật nhóm' : 'Ghi nhận'}</span>
             </button>
             {editingBlockId && (

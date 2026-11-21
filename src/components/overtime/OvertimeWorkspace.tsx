@@ -7,7 +7,7 @@ import {
   Pencil,
   Plus,
 } from 'lucide-react';
-import { DepartmentGroup, Employee } from '../../types/hr';
+import { DepartmentGroup, Employee, LeaveRecord } from '../../types/hr';
 import {
   formatNumberVN,
   getFriendlyErrorMessage,
@@ -16,14 +16,17 @@ import { formatDateToFormStyle } from '../../utils/overtimeExportService';
 import {
   createOrOpenOvertimeShell,
   DEFAULT_OVERTIME_DEPARTMENT,
+  fetchActiveLeaveRecordsForOvertimeCheck,
   fetchOvertimeFormById,
   fetchOvertimeForms,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
   getLocalTodayIsoDate,
   OvertimeFormWithItems,
+  OvertimeLeaveCheckEntry,
   resolveOvertimeMainDepartment,
   softDeleteOvertimeForms,
+  subscribeToLeaveLogsRealtime,
   subscribeToOvertimeRealtime,
   updateOvertimeFormInHistory,
 } from '../../utils/overtimeFormsService';
@@ -38,6 +41,7 @@ export type OvertimeTabId = 'create' | 'log';
 export interface OvertimeWorkspaceProps {
   employees: Employee[];
   groups: DepartmentGroup[];
+  leaveRecords?: LeaveRecord[];
   initialTab?: OvertimeTabId;
   onShowToast?: (message: string) => void;
 }
@@ -45,6 +49,7 @@ export interface OvertimeWorkspaceProps {
 export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   employees,
   groups,
+  leaveRecords: propLeaveRecords = [],
   initialTab = 'log',
   onShowToast,
 }) => {
@@ -59,7 +64,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     getLocalTodayIsoDate()
   );
   const [isQuickCreating, setIsQuickCreating] = useState<boolean>(false);
+  const [supabaseLeaveRecords, setSupabaseLeaveRecords] = useState<
+    OvertimeLeaveCheckEntry[] | null
+  >(null);
   const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const knownSubGroups = useMemo(() => {
     const names = new Set<string>();
@@ -71,6 +80,20 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     });
     return Array.from(names);
   }, [groups, employees]);
+
+  const loadLeaveRecords = useCallback(async () => {
+    const res = await fetchActiveLeaveRecordsForOvertimeCheck(employees);
+    if (res.source === 'supabase') {
+      setSupabaseLeaveRecords(res.records);
+    }
+  }, [employees]);
+
+  const effectiveLeaveRecords = useMemo<OvertimeLeaveCheckEntry[]>(() => {
+    if (supabaseLeaveRecords !== null) {
+      return supabaseLeaveRecords;
+    }
+    return propLeaveRecords;
+  }, [supabaseLeaveRecords, propLeaveRecords]);
 
   const loadForms = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
@@ -90,9 +113,10 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
 
   useEffect(() => {
     void loadForms();
-  }, [loadForms]);
+    void loadLeaveRecords();
+  }, [loadForms, loadLeaveRecords, propLeaveRecords]);
 
-  // Đăng ký Supabase Realtime (postgres_changes: INSERT, UPDATE, DELETE) cho cả 2 bảng
+  // Đăng ký Supabase Realtime (postgres_changes: INSERT, UPDATE, DELETE) cho cả phiếu tăng ca & đơn nghỉ
   useEffect(() => {
     const scheduleSilentReload = () => {
       if (realtimeReloadTimerRef.current) {
@@ -100,6 +124,15 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       }
       realtimeReloadTimerRef.current = setTimeout(() => {
         void loadForms({ silent: true });
+      }, 250);
+    };
+
+    const scheduleLeaveReload = () => {
+      if (leaveReloadTimerRef.current) {
+        clearTimeout(leaveReloadTimerRef.current);
+      }
+      leaveReloadTimerRef.current = setTimeout(() => {
+        void loadLeaveRecords();
       }, 250);
     };
 
@@ -128,9 +161,12 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       scheduleSilentReload();
     });
 
+    const unsubscribeLeaves = subscribeToLeaveLogsRealtime(scheduleLeaveReload);
+
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
         void loadForms({ silent: true });
+        void loadLeaveRecords();
       }
     };
     window.addEventListener('focus', handleVisibilityOrFocus);
@@ -140,11 +176,15 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       if (realtimeReloadTimerRef.current) {
         clearTimeout(realtimeReloadTimerRef.current);
       }
+      if (leaveReloadTimerRef.current) {
+        clearTimeout(leaveReloadTimerRef.current);
+      }
       unsubscribe();
+      unsubscribeLeaves();
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [loadForms]);
+  }, [loadForms, loadLeaveRecords]);
 
   const handleCreateOrOpenShell = async (overtimeDate: string) => {
     const res = await createOrOpenOvertimeShell(overtimeDate, {
@@ -338,6 +378,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             key={editingForm.id}
             employees={employees}
             groups={groups}
+            leaveRecords={effectiveLeaveRecords}
             existingForms={forms}
             isCheckingExistingForms={isLoadingForms}
             editingForm={editingForm}

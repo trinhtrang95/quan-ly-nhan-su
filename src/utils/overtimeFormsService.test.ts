@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildOnLeaveEmployeeMapForDate,
   buildOvertimeFormItemsFromBlocks,
   buildPrintableDateGroupsFromItems,
   buildUpdatedOvertimeForm,
@@ -11,6 +12,8 @@ import {
   formatOvertimeDepartmentHeaderLabel,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
+  getLeaveTypeShortLabel,
+  isLeaveRecordCoveringDate,
   isOvertimeTimeBold,
   reconstructBlocksFromItems,
   resolveDefaultPrimaryOvertimeDate,
@@ -19,6 +22,7 @@ import {
   resolveRepresentativeOvertimeDate,
   type OvertimeBlockInput,
   type OvertimeFormWithItems,
+  type OvertimeLeaveCheckEntry,
 } from './overtimeFormsService';
 import type { Employee } from '../types/hr';
 
@@ -604,4 +608,92 @@ describe('overtimeFormsService pure logic', () => {
       'Bộ phận Sản xuất / 부서'
     );
   });
+
+  it('filters active leave records by date range, excludes late_early and soft-deleted rows, and matches by employee_id or employee_code', () => {
+    const leaveEntries: OvertimeLeaveCheckEntry[] = [
+      {
+        id: 'lv-1',
+        employeeId: 'emp-1',
+        type: 'annual_leave',
+        startDate: '2026-11-20',
+        endDate: '2026-11-22',
+        amount: 3,
+        reason: 'Nghỉ phép gia đình',
+        createdAt: '2026-11-19',
+        approvedBy: 'Admin',
+        deletedAt: null,
+        isDeleted: false,
+      },
+      {
+        id: 'lv-2',
+        employeeId: 'legacy-uuid-not-matching',
+        employeeCode: 'nv002',
+        type: 'regime_leave',
+        regimeSubtype: 'Ốm đau / Viện phí',
+        startDate: '2026-11-21',
+        endDate: '',
+        amount: 1,
+        reason: 'Khám bệnh',
+        createdAt: '2026-11-20',
+        approvedBy: 'Admin',
+        deletedAt: null,
+      },
+      {
+        id: 'lv-late',
+        employeeId: 'emp-2',
+        type: 'late_early',
+        startDate: '2026-11-20',
+        endDate: '2026-11-20',
+        amount: 1,
+        reason: 'Đi muộn 1h',
+        createdAt: '2026-11-20',
+        approvedBy: 'Admin',
+        deletedAt: null,
+      },
+      {
+        id: 'lv-deleted',
+        employeeId: 'emp-2',
+        type: 'unpaid_leave',
+        startDate: '2026-11-20',
+        endDate: '2026-11-20',
+        amount: 1,
+        reason: 'Đã hủy đơn',
+        createdAt: '2026-11-19',
+        approvedBy: 'Admin',
+        deletedAt: '2026-11-19T10:00:00.000Z',
+      },
+    ];
+
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[0], '2026-11-19'), false);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[0], '2026-11-20'), true);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[0], '2026-11-21'), true);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[0], '2026-11-22'), true);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[0], '2026-11-23'), false);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[1], '2026-11-21'), true);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[2], '2026-11-20'), false);
+    assert.equal(isLeaveRecordCoveringDate(leaveEntries[3], '2026-11-20'), false);
+
+    // On 2026-11-20: emp-1 is on annual_leave; emp-2 only has late_early and soft-deleted unpaid_leave -> NOT blocked
+    const mapNov20 = buildOnLeaveEmployeeMapForDate(
+      '2026-11-20',
+      leaveEntries,
+      sampleEmployees
+    );
+    assert.equal(mapNov20.has('emp-1'), true);
+    assert.equal(mapNov20.has('emp-2'), false);
+
+    // On 2026-11-21: emp-1 is on annual_leave (middle of range); emp-2 is matched via employeeCode 'nv002' -> BOTH blocked
+    const mapNov21 = buildOnLeaveEmployeeMapForDate(
+      '2026-11-21',
+      leaveEntries,
+      sampleEmployees
+    );
+    assert.equal(mapNov21.has('emp-1'), true);
+    assert.equal(mapNov21.has('emp-2'), true);
+    assert.equal(
+      getLeaveTypeShortLabel(mapNov21.get('emp-2')!),
+      'Nghỉ Chế độ (Ốm đau / Viện phí)'
+    );
+  });
 });
+
