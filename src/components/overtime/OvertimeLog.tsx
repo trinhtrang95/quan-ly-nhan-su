@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Calendar,
+  Check,
+  Copy,
+  Database,
   Eye,
   FileSpreadsheet,
   FileText,
@@ -27,13 +30,16 @@ import {
 import {
   buildMergedEmployeesForExport,
   buildPrintableDateGroupsFromItems,
+  fetchOvertimeFormById,
   filterOvertimeForms,
   formatCreatedAtVN,
   formatOvertimeFormCodeDisplay,
   isOvertimeTimeBold,
   OvertimeFormWithItems,
+  OvertimeSupabaseActionError,
   reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
+  SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL,
 } from '../../utils/overtimeFormsService';
 
 export interface OvertimeLogProps {
@@ -41,9 +47,10 @@ export interface OvertimeLogProps {
   employees: Employee[];
   groups?: DepartmentGroup[];
   isLoading: boolean;
+  schemaNeedsMigration?: boolean;
   onRefresh: () => Promise<void> | void;
   onEdit: (form: OvertimeFormWithItems) => void;
-  onSoftDelete: (formId: string) => Promise<void>;
+  onSoftDelete: (formIds: string[]) => Promise<void>;
   onSwitchToCreate?: () => void;
   onShowToast?: (message: string) => void;
 }
@@ -53,6 +60,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   employees,
   groups = [],
   isLoading,
+  schemaNeedsMigration = false,
   onRefresh,
   onEdit,
   onSoftDelete,
@@ -65,11 +73,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   const [viewingForm, setViewingForm] = useState<OvertimeFormWithItems | null>(
     null
   );
-  const [deletingForm, setDeletingForm] =
-    useState<OvertimeFormWithItems | null>(null);
+  const [loadingViewFormId, setLoadingViewFormId] = useState<string | null>(
+    null
+  );
+  const [deletingForms, setDeletingForms] = useState<OvertimeFormWithItems[]>(
+    []
+  );
+  const [selectedFormIds, setSelectedFormIds] = useState<string[]>([]);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [exportingFormId, setExportingFormId] = useState<string | null>(null);
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState<boolean>(false);
+  const [sqlErrorContext, setSqlErrorContext] = useState<string | null>(null);
+  const [sqlCopied, setSqlCopied] = useState<boolean>(false);
 
   const knownSubGroups = useMemo(() => {
     const names = new Set<string>();
@@ -90,7 +106,50 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     [forms, searchQuery, dateFilter, knownSubGroups]
   );
 
+  // Tự động đồng bộ selection và modal xem chi tiết khi danh sách thay đổi qua Realtime
+  useEffect(() => {
+    const activeIds = new Set(
+      forms.filter((f) => !f.deleted_at).map((f) => f.id)
+    );
+    setSelectedFormIds((prev) => prev.filter((id) => activeIds.has(id)));
+    if (viewingForm && !activeIds.has(viewingForm.id)) {
+      setViewingForm(null);
+      onShowToast?.('Phiếu đang xem vừa được xóa khỏi hệ thống.');
+    }
+  }, [forms, viewingForm, onShowToast]);
+
+  const selectedSet = useMemo(
+    () => new Set(selectedFormIds),
+    [selectedFormIds]
+  );
+
+  const visibleSelectedCount = useMemo(
+    () => filteredForms.filter((f) => selectedSet.has(f.id)).length,
+    [filteredForms, selectedSet]
+  );
+
+  const isAllVisibleSelected =
+    filteredForms.length > 0 && visibleSelectedCount === filteredForms.length;
+
   const hasActiveFilters = Boolean(searchQuery.trim() || dateFilter.trim());
+
+  const handleToggleSelectAllVisible = () => {
+    const visibleIds = filteredForms.map((f) => f.id);
+    if (isAllVisibleSelected) {
+      const visibleSet = new Set(visibleIds);
+      setSelectedFormIds((prev) => prev.filter((id) => !visibleSet.has(id)));
+    } else {
+      setSelectedFormIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleToggleSelectOne = (formId: string) => {
+    setSelectedFormIds((prev) =>
+      prev.includes(formId)
+        ? prev.filter((id) => id !== formId)
+        : [...prev, formId]
+    );
+  };
 
   const handleRefreshClick = async () => {
     setIsRefreshing(true);
@@ -101,30 +160,61 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   };
 
+  const handleViewForm = async (form: OvertimeFormWithItems) => {
+    setLoadingViewFormId(form.id);
+    try {
+      const freshForm = await fetchOvertimeFormById(form.id);
+      if (!freshForm) {
+        onShowToast?.(
+          `Phiếu ${formatOvertimeFormCodeDisplay(form.form_code)} đã bị xóa trên hệ thống.`
+        );
+        await onRefresh();
+        return;
+      }
+      setViewingForm(freshForm);
+    } catch {
+      setViewingForm(form);
+    } finally {
+      setLoadingViewFormId(null);
+    }
+  };
+
   const handleExportFormExcel = async (form: OvertimeFormWithItems) => {
     setExportingFormId(form.id);
     try {
-      const blocks = reconstructBlocksFromItems(form.items);
+      const freshForm = await fetchOvertimeFormById(form.id);
+      if (!freshForm) {
+        onShowToast?.(
+          `Phiếu ${formatOvertimeFormCodeDisplay(form.form_code)} đã bị xóa, không thể xuất file.`
+        );
+        if (viewingForm?.id === form.id) {
+          setViewingForm(null);
+        }
+        await onRefresh();
+        return;
+      }
+
+      const blocks = reconstructBlocksFromItems(freshForm.items);
       if (blocks.length === 0) {
         onShowToast?.('Phiếu không có dữ liệu nhân sự để xuất Excel.');
         return;
       }
-      const mainDepartment = getDisplayDepartment(form.department);
+      const mainDepartment = getDisplayDepartment(freshForm.department);
       const mergedEmployees = buildMergedEmployeesForExport(
-        form.items,
+        freshForm.items,
         employees,
         mainDepartment
       );
       await overtimeExportService.exportExcel({
         department: mainDepartment,
-        overtimeDate: form.overtime_date,
+        overtimeDate: freshForm.overtime_date,
         blocks,
         employees: mergedEmployees,
         knownSubGroups,
       });
       onShowToast?.(
         `Đã xuất file Excel cho phiếu ${formatOvertimeFormCodeDisplay(
-          form.form_code
+          freshForm.form_code
         )}.`
       );
     } catch (error: unknown) {
@@ -138,34 +228,80 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   };
 
-  const handleOpenDeleteModal = (form: OvertimeFormWithItems) => {
+  const handleOpenDeleteModal = (targets: OvertimeFormWithItems[]) => {
+    if (targets.length === 0) return;
     setIsDeleteConfirmed(false);
-    setDeletingForm(form);
+    setDeletingForms(targets);
+  };
+
+  const handleOpenBulkDeleteModal = () => {
+    const targets = forms.filter((f) => !f.deleted_at && selectedSet.has(f.id));
+    handleOpenDeleteModal(targets);
   };
 
   const handleCloseDeleteModal = () => {
     if (isDeleting) return;
-    setDeletingForm(null);
+    setDeletingForms([]);
     setIsDeleteConfirmed(false);
   };
 
   const handleConfirmDelete = async () => {
-    if (!deletingForm || !isDeleteConfirmed) return;
+    if (deletingForms.length === 0 || !isDeleteConfirmed) return;
     setIsDeleting(true);
     try {
-      const code = formatOvertimeFormCodeDisplay(deletingForm.form_code);
-      const targetId = deletingForm.id;
-      await onSoftDelete(targetId);
-      if (viewingForm?.id === targetId) {
+      const targetIds = deletingForms.map((f) => f.id);
+      const targetIdSet = new Set(targetIds);
+      const firstCode = formatOvertimeFormCodeDisplay(deletingForms[0].form_code);
+
+      await onSoftDelete(targetIds);
+
+      if (viewingForm && targetIdSet.has(viewingForm.id)) {
         setViewingForm(null);
       }
-      setDeletingForm(null);
+      setSelectedFormIds((prev) => prev.filter((id) => !targetIdSet.has(id)));
+      setDeletingForms([]);
       setIsDeleteConfirmed(false);
-      onShowToast?.(`Đã xóa phiếu tăng ca ${code} khỏi nhật ký.`);
+
+      if (targetIds.length === 1) {
+        onShowToast?.(`Đã xóa mềm phiếu tăng ca ${firstCode} khỏi nhật ký.`);
+      } else {
+        onShowToast?.(
+          `Đã xóa mềm ${formatNumberVN(targetIds.length)} phiếu tăng ca khỏi nhật ký.`
+        );
+      }
     } catch (error) {
-      onShowToast?.(getFriendlyErrorMessage(error));
+      if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
+        setDeletingForms([]);
+        setIsDeleteConfirmed(false);
+        setSqlErrorContext(error.message);
+        setIsSqlModalOpen(true);
+        onShowToast?.(error.message);
+      } else if (error instanceof OvertimeSupabaseActionError) {
+        onShowToast?.(error.message);
+      } else {
+        onShowToast?.(getFriendlyErrorMessage(error));
+      }
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleCopySql = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL
+      );
+      setSqlCopied(true);
+      setTimeout(() => setSqlCopied(false), 2500);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setSqlCopied(true);
+      setTimeout(() => setSqlCopied(false), 2500);
     }
   };
 
@@ -180,6 +316,31 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
   return (
     <div className="flex flex-col gap-4 min-h-0">
+      {/* Cảnh báo nhẹ khi DB Supabase chưa có cột deleted_at trên overtime_form_items */}
+      {schemaNeedsMigration && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 no-print">
+          <div className="flex items-center gap-2 min-w-0">
+            <Database className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              Bảng <code className="font-mono font-semibold">overtime_form_items</code>{' '}
+              trên Supabase chưa có cột <code className="font-mono font-semibold">deleted_at</code>{' '}
+              hoặc chưa bật Realtime đồng bộ giữa các user.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSqlErrorContext(null);
+              setIsSqlModalOpen(true);
+            }}
+            className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Xem mã SQL chuẩn hóa</span>
+          </button>
+        </div>
+      )}
+
       {/* Filter Toolbar */}
       <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 no-print">
         <div className="flex flex-1 flex-wrap items-center gap-2.5">
@@ -230,7 +391,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-3 justify-between md:justify-end">
+        <div className="flex flex-wrap items-center gap-2.5 justify-between md:justify-end">
+          {selectedFormIds.length > 0 && (
+            <button
+              type="button"
+              onClick={handleOpenBulkDeleteModal}
+              className="h-9 px-3.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-2xs"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Xóa đã chọn ({formatNumberVN(selectedFormIds.length)})</span>
+            </button>
+          )}
+
           <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap">
             Hiển thị{' '}
             <strong className="font-semibold text-slate-800">
@@ -255,13 +427,23 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       </div>
 
-      {/* 7-Column Data Table */}
+      {/* Data Table */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden no-print">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                <th className="py-3 px-3.5 w-14 text-center">STT</th>
+                <th className="py-3 pl-3.5 pr-1.5 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={isAllVisibleSelected}
+                    disabled={filteredForms.length === 0 || isLoading}
+                    onChange={handleToggleSelectAllVisible}
+                    aria-label="Chọn tất cả phiếu đang hiển thị"
+                    className="w-4 h-4 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer disabled:opacity-40"
+                  />
+                </th>
+                <th className="py-3 px-3 w-12 text-center">STT</th>
                 <th className="py-3 px-3.5 min-w-[180px]">
                   Mã phiếu / Ngày tạo
                 </th>
@@ -278,7 +460,10 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               {isLoading ? (
                 Array.from({ length: 4 }).map((_, idx) => (
                   <tr key={`skeleton-${idx}`} className="h-14 animate-pulse">
-                    <td className="py-3 px-3.5 text-center">
+                    <td className="py-3 pl-3.5 pr-1.5 text-center">
+                      <div className="h-4 w-4 bg-slate-200 rounded mx-auto" />
+                    </td>
+                    <td className="py-3 px-3 text-center">
                       <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
                     </td>
                     <td className="py-3 px-3.5">
@@ -304,7 +489,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 ))
               ) : filteredForms.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-14 px-6 text-center">
+                  <td colSpan={8} className="py-14 px-6 text-center">
                     <div className="max-w-sm mx-auto flex flex-col items-center">
                       <FileText className="w-9 h-9 text-slate-300 mb-3" />
                       <p className="text-sm font-semibold text-slate-800">
@@ -338,14 +523,33 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       ? form.overtime_dates
                       : [form.overtime_date].filter(Boolean);
                   const isExporting = exportingFormId === form.id;
+                  const isViewingLoading = loadingViewFormId === form.id;
+                  const isSelected = selectedSet.has(form.id);
 
                   return (
                     <tr
                       key={form.id}
-                      className="hover:bg-slate-50/90 transition-colors"
+                      className={`transition-colors ${
+                        isSelected
+                          ? 'bg-blue-50/60 hover:bg-blue-50/90'
+                          : 'hover:bg-slate-50/90'
+                      }`}
                     >
+                      {/* Checkbox */}
+                      <td className="py-3 pl-3.5 pr-1.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectOne(form.id)}
+                          aria-label={`Chọn phiếu ${formatOvertimeFormCodeDisplay(
+                            form.form_code
+                          )}`}
+                          className="w-4 h-4 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
+                        />
+                      </td>
+
                       {/* 1. STT */}
-                      <td className="py-3 px-3.5 text-center font-mono text-slate-500 tabular-nums">
+                      <td className="py-3 px-3 text-center font-mono text-slate-500 tabular-nums">
                         {formatNumberVN(index + 1)}
                       </td>
 
@@ -409,11 +613,16 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                         <div className="inline-flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            onClick={() => setViewingForm(form)}
-                            className="h-8 px-2.5 rounded-lg border border-[#14539E]/30 text-[#14539E] hover:bg-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                            disabled={isViewingLoading}
+                            onClick={() => void handleViewForm(form)}
+                            className="h-8 px-2.5 rounded-lg border border-[#14539E]/30 text-[#14539E] hover:bg-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
                             title="Xem tờ phiếu A4 chuẩn TV-PSGC2022"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            {isViewingLoading ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
                             <span>Xem phiếu</span>
                           </button>
 
@@ -430,7 +639,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           <button
                             type="button"
                             disabled={isExporting}
-                            onClick={() => handleExportFormExcel(form)}
+                            onClick={() => void handleExportFormExcel(form)}
                             className="h-8 w-8 rounded-lg border border-slate-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
                             title="Xuất lại file Excel"
                             aria-label={`Xuất Excel phiếu ${form.form_code}`}
@@ -444,7 +653,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => handleOpenDeleteModal(form)}
+                            onClick={() => handleOpenDeleteModal([form])}
                             className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer"
                             title="Xóa phiếu"
                             aria-label={`Xóa phiếu ${form.form_code}`}
@@ -510,7 +719,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 <button
                   type="button"
                   disabled={exportingFormId === viewingForm.id}
-                  onClick={() => handleExportFormExcel(viewingForm)}
+                  onClick={() => void handleExportFormExcel(viewingForm)}
                   className="h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
                 >
                   {exportingFormId === viewingForm.id ? (
@@ -567,186 +776,186 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       </div>
                     </div>
                     <table className="border-collapse border border-black text-[11px] text-center">
-                    <thead>
-                      <tr>
-                        <th className="border border-black px-2 py-0.5 font-normal">
-                          결
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          작성
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          검사
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          검사
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          검사
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          승인
-                        </th>
-                      </tr>
-                      <tr>
-                        <th className="border border-black px-2 py-0.5 font-normal">
-                          xác
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          Người lập
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          Kiểm tra
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          Kiểm tra
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          Kiểm tra
-                        </th>
-                        <th className="border border-black px-3 py-0.5 font-normal">
-                          Phê duyệt
-                        </th>
-                      </tr>
-                    </thead>
+                      <thead>
+                        <tr>
+                          <th className="border border-black px-2 py-0.5 font-normal">
+                            결
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            작성
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            검사
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            검사
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            검사
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            승인
+                          </th>
+                        </tr>
+                        <tr>
+                          <th className="border border-black px-2 py-0.5 font-normal">
+                            xác
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            Người lập
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            Kiểm tra
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            Kiểm tra
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            Kiểm tra
+                          </th>
+                          <th className="border border-black px-3 py-0.5 font-normal">
+                            Phê duyệt
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="h-14">
+                          <td className="border border-black px-2 align-bottom pb-1 text-[10px]">
+                            <div>nhận</div>
+                            <div className="border-t border-black mt-0.5 pt-0.5">
+                              재
+                            </div>
+                          </td>
+                          <td className="border border-black w-16" />
+                          <td className="border border-black w-16" />
+                          <td className="border border-black w-16" />
+                          <td className="border border-black w-16" />
+                          <td className="border border-black w-16" />
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Multi-date 7-column TV-PSGC2022 Table */}
+                  <table className="w-full border-collapse text-[11px]">
                     <tbody>
-                      <tr className="h-14">
-                        <td className="border border-black px-2 align-bottom pb-1 text-[10px]">
-                          <div>nhận</div>
-                          <div className="border-t border-black mt-0.5 pt-0.5">
-                            재
-                          </div>
-                        </td>
-                        <td className="border border-black w-16" />
-                        <td className="border border-black w-16" />
-                        <td className="border border-black w-16" />
-                        <td className="border border-black w-16" />
-                        <td className="border border-black w-16" />
-                      </tr>
+                      {modalPrintableGroups.map((dateGroup, dateIdx) => (
+                        <React.Fragment key={dateGroup.date}>
+                          <tr className={dateIdx === 0 ? 'h-7' : 'h-8'}>
+                            <td
+                              colSpan={4}
+                              className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${
+                                dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
+                              }`}
+                            >
+                              {dateIdx === 0
+                                ? formatDepartmentHeaderLabel(
+                                    getDisplayDepartment(viewingForm.department),
+                                    knownSubGroups
+                                  )
+                                : ''}
+                            </td>
+                            <td
+                              colSpan={3}
+                              className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${
+                                dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
+                              }`}
+                            >
+                              {dateGroup.formattedDate}
+                            </td>
+                          </tr>
+                          <tr className="text-center font-normal">
+                            <th className="border border-black px-1.5 py-0.5 w-8 min-w-[32px] font-normal">
+                              No
+                            </th>
+                            <th className="border border-black px-2 py-0.5 w-40 min-w-[145px] font-normal">
+                              Danh sách làm thêm
+                            </th>
+                            <th className="border border-black px-2.5 py-0.5 min-w-[220px] font-normal">
+                              Lý do làm thêm
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
+                              Giờ bắt đầu
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
+                              Giờ kết thúc
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
+                              Tổng thời gian
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 w-14 min-w-[50px] font-normal">
+                              Ký nhận
+                            </th>
+                          </tr>
+                          <tr className="text-center font-normal">
+                            <th className="border border-black px-1.5 py-0.5 font-normal" />
+                            <th className="border border-black px-2 py-0.5 font-normal">
+                              명단
+                            </th>
+                            <th className="border border-black px-2.5 py-0.5 font-normal">
+                              잔업. 특근사유
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 font-normal">
+                              시작
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 font-normal">
+                              종료
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 font-normal">
+                              총 시간
+                            </th>
+                            <th className="border border-black px-1.5 py-0.5 font-normal">
+                              싸인
+                            </th>
+                          </tr>
+                          {dateGroup.blocks.map((block) =>
+                            block.rows.map((row) => (
+                              <tr
+                                key={`${block.blockId}-${row.no}`}
+                                className="h-7 min-h-[26px]"
+                              >
+                                <td className="border border-black px-1.5 py-0.5 text-center font-normal">
+                                  {row.no}
+                                </td>
+                                <td className="border border-black px-2 py-0.5 text-left font-normal">
+                                  {row.fullName}
+                                </td>
+                                {row.isFirstInBlock && (
+                                  <td
+                                    rowSpan={row.rowSpan}
+                                    className="border border-black px-2.5 py-1 text-left align-middle whitespace-pre-line font-normal leading-snug"
+                                  >
+                                    {row.combinedReason}
+                                  </td>
+                                )}
+                                <td
+                                  className={`border border-black px-1.5 py-0.5 text-center align-middle ${
+                                    isOvertimeTimeBold(row.startTimeFormatted)
+                                      ? 'font-bold'
+                                      : 'font-normal'
+                                  }`}
+                                >
+                                  {row.startTimeFormatted}
+                                </td>
+                                <td
+                                  className={`border border-black px-1.5 py-0.5 text-center align-middle ${
+                                    isOvertimeTimeBold(row.endTimeFormatted)
+                                      ? 'font-bold'
+                                      : 'font-normal'
+                                  }`}
+                                >
+                                  {row.endTimeFormatted}
+                                </td>
+                                <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
+                                <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
+                              </tr>
+                            ))
+                          )}
+                        </React.Fragment>
+                      ))}
                     </tbody>
                   </table>
                 </div>
-
-                {/* Multi-date 7-column TV-PSGC2022 Table */}
-                <table className="w-full border-collapse text-[11px]">
-                  <tbody>
-                    {modalPrintableGroups.map((dateGroup, dateIdx) => (
-                      <React.Fragment key={dateGroup.date}>
-                        <tr className={dateIdx === 0 ? 'h-7' : 'h-8'}>
-                          <td
-                            colSpan={4}
-                            className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${
-                              dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
-                            }`}
-                          >
-                            {dateIdx === 0
-                              ? formatDepartmentHeaderLabel(
-                                  getDisplayDepartment(viewingForm.department),
-                                  knownSubGroups
-                                )
-                              : ''}
-                          </td>
-                          <td
-                            colSpan={3}
-                            className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${
-                              dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
-                            }`}
-                          >
-                            {dateGroup.formattedDate}
-                          </td>
-                        </tr>
-                        <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-0.5 w-8 min-w-[32px] font-normal">
-                            No
-                          </th>
-                          <th className="border border-black px-2 py-0.5 w-40 min-w-[145px] font-normal">
-                            Danh sách làm thêm
-                          </th>
-                          <th className="border border-black px-2.5 py-0.5 min-w-[220px] font-normal">
-                            Lý do làm thêm
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
-                            Giờ bắt đầu
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
-                            Giờ kết thúc
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
-                            Tổng thời gian
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 w-14 min-w-[50px] font-normal">
-                            Ký nhận
-                          </th>
-                        </tr>
-                        <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-0.5 font-normal" />
-                          <th className="border border-black px-2 py-0.5 font-normal">
-                            명단
-                          </th>
-                          <th className="border border-black px-2.5 py-0.5 font-normal">
-                            잔업. 특근사유
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 font-normal">
-                            시작
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 font-normal">
-                            종료
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 font-normal">
-                            총 시간
-                          </th>
-                          <th className="border border-black px-1.5 py-0.5 font-normal">
-                            싸인
-                          </th>
-                        </tr>
-                        {dateGroup.blocks.map((block) =>
-                          block.rows.map((row) => (
-                            <tr
-                              key={`${block.blockId}-${row.no}`}
-                              className="h-7 min-h-[26px]"
-                            >
-                              <td className="border border-black px-1.5 py-0.5 text-center font-normal">
-                                {row.no}
-                              </td>
-                              <td className="border border-black px-2 py-0.5 text-left font-normal">
-                                {row.fullName}
-                              </td>
-                              {row.isFirstInBlock && (
-                                <td
-                                  rowSpan={row.rowSpan}
-                                  className="border border-black px-2.5 py-1 text-left align-middle whitespace-pre-line font-normal leading-snug"
-                                >
-                                  {row.combinedReason}
-                                </td>
-                              )}
-                              <td
-                                className={`border border-black px-1.5 py-0.5 text-center align-middle ${
-                                  isOvertimeTimeBold(row.startTimeFormatted)
-                                    ? 'font-bold'
-                                    : 'font-normal'
-                                }`}
-                              >
-                                {row.startTimeFormatted}
-                              </td>
-                              <td
-                                className={`border border-black px-1.5 py-0.5 text-center align-middle ${
-                                  isOvertimeTimeBold(row.endTimeFormatted)
-                                    ? 'font-bold'
-                                    : 'font-normal'
-                                }`}
-                              >
-                                {row.endTimeFormatted}
-                              </td>
-                              <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
-                              <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
-                            </tr>
-                          ))
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
 
                 {/* Notes Footer */}
                 <div className="mt-2 text-[11px] space-y-0.5 leading-snug">
@@ -766,8 +975,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* In-app Soft Delete Confirmation Modal with Extra Protection Layer */}
-      {deletingForm && (
+      {/* In-app Soft Delete Confirmation Modal (hỗ trợ xóa 1 phiếu hoặc nhiều phiếu) */}
+      {deletingForms.length > 0 && (
         <div
           role="dialog"
           aria-modal="true"
@@ -785,11 +994,14 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     id="delete-overtime-title"
                     className="text-sm font-bold text-slate-900"
                   >
-                    Xác nhận xóa phiếu tăng ca
+                    {deletingForms.length === 1
+                      ? 'Xác nhận xóa phiếu tăng ca'
+                      : `Xác nhận xóa ${formatNumberVN(deletingForms.length)} phiếu tăng ca`}
                   </h3>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Bạn có chắc chắn muốn xóa phiếu này khỏi nhật ký không? Phiếu
-                    sẽ được đánh dấu xóa mềm và ẩn khỏi danh sách tra cứu.
+                    Hệ thống sẽ đánh dấu xóa mềm (<code className="font-mono">deleted_at</code>)
+                    trên cả <code className="font-mono">overtime_forms</code> và{' '}
+                    <code className="font-mono">overtime_form_items</code> để đồng bộ cho toàn bộ người dùng.
                   </p>
                 </div>
               </div>
@@ -805,27 +1017,45 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             </div>
 
             {/* Thông tin tóm tắt phiếu sắp xóa */}
-            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-500">Mã phiếu:</span>
-                <span className="font-mono font-bold text-[#14539E]">
-                  {formatOvertimeFormCodeDisplay(deletingForm.form_code)}
-                </span>
+            {deletingForms.length === 1 ? (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Mã phiếu:</span>
+                  <span className="font-mono font-bold text-[#14539E]">
+                    {formatOvertimeFormCodeDisplay(deletingForms[0].form_code)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Bộ phận:</span>
+                  <span className="font-semibold text-slate-800">
+                    {getDisplayDepartment(deletingForms[0].department)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Quy mô:</span>
+                  <span className="font-medium text-slate-700 tabular-nums">
+                    {formatNumberVN(deletingForms[0].total_participants)} lượt •{' '}
+                    {formatNumberVN(deletingForms[0].total_hours)} giờ
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-500">Bộ phận:</span>
-                <span className="font-semibold text-slate-800">
-                  {getDisplayDepartment(deletingForm.department)}
-                </span>
+            ) : (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1.5 max-h-36 overflow-y-auto">
+                <div className="font-semibold text-slate-700">
+                  Danh sách {formatNumberVN(deletingForms.length)} phiếu sẽ xóa mềm:
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {deletingForms.map((f) => (
+                    <span
+                      key={f.id}
+                      className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[11px] font-semibold text-[#14539E]"
+                    >
+                      {formatOvertimeFormCodeDisplay(f.form_code)}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-500">Quy mô:</span>
-                <span className="font-medium text-slate-700 tabular-nums">
-                  {formatNumberVN(deletingForm.total_participants)} lượt •{' '}
-                  {formatNumberVN(deletingForm.total_hours)} giờ
-                </span>
-              </div>
-            </div>
+            )}
 
             {/* Lớp bảo vệ xác nhận bắt buộc trước khi xóa */}
             <label className="flex items-start gap-2.5 p-3 rounded-lg border border-red-200/80 bg-red-50/40 cursor-pointer select-none">
@@ -836,11 +1066,23 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 className="mt-0.5 w-4 h-4 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
               />
               <span className="text-xs text-slate-700 leading-snug">
-                Tôi xác nhận muốn xóa phiếu tăng ca{' '}
-                <strong className="font-mono text-slate-900">
-                  {formatOvertimeFormCodeDisplay(deletingForm.form_code)}
-                </strong>{' '}
-                khỏi nhật ký.
+                {deletingForms.length === 1 ? (
+                  <>
+                    Tôi xác nhận muốn xóa phiếu tăng ca{' '}
+                    <strong className="font-mono text-slate-900">
+                      {formatOvertimeFormCodeDisplay(deletingForms[0].form_code)}
+                    </strong>{' '}
+                    khỏi nhật ký.
+                  </>
+                ) : (
+                  <>
+                    Tôi xác nhận muốn xóa{' '}
+                    <strong className="text-slate-900">
+                      {formatNumberVN(deletingForms.length)} phiếu tăng ca
+                    </strong>{' '}
+                    đã chọn khỏi nhật ký.
+                  </>
+                )}
               </span>
             </label>
 
@@ -856,11 +1098,99 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               <button
                 type="button"
                 disabled={isDeleting || !isDeleteConfirmed}
-                onClick={handleConfirmDelete}
+                onClick={() => void handleConfirmDelete()}
                 className="h-9 px-4 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
               >
                 {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 <span>Xác nhận xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Mã SQL Chuẩn hóa RLS Xóa mềm & Realtime trên Supabase */}
+      {isSqlModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mã SQL chuẩn hóa xóa mềm và Realtime Supabase"
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center p-4 no-print"
+        >
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Database className="w-5 h-5 text-[#14539E] shrink-0" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Chuẩn hóa Supabase: Xóa mềm (deleted_at) &amp; Realtime
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Chạy đoạn SQL sau trong SQL Editor trên Supabase để mở quyền cập nhật deleted_at và đồng bộ Realtime
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(false)}
+                aria-label="Đóng hộp thoại SQL"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-3 flex-1 min-h-0">
+              {sqlErrorContext && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800">
+                  {sqlErrorContext}
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-700">
+                  Áp dụng cho <code className="font-mono text-[#14539E]">public.overtime_forms</code> &amp;{' '}
+                  <code className="font-mono text-[#14539E]">public.overtime_form_items</code>:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleCopySql()}
+                  className="h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {sqlCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Đã sao chép SQL!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Sao chép mã SQL</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <pre className="p-4 rounded-xl bg-slate-900 text-blue-200 font-mono text-xs overflow-x-auto leading-relaxed select-all border border-slate-800">
+                <code>{SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL}</code>
+              </pre>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSqlModalOpen(false);
+                  await onRefresh();
+                }}
+                className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold cursor-pointer"
+              >
+                Đã chạy SQL, tải lại dữ liệu
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(false)}
+                className="h-9 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Đóng
               </button>
             </div>
           </div>

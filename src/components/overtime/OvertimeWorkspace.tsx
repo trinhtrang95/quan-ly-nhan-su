@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardList, FilePlus2, Pencil } from 'lucide-react';
 import { DepartmentGroup, Employee } from '../../types/hr';
 import { formatNumberVN } from '../../utils/errorAndSecurityService';
@@ -9,7 +9,8 @@ import {
   OvertimeFormWithItems,
   resolveOvertimeMainDepartment,
   saveOvertimeFormToHistory,
-  softDeleteOvertimeForm,
+  softDeleteOvertimeForms,
+  subscribeToOvertimeRealtime,
   updateOvertimeFormInHistory,
 } from '../../utils/overtimeFormsService';
 import {
@@ -36,9 +37,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   const [activeTab, setActiveTab] = useState<OvertimeTabId>(initialTab);
   const [forms, setForms] = useState<OvertimeFormWithItems[]>([]);
   const [isLoadingForms, setIsLoadingForms] = useState<boolean>(true);
+  const [schemaNeedsMigration, setSchemaNeedsMigration] = useState<boolean>(false);
   const [editingForm, setEditingForm] = useState<OvertimeFormWithItems | null>(
     null
   );
+  const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const knownSubGroups = useMemo(() => {
     const names = new Set<string>();
@@ -51,18 +54,78 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     return Array.from(names);
   }, [groups, employees]);
 
-  const loadForms = useCallback(async () => {
-    setIsLoadingForms(true);
+  const loadForms = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+      setIsLoadingForms(true);
+    }
     try {
-      const { forms: fetched } = await fetchOvertimeForms();
-      setForms(fetched);
+      const res = await fetchOvertimeForms();
+      setForms(res.forms);
+      setSchemaNeedsMigration(Boolean(res.schemaNeedsMigration));
     } finally {
-      setIsLoadingForms(false);
+      if (!silent) {
+        setIsLoadingForms(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadForms();
+  }, [loadForms]);
+
+  // Đăng ký Supabase Realtime (postgres_changes: INSERT, UPDATE, DELETE) cho cả 2 bảng
+  useEffect(() => {
+    const scheduleSilentReload = () => {
+      if (realtimeReloadTimerRef.current) {
+        clearTimeout(realtimeReloadTimerRef.current);
+      }
+      realtimeReloadTimerRef.current = setTimeout(() => {
+        void loadForms({ silent: true });
+      }, 250);
+    };
+
+    const unsubscribe = subscribeToOvertimeRealtime((event) => {
+      if (event.table === 'overtime_forms') {
+        if (event.eventType === 'UPDATE') {
+          const updatedRow = event.payload.new as
+            | { id?: string; deleted_at?: string | null }
+            | undefined;
+          if (updatedRow?.id && updatedRow.deleted_at) {
+            setForms((prev) => prev.filter((f) => f.id !== updatedRow.id));
+            setEditingForm((prev) =>
+              prev && prev.id === updatedRow.id ? null : prev
+            );
+          }
+        } else if (event.eventType === 'DELETE') {
+          const oldRow = event.payload.old as { id?: string } | undefined;
+          if (oldRow?.id) {
+            setForms((prev) => prev.filter((f) => f.id !== oldRow.id));
+            setEditingForm((prev) =>
+              prev && prev.id === oldRow.id ? null : prev
+            );
+          }
+        }
+      }
+      scheduleSilentReload();
+    });
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void loadForms({ silent: true });
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      if (realtimeReloadTimerRef.current) {
+        clearTimeout(realtimeReloadTimerRef.current);
+      }
+      unsubscribe();
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
   }, [loadForms]);
 
   const handleSaveForm = async (payload: CreateOvertimeFormPayload) => {
@@ -113,9 +176,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         employees,
         knownSubGroups,
       });
-      setForms((prev) =>
-        prev.map((f) => (f.id === updated.id ? updated : f))
-      );
+      await loadForms({ silent: true });
       setEditingForm(null);
       onShowToast?.(
         `Đã cập nhật phiếu tăng ca ${formatOvertimeFormCodeDisplay(
@@ -134,7 +195,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       knownSubGroups,
     });
 
-    setForms((prev) => [saved, ...prev.filter((f) => f.id !== saved.id)]);
+    await loadForms({ silent: true });
     onShowToast?.(
       `Đã lưu phiếu tăng ca ${formatOvertimeFormCodeDisplay(
         saved.form_code
@@ -153,12 +214,17 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     setActiveTab('log');
   };
 
-  const handleSoftDelete = async (formId: string) => {
-    await softDeleteOvertimeForm(formId);
-    setForms((prev) => prev.filter((f) => f.id !== formId));
-    if (editingForm?.id === formId) {
+  const handleSoftDeleteForms = async (formIds: string[]) => {
+    const result = await softDeleteOvertimeForms(formIds);
+    if (result.itemsSchemaMissing) {
+      setSchemaNeedsMigration(true);
+    }
+    const deletedSet = new Set(result.deletedIds);
+    if (editingForm && deletedSet.has(editingForm.id)) {
       setEditingForm(null);
     }
+    // Tải lại danh sách trực tiếp từ Supabase (.is('deleted_at', null)), không giữ state local cũ
+    await loadForms({ silent: true });
   };
 
   const activeFormsCount = forms.filter((f) => !f.deleted_at).length;
@@ -204,6 +270,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             onClick={() => {
               setEditingForm(null);
               setActiveTab('log');
+              void loadForms({ silent: true });
             }}
             className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'log'
@@ -253,9 +320,10 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             employees={employees}
             groups={groups}
             isLoading={isLoadingForms}
-            onRefresh={loadForms}
+            schemaNeedsMigration={schemaNeedsMigration}
+            onRefresh={() => loadForms({ silent: false })}
             onEdit={handleStartEditForm}
-            onSoftDelete={handleSoftDelete}
+            onSoftDelete={handleSoftDeleteForms}
             onSwitchToCreate={() => {
               setEditingForm(null);
               setActiveTab('create');

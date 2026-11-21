@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Clock,
   Download,
@@ -16,6 +16,7 @@ import { formatNumberVN } from '../../utils/errorAndSecurityService';
 import {
   fetchOvertimeForms,
   OvertimeFormWithItems,
+  subscribeToOvertimeRealtime,
 } from '../../utils/overtimeFormsService';
 import {
   calculateMonthlyOvertimeReport,
@@ -51,10 +52,11 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
+  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadForms = useCallback(
-    async (notify = false) => {
-      setIsLoading(true);
+    async (notify = false, silent = false) => {
+      if (!silent) setIsLoading(true);
       try {
         const res = await fetchOvertimeForms();
         setForms(res.forms);
@@ -64,14 +66,36 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
           );
         }
       } finally {
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
       }
     },
     [onShowToast]
   );
 
   useEffect(() => {
-    void loadForms(false);
+    void loadForms(false, false);
+  }, [loadForms]);
+
+  useEffect(() => {
+    const scheduleReload = () => {
+      if (realtimeTimerRef.current) {
+        clearTimeout(realtimeTimerRef.current);
+      }
+      realtimeTimerRef.current = setTimeout(() => {
+        void loadForms(false, true);
+      }, 250);
+    };
+
+    const unsubscribe = subscribeToOvertimeRealtime(() => {
+      scheduleReload();
+    });
+
+    return () => {
+      if (realtimeTimerRef.current) {
+        clearTimeout(realtimeTimerRef.current);
+      }
+      unsubscribe();
+    };
   }, [loadForms]);
 
   const yearOptions = useMemo(() => {

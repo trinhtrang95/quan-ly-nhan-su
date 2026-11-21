@@ -1,3 +1,8 @@
+import {
+  createClient,
+  RealtimePostgresChangesPayload,
+  SupabaseClient,
+} from '@supabase/supabase-js';
 import { Employee } from '../types/hr';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabaseService';
 
@@ -148,16 +153,104 @@ interface SupabaseOvertimeFormItemRow {
   start_time: string | null;
   end_time: string | null;
   created_at?: string;
+  deleted_at?: string | null;
 }
 
 export const OVERTIME_FORMS_STORAGE_KEY = 'hr_pro_overtime_forms_v1';
 export const OVERTIME_FORMS_DELETED_KEY = 'hr_pro_overtime_forms_deleted_v1';
 export const OVERTIME_FORMS_UPDATED_KEY = 'hr_pro_overtime_forms_updated_v1';
 
+export const SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL = `-- 1. Bổ sung cột deleted_at cho cả 2 bảng overtime_forms và overtime_form_items
+ALTER TABLE public.overtime_forms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.overtime_form_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+
+-- 2. Chuẩn hóa RLS Policy (cho phép đọc/ghi/cập nhật deleted_at không bị chặn lỗi 42501)
+ALTER TABLE public.overtime_forms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.overtime_form_items ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  pol RECORD;
+BEGIN
+  FOR pol IN
+    SELECT policyname, tablename
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename IN ('overtime_forms', 'overtime_form_items')
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol.policyname, pol.tablename);
+  END LOOP;
+END $$;
+
+CREATE POLICY "Allow public full access on overtime_forms"
+  ON public.overtime_forms
+  FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Allow public full access on overtime_form_items"
+  ON public.overtime_form_items
+  FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
+-- 3. Bật Supabase Realtime (INSERT, UPDATE, DELETE) cho cả 2 bảng
+ALTER TABLE public.overtime_forms REPLICA IDENTITY FULL;
+ALTER TABLE public.overtime_form_items REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'overtime_forms'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.overtime_forms;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'overtime_form_items'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.overtime_form_items;
+  END IF;
+END $$;`;
+
+export class OvertimeSupabaseActionError extends Error {
+  code?: string;
+  needsSqlFix: boolean;
+
+  constructor(message: string, code?: string, needsSqlFix = false) {
+    super(message);
+    this.name = 'OvertimeSupabaseActionError';
+    this.code = code;
+    this.needsSqlFix = needsSqlFix;
+  }
+}
+
+let cachedSupabaseClient: SupabaseClient | null = null;
+
+export function getOvertimeSupabaseClient(): SupabaseClient {
+  if (!cachedSupabaseClient) {
+    cachedSupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    });
+  }
+  return cachedSupabaseClient;
+}
+
 /**
  * Safe Supabase REST client wrapper for the Overtime module.
- * Reuses the app's configured SUPABASE_URL & SUPABASE_ANON_KEY (from env vars or defaults)
- * without requiring external SDK packages that could fail Vite bundling.
+ * Reuses the app's configured SUPABASE_URL & SUPABASE_ANON_KEY (from env vars or defaults).
  */
 export const overtimeSupabase = {
   url: SUPABASE_URL,
@@ -574,7 +667,7 @@ function mapSupabaseItemRow(
     start_time: startTime,
     end_time: endTime,
     total_hours: calculateHoursBetween(startTime, endTime),
-    deleted_at: null,
+    deleted_at: row.deleted_at ?? null,
   };
 }
 
@@ -1221,83 +1314,200 @@ export function buildUpdatedOvertimeForm(
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function clearStaleLocalOvertimeOverrides(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(OVERTIME_FORMS_DELETED_KEY);
+    localStorage.removeItem(OVERTIME_FORMS_UPDATED_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function hydrateOvertimeFormRow(
+  f: SupabaseOvertimeFormRow,
+  formItems: OvertimeFormItemRecord[]
+): OvertimeFormWithItems {
+  const activeItems = formItems.filter((item) => !item.deleted_at);
+  const derivedDates = Array.from(
+    new Set(activeItems.map((i) => i.overtime_date).filter(Boolean))
+  );
+  const computedHours = Number(
+    activeItems.reduce((acc, item) => acc + item.total_hours, 0).toFixed(2)
+  );
+  return {
+    id: f.id,
+    form_code: f.form_code,
+    department: f.department || DEFAULT_OVERTIME_DEPARTMENT,
+    overtime_date: f.overtime_date || derivedDates[0] || '',
+    overtime_dates:
+      derivedDates.length > 0
+        ? derivedDates
+        : f.overtime_date
+          ? [f.overtime_date]
+          : [],
+    total_blocks: Number(f.total_blocks ?? 0),
+    total_participants: Number(f.total_employees ?? activeItems.length),
+    total_hours: Number(f.total_hours ?? computedHours),
+    status: f.status || 'Đã lưu',
+    created_by: f.created_by ?? null,
+    created_at: f.created_at,
+    updated_at: f.updated_at ?? null,
+    deleted_at: f.deleted_at ?? null,
+    items: activeItems,
+  };
+}
+
+function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return (
+    err.code === '42703' ||
+    Boolean(err.message && err.message.toLowerCase().includes('deleted_at'))
+  );
+}
+
 /**
- * Fetches all non-deleted overtime forms with their grouped line items.
- * Queries live Supabase `overtime_forms` + `overtime_form_items` first and
- * seamlessly falls back to localStorage + sample data on network/schema error.
+ * Fetches all non-deleted overtime forms with their active line items directly from Supabase
+ * using `.is('deleted_at', null)` on both `overtime_forms` and `overtime_form_items`.
  */
 export async function fetchOvertimeForms(): Promise<{
   forms: OvertimeFormWithItems[];
   source: 'supabase' | 'local';
+  schemaNeedsMigration?: boolean;
 }> {
+  const client = getOvertimeSupabaseClient();
+  let schemaNeedsMigration = false;
+
   try {
-    const [formsRows, itemRows] = await Promise.all([
-      overtimeSupabase.request<SupabaseOvertimeFormRow[]>(
-        'overtime_forms?select=*&deleted_at=is.null&order=created_at.desc'
-      ),
-      overtimeSupabase.request<SupabaseOvertimeFormItemRow[]>(
-        'overtime_form_items?select=*&order=block_order.asc,item_order.asc'
-      ),
-    ]);
+    const formsRes = await client
+      .from('overtime_forms')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+
+    if (formsRes.error) {
+      throw formsRes.error;
+    }
+
+    let itemsRes = await client
+      .from('overtime_form_items')
+      .select('*')
+      .is('deleted_at', null)
+      .order('block_order', { ascending: true })
+      .order('item_order', { ascending: true });
+
+    if (itemsRes.error && isUndefinedColumnError(itemsRes.error)) {
+      schemaNeedsMigration = true;
+      itemsRes = await client
+        .from('overtime_form_items')
+        .select('*')
+        .order('block_order', { ascending: true })
+        .order('item_order', { ascending: true });
+    }
+
+    if (itemsRes.error) {
+      throw itemsRes.error;
+    }
+
+    const formsRows = (formsRes.data || []) as SupabaseOvertimeFormRow[];
+    const itemRows = (itemsRes.data || []) as SupabaseOvertimeFormItemRow[];
 
     const itemsByForm = new Map<string, OvertimeFormItemRecord[]>();
-    for (const rawItem of itemRows || []) {
+    for (const rawItem of itemRows) {
+      if (rawItem.deleted_at) continue;
       const mapped = mapSupabaseItemRow(rawItem);
+      if (mapped.deleted_at) continue;
       if (!itemsByForm.has(mapped.form_id)) {
         itemsByForm.set(mapped.form_id, []);
       }
       itemsByForm.get(mapped.form_id)!.push(mapped);
     }
 
-    const deletedIds = readDeletedIds();
-    const updatedMap = readLocalUpdatedMap();
-    const hydrated: OvertimeFormWithItems[] = (formsRows || [])
-      .filter((f) => !f.deleted_at && !deletedIds.has(f.id))
-      .map((f) => {
-        if (updatedMap[f.id]) {
-          return updatedMap[f.id];
-        }
-        const formItems = itemsByForm.get(f.id) || [];
-        const derivedDates = Array.from(
-          new Set(formItems.map((i) => i.overtime_date).filter(Boolean))
-        );
-        const computedHours = Number(
-          formItems.reduce((acc, item) => acc + item.total_hours, 0).toFixed(2)
-        );
-        return {
-          id: f.id,
-          form_code: f.form_code,
-          department: f.department || DEFAULT_OVERTIME_DEPARTMENT,
-          overtime_date: f.overtime_date || derivedDates[0] || '',
-          overtime_dates:
-            derivedDates.length > 0
-              ? derivedDates
-              : f.overtime_date
-                ? [f.overtime_date]
-                : [],
-          total_blocks: Number(f.total_blocks ?? 0),
-          total_participants: Number(f.total_employees ?? formItems.length),
-          total_hours: Number(f.total_hours ?? computedHours),
-          status: f.status || 'Đã lưu',
-          created_by: f.created_by ?? null,
-          created_at: f.created_at,
-          updated_at: f.updated_at ?? null,
-          deleted_at: f.deleted_at,
-          items: formItems,
-        };
-      });
+    const hydrated: OvertimeFormWithItems[] = formsRows
+      .filter((f) => !f.deleted_at)
+      .map((f) => hydrateOvertimeFormRow(f, itemsByForm.get(f.id) || []));
 
+    // Supabase is authoritative: clear legacy local delete/edit overrides so all users stay synced
+    clearStaleLocalOvertimeOverrides();
     writeLocalForms(hydrated);
-    return { forms: hydrated, source: 'supabase' };
+    return { forms: hydrated, source: 'supabase', schemaNeedsMigration };
   } catch {
-    const deletedIds = readDeletedIds();
-    const localForms = readLocalForms(true)
-      .filter((f) => !f.deleted_at && !deletedIds.has(f.id))
+    const localForms = readLocalForms(false)
+      .filter((f) => !f.deleted_at)
+      .map((f) => ({
+        ...f,
+        items: (f.items || []).filter((item) => !item.deleted_at),
+      }))
       .sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
-    return { forms: localForms, source: 'local' };
+    return { forms: localForms, source: 'local', schemaNeedsMigration };
+  }
+}
+
+/**
+ * Fetches a single active overtime form and its active line items directly from Supabase
+ * with `.is('deleted_at', null)` on both `overtime_forms` and `overtime_form_items`.
+ * Returns `null` if the form has been soft-deleted or does not exist.
+ */
+export async function fetchOvertimeFormById(
+  formId: string
+): Promise<OvertimeFormWithItems | null> {
+  const client = getOvertimeSupabaseClient();
+  const cleanId = (formId || '').trim();
+  if (!cleanId) return null;
+
+  try {
+    const formRes = await client
+      .from('overtime_forms')
+      .select('*')
+      .eq('id', cleanId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (formRes.error) throw formRes.error;
+    if (!formRes.data || (formRes.data as SupabaseOvertimeFormRow).deleted_at) {
+      return null;
+    }
+
+    let itemsRes = await client
+      .from('overtime_form_items')
+      .select('*')
+      .eq('form_id', cleanId)
+      .is('deleted_at', null)
+      .order('block_order', { ascending: true })
+      .order('item_order', { ascending: true });
+
+    if (itemsRes.error && isUndefinedColumnError(itemsRes.error)) {
+      itemsRes = await client
+        .from('overtime_form_items')
+        .select('*')
+        .eq('form_id', cleanId)
+        .order('block_order', { ascending: true })
+        .order('item_order', { ascending: true });
+    }
+
+    if (itemsRes.error) throw itemsRes.error;
+
+    const mappedItems = ((itemsRes.data || []) as SupabaseOvertimeFormItemRow[])
+      .filter((row) => !row.deleted_at)
+      .map(mapSupabaseItemRow)
+      .filter((item) => !item.deleted_at);
+
+    return hydrateOvertimeFormRow(
+      formRes.data as SupabaseOvertimeFormRow,
+      mappedItems
+    );
+  } catch {
+    const localMatch = readLocalForms(false).find(
+      (f) => f.id === cleanId && !f.deleted_at
+    );
+    if (!localMatch) return null;
+    return {
+      ...localMatch,
+      items: (localMatch.items || []).filter((item) => !item.deleted_at),
+    };
   }
 }
 
@@ -1308,6 +1518,7 @@ export async function fetchOvertimeForms(): Promise<{
 export async function saveOvertimeFormToHistory(
   input: SaveOvertimeFormInput
 ): Promise<OvertimeFormWithItems> {
+  const client = getOvertimeSupabaseClient();
   const existingLocal = readLocalForms(false);
   const fallbackDate =
     input.blocks[0]?.overtimeDate || input.overtimeDate || getLocalTodayIsoDate();
@@ -1323,6 +1534,23 @@ export async function saveOvertimeFormToHistory(
     input.knownSubGroups
   );
 
+  let activeFormCodes = existingLocal
+    .filter((f) => !f.deleted_at)
+    .map((f) => f.form_code);
+  try {
+    const activeCodesRes = await client
+      .from('overtime_forms')
+      .select('form_code')
+      .is('deleted_at', null);
+    if (!activeCodesRes.error && Array.isArray(activeCodesRes.data)) {
+      activeFormCodes = activeCodesRes.data
+        .map((r) => String((r as { form_code?: string }).form_code || ''))
+        .filter(Boolean);
+    }
+  } catch {
+    // Fallback to active local codes
+  }
+
   const formId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -1330,7 +1558,7 @@ export async function saveOvertimeFormToHistory(
 
   const formCode = generateOvertimeFormCode(
     representativeDate,
-    existingLocal.map((f) => f.form_code)
+    activeFormCodes
   );
 
   const items = buildOvertimeFormItemsFromBlocks(
@@ -1365,27 +1593,18 @@ export async function saveOvertimeFormToHistory(
   try {
     // Free canonical form_code if held by a previously soft-deleted row in Supabase
     try {
-      await overtimeSupabase.request<void>(
-        `overtime_forms?form_code=eq.${encodeURIComponent(
-          newForm.form_code
-        )}&deleted_at=not.is.null`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({
-            form_code: `${newForm.form_code}-DEL-${Date.now()}`,
-          }),
-        }
-      );
+      await client
+        .from('overtime_forms')
+        .update({ form_code: `${newForm.form_code}-DEL-${Date.now()}` })
+        .eq('form_code', newForm.form_code)
+        .not('deleted_at', 'is', null);
     } catch {
       // Non-fatal: proceed to insert
     }
 
-    const insertedForms = await overtimeSupabase.request<
-      SupabaseOvertimeFormRow[]
-    >('overtime_forms?select=*', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
+    const insertedRes = await client
+      .from('overtime_forms')
+      .insert({
         id: newForm.id,
         form_code: newForm.form_code,
         department: newForm.department,
@@ -1395,9 +1614,12 @@ export async function saveOvertimeFormToHistory(
         total_hours: newForm.total_hours,
         status: newForm.status,
         created_by: newForm.created_by,
-      }),
-    });
+      })
+      .select('*');
 
+    if (insertedRes.error) throw insertedRes.error;
+
+    const insertedForms = (insertedRes.data || []) as SupabaseOvertimeFormRow[];
     const persistedFormId = insertedForms?.[0]?.id || newForm.id;
     newForm.id = persistedFormId;
     if (insertedForms?.[0]?.created_at) {
@@ -1405,12 +1627,9 @@ export async function saveOvertimeFormToHistory(
     }
 
     if (items.length > 0) {
-      const insertedItems = await overtimeSupabase.request<
-        SupabaseOvertimeFormItemRow[]
-      >('overtime_form_items?select=*', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(
+      const insertedItemsRes = await client
+        .from('overtime_form_items')
+        .insert(
           items.map((item) => ({
             form_id: persistedFormId,
             overtime_date: item.overtime_date,
@@ -1427,11 +1646,13 @@ export async function saveOvertimeFormToHistory(
             start_time: item.start_time,
             end_time: item.end_time,
           }))
-        ),
-      });
+        )
+        .select('*');
 
-      if (insertedItems && insertedItems.length > 0) {
-        newForm.items = insertedItems.map(mapSupabaseItemRow);
+      if (!insertedItemsRes.error && insertedItemsRes.data?.length) {
+        newForm.items = (
+          insertedItemsRes.data as SupabaseOvertimeFormItemRow[]
+        ).map(mapSupabaseItemRow);
       }
     }
   } catch {
@@ -1448,46 +1669,56 @@ export async function saveOvertimeFormToHistory(
 }
 
 /**
- * Updates an existing overtime form header and replaces its items in Supabase,
- * with durable local cache synchronization if offline or RLS-restricted.
+ * Updates an existing overtime form header and replaces its active items in Supabase
+ * (soft-deleting previous active items when `deleted_at` column is present).
  */
 export async function updateOvertimeFormInHistory(
   existingForm: OvertimeFormWithItems,
   input: SaveOvertimeFormInput
 ): Promise<OvertimeFormWithItems> {
+  const client = getOvertimeSupabaseClient();
   const updatedForm = buildUpdatedOvertimeForm(existingForm, input);
+  const nowIso = updatedForm.updated_at || new Date().toISOString();
 
   let syncedToSupabase = false;
   try {
-    await overtimeSupabase.request<void>(
-      `overtime_forms?id=eq.${encodeURIComponent(existingForm.id)}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          department: updatedForm.department,
-          overtime_date: updatedForm.overtime_date,
-          total_blocks: updatedForm.total_blocks,
-          total_employees: updatedForm.total_participants,
-          total_hours: updatedForm.total_hours,
-          updated_at: updatedForm.updated_at || new Date().toISOString(),
-        }),
-      }
-    );
+    const updateFormRes = await client
+      .from('overtime_forms')
+      .update({
+        department: updatedForm.department,
+        overtime_date: updatedForm.overtime_date,
+        total_blocks: updatedForm.total_blocks,
+        total_employees: updatedForm.total_participants,
+        total_hours: updatedForm.total_hours,
+        updated_at: nowIso,
+      })
+      .eq('id', existingForm.id)
+      .is('deleted_at', null);
 
-    await overtimeSupabase.request<void>(
-      `overtime_form_items?form_id=eq.${encodeURIComponent(existingForm.id)}`,
-      {
-        method: 'DELETE',
+    if (updateFormRes.error) throw updateFormRes.error;
+
+    const softDeleteItemsRes = await client
+      .from('overtime_form_items')
+      .update({ deleted_at: nowIso })
+      .eq('form_id', existingForm.id)
+      .is('deleted_at', null);
+
+    if (softDeleteItemsRes.error) {
+      if (isUndefinedColumnError(softDeleteItemsRes.error)) {
+        const legacyDeleteRes = await client
+          .from('overtime_form_items')
+          .delete()
+          .eq('form_id', existingForm.id);
+        if (legacyDeleteRes.error) throw legacyDeleteRes.error;
+      } else {
+        throw softDeleteItemsRes.error;
       }
-    );
+    }
 
     if (updatedForm.items.length > 0) {
-      const insertedItems = await overtimeSupabase.request<
-        SupabaseOvertimeFormItemRow[]
-      >('overtime_form_items?select=*', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(
+      const insertedItemsRes = await client
+        .from('overtime_form_items')
+        .insert(
           updatedForm.items.map((item) => ({
             form_id: existingForm.id,
             overtime_date: item.overtime_date,
@@ -1504,11 +1735,14 @@ export async function updateOvertimeFormInHistory(
             start_time: item.start_time,
             end_time: item.end_time,
           }))
-        ),
-      });
+        )
+        .select('*');
 
-      if (insertedItems && insertedItems.length > 0) {
-        updatedForm.items = insertedItems.map(mapSupabaseItemRow);
+      if (insertedItemsRes.error) throw insertedItemsRes.error;
+      if (insertedItemsRes.data && insertedItemsRes.data.length > 0) {
+        updatedForm.items = (
+          insertedItemsRes.data as SupabaseOvertimeFormItemRow[]
+        ).map(mapSupabaseItemRow);
       }
     }
     syncedToSupabase = true;
@@ -1532,35 +1766,187 @@ export async function updateOvertimeFormInHistory(
   return updatedForm;
 }
 
+export interface SoftDeleteOvertimeResult {
+  deletedIds: string[];
+  deletedAt: string;
+  itemsSchemaMissing: boolean;
+}
+
 /**
- * Soft-deletes an overtime form by setting `deleted_at = NOW()` on `overtime_forms`,
- * plus updating local cache so offline environments stay consistent.
+ * Soft-deletes one or multiple overtime forms by setting `deleted_at = new Date().toISOString()`
+ * on BOTH `overtime_forms` and related `overtime_form_items` rows (never hard-deleting).
+ * Throws `OvertimeSupabaseActionError` if Supabase RLS/permissions reject the update so
+ * callers never hide unsaved deletions only in local state.
  */
-export async function softDeleteOvertimeForm(formId: string): Promise<void> {
+export async function softDeleteOvertimeForms(
+  formIds: string[]
+): Promise<SoftDeleteOvertimeResult> {
+  const cleanIds = Array.from(
+    new Set((formIds || []).map((id) => (id || '').trim()).filter(Boolean))
+  );
   const deletedAt = new Date().toISOString();
 
-  try {
-    await overtimeSupabase.request<void>(
-      `overtime_forms?id=eq.${encodeURIComponent(formId)}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ deleted_at: deletedAt }),
-      }
-    );
-  } catch {
-    // Fallback cleanly to local soft delete
+  if (cleanIds.length === 0) {
+    return { deletedIds: [], deletedAt, itemsSchemaMissing: false };
   }
 
-  markIdDeletedLocally(formId);
-  clearLocalUpdatedForm(formId);
-  const localForms = readLocalForms(false).map((form) =>
-    form.id === formId
-      ? {
-          ...form,
-          deleted_at: deletedAt,
-          items: form.items.map((item) => ({ ...item, deleted_at: deletedAt })),
-        }
-      : form
-  );
+  const client = getOvertimeSupabaseClient();
+  let itemsSchemaMissing = false;
+
+  // 1. Soft-delete child records in overtime_form_items first
+  const itemsUpdateRes = await client
+    .from('overtime_form_items')
+    .update({ deleted_at: deletedAt })
+    .in('form_id', cleanIds)
+    .is('deleted_at', null);
+
+  if (itemsUpdateRes.error) {
+    if (isUndefinedColumnError(itemsUpdateRes.error)) {
+      itemsSchemaMissing = true;
+    } else {
+      const code = itemsUpdateRes.error.code;
+      const isRls =
+        code === '42501' ||
+        itemsUpdateRes.error.message.toLowerCase().includes('row-level security');
+      throw new OvertimeSupabaseActionError(
+        isRls
+          ? 'Supabase RLS đang chặn cập nhật deleted_at trên bảng overtime_form_items. Vui lòng chạy mã SQL chuẩn hóa trên Supabase.'
+          : `Không thể xóa mềm chi tiết phiếu trên Supabase: ${itemsUpdateRes.error.message}`,
+        code,
+        isRls
+      );
+    }
+  }
+
+  // 2. Soft-delete parent records in overtime_forms
+  const formsUpdateRes = await client
+    .from('overtime_forms')
+    .update({ deleted_at: deletedAt, updated_at: deletedAt })
+    .in('id', cleanIds)
+    .is('deleted_at', null)
+    .select('id, deleted_at');
+
+  if (formsUpdateRes.error) {
+    const code = formsUpdateRes.error.code;
+    const isRls =
+      code === '42501' ||
+      formsUpdateRes.error.message.toLowerCase().includes('row-level security');
+    throw new OvertimeSupabaseActionError(
+      isRls
+        ? 'Supabase RLS đang chặn cập nhật deleted_at trên bảng overtime_forms (lỗi 42501). Vui lòng chạy mã SQL chuẩn hóa quyền UPDATE/Realtime trên Supabase.'
+        : `Không thể xóa mềm phiếu trên Supabase: ${formsUpdateRes.error.message}`,
+      code,
+      isRls
+    );
+  }
+
+  const updatedRows = (formsUpdateRes.data || []) as Array<{
+    id: string;
+    deleted_at: string | null;
+  }>;
+  if (updatedRows.length === 0) {
+    // Verify whether rows are still active in Supabase (meaning RLS silently blocked update)
+    const remainingRes = await client
+      .from('overtime_forms')
+      .select('id')
+      .in('id', cleanIds)
+      .is('deleted_at', null);
+    if (!remainingRes.error && (remainingRes.data || []).length > 0) {
+      throw new OvertimeSupabaseActionError(
+        'Supabase không cho phép cập nhật deleted_at trên overtime_forms (RLS policy). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.',
+        '42501',
+        true
+      );
+    }
+  }
+
+  for (const id of cleanIds) {
+    clearLocalUpdatedForm(id);
+  }
+  const cleanSet = new Set(cleanIds);
+  const localForms = readLocalForms(false).filter((form) => !cleanSet.has(form.id));
   writeLocalForms(localForms);
+
+  return {
+    deletedIds: cleanIds,
+    deletedAt,
+    itemsSchemaMissing,
+  };
+}
+
+/**
+ * Convenience wrapper to soft-delete a single overtime form (`overtime_forms` + `overtime_form_items`).
+ */
+export async function softDeleteOvertimeForm(
+  formId: string
+): Promise<SoftDeleteOvertimeResult> {
+  return softDeleteOvertimeForms([formId]);
+}
+
+export interface OvertimeRealtimeChangeEvent {
+  table: 'overtime_forms' | 'overtime_form_items';
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  payload: RealtimePostgresChangesPayload<Record<string, unknown>>;
+}
+
+/**
+ * Subscribes to Supabase Realtime `postgres_changes` (INSERT, UPDATE, DELETE)
+ * on both `overtime_forms` and `overtime_form_items` so all connected users/tabs
+ * automatically sync whenever a form is created, updated, or soft-deleted.
+ */
+export function subscribeToOvertimeRealtime(
+  onChange: (event: OvertimeRealtimeChangeEvent) => void,
+  onStatusChange?: (status: string) => void
+): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const client = getOvertimeSupabaseClient();
+  const channelName = `overtime-realtime-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+
+  const channel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'overtime_forms' },
+      (payload) => onChange({ table: 'overtime_forms', eventType: 'INSERT', payload })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'overtime_forms' },
+      (payload) => onChange({ table: 'overtime_forms', eventType: 'UPDATE', payload })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'overtime_forms' },
+      (payload) => onChange({ table: 'overtime_forms', eventType: 'DELETE', payload })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'overtime_form_items' },
+      (payload) =>
+        onChange({ table: 'overtime_form_items', eventType: 'INSERT', payload })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'overtime_form_items' },
+      (payload) =>
+        onChange({ table: 'overtime_form_items', eventType: 'UPDATE', payload })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'overtime_form_items' },
+      (payload) =>
+        onChange({ table: 'overtime_form_items', eventType: 'DELETE', payload })
+    )
+    .subscribe((status) => {
+      onStatusChange?.(status);
+    });
+
+  return () => {
+    void client.removeChannel(channel);
+  };
 }
