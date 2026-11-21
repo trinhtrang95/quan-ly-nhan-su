@@ -1041,7 +1041,7 @@ export function resolveDepartmentLabel(
 
 /**
  * Pure helper: formats the bilingual TV-PSGC2022 department header line.
- * Always keeps "Bộ phận Kỹ thuật / 부서: 기술" for Bộ phận Kỹ thuật and its sub-groups,
+ * Always keeps "Bộ phận 부서: Kỹ Thuật 기술" for Bộ phận Kỹ thuật and its sub-groups,
  * while preserving explicitly configured distinct top-level departments.
  */
 export function formatOvertimeDepartmentHeaderLabel(
@@ -1050,7 +1050,7 @@ export function formatOvertimeDepartmentHeaderLabel(
 ): string {
   const mainDept = resolveOvertimeMainDepartment(department, knownSubGroups);
   if (mainDept === DEFAULT_OVERTIME_DEPARTMENT) {
-    return 'Bộ phận Kỹ thuật / 부서: 기술';
+    return 'Bộ phận 부서: Kỹ Thuật 기술';
   }
   if (/^bộ phận\b/i.test(mainDept)) {
     return `${mainDept} / 부서`;

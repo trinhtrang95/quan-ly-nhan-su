@@ -214,10 +214,7 @@ export class OvertimeExportService {
       worksheet.getRow(currentRowIndex).height = dateIdx === 0 ? 20 : 24;
       worksheet.mergeCells(`A${currentRowIndex}:D${currentRowIndex}`);
       const deptCell = worksheet.getCell(`A${currentRowIndex}`);
-      deptCell.value =
-        dateIdx === 0
-          ? formatDepartmentHeaderLabel(department, allKnownSubGroups)
-          : '';
+      deptCell.value = formatDepartmentHeaderLabel(department, allKnownSubGroups);
       deptCell.font = { name: FONT_NAME, size: 11, bold: false };
       deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
 

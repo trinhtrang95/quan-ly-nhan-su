@@ -959,12 +959,10 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
                               }`}
                             >
-                              {dateIdx === 0
-                                ? formatDepartmentHeaderLabel(
-                                    getDisplayDepartment(viewingForm.department),
-                                    knownSubGroups
-                                  )
-                                : ''}
+                              {formatDepartmentHeaderLabel(
+                                getDisplayDepartment(viewingForm.department),
+                                knownSubGroups
+                              )}
                             </td>
                             <td
                               colSpan={3}

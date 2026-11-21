@@ -589,15 +589,15 @@ describe('overtimeFormsService pure logic', () => {
     // TV-PSGC2022 header label & Excel header formatting
     assert.equal(
       formatOvertimeDepartmentHeaderLabel('Bộ phận Kỹ thuật', knownSubGroups),
-      'Bộ phận Kỹ thuật / 부서: 기술'
+      'Bộ phận 부서: Kỹ Thuật 기술'
     );
     assert.equal(
       formatOvertimeDepartmentHeaderLabel('IOT', knownSubGroups),
-      'Bộ phận Kỹ thuật / 부서: 기술'
+      'Bộ phận 부서: Kỹ Thuật 기술'
     );
     assert.equal(
       formatOvertimeDepartmentHeaderLabel('ALL', knownSubGroups),
-      'Bộ phận Kỹ thuật / 부서: 기술'
+      'Bộ phận 부서: Kỹ Thuật 기술'
     );
     assert.equal(
       formatOvertimeDepartmentHeaderLabel('Sản Xuất', knownSubGroups),

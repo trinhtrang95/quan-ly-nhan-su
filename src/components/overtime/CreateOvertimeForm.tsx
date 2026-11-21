@@ -1620,7 +1620,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                           data-testid={dateIdx === 0 ? 'tv-psgc-department-header' : undefined}
                           className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'}`}
                         >
-                          {dateIdx === 0 ? formatDepartmentHeaderLabel(formDepartment, departmentOptions) : ''}
+                          {formatDepartmentHeaderLabel(formDepartment, departmentOptions)}
                         </td>
                         <td colSpan={4} className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'}`}>
                           {dateGroup.formattedDate}
