@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  BookmarkPlus,
-  BookOpen,
   Calendar,
   Check,
   CheckCircle2,
@@ -16,7 +14,6 @@ import {
   Pencil,
   Plus,
   Search,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';  
@@ -29,7 +26,6 @@ import {
 import {
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
-  findActiveFormsByDate,
   formatOvertimeFormCodeDisplay,
   getLocalTodayIsoDate,
   OvertimeFormWithItems,
@@ -90,14 +86,14 @@ export interface CreateOvertimeFormProps {
 }
 
 class OvertimeFormService {
-  static createEmptyBlock(defaultDate = '2026-11-16'): OvertimeTaskBlock {
+  static createEmptyBlock(defaultDate = getLocalTodayIsoDate()): OvertimeTaskBlock {
     return {
       id: `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       overtimeDate: defaultDate,
       reasonVi: '',
       reasonKr: '',
       startTime: '16:10',
-      endTime: '20:10',
+      endTime: '18:10',
       selectedEmployeeIds: [],
       participants: [],
       isTranslating: false,
@@ -186,8 +182,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     return localStorage.getItem(`${DRAFT_STORAGE_KEY}_group_filter`) || 'ALL';
   });
   const [overtimeDate, setOvertimeDate] = useState<string>(() => {
-    if (editingForm) return editingForm.overtime_date || initialDate;
-    return localStorage.getItem(`${DRAFT_STORAGE_KEY}_date`) || initialDate;
+    if (editingForm) return editingForm.overtime_date || getLocalTodayIsoDate();
+    return getLocalTodayIsoDate();
   });
   const [previewData, setPreviewData] = useState<OvertimeTaskBlock[]>(() => {
     if (editingForm) {
@@ -202,7 +198,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
 
   const [currentStartTime, setCurrentStartTime] = useState<string>('16:10');
-  const [currentEndTime, setCurrentEndTime] = useState<string>('20:10');
+  const [currentEndTime, setCurrentEndTime] = useState<string>('18:10');
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
@@ -387,12 +383,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   const representativeOvertimeDate = dateConflictEval.representativeDate;
 
-  // Cảnh báo sớm ngay khi chọn ngày làm thêm đã có phiếu trong Nhật ký
-  const selectedDateExistingForms = useMemo(
-    () => findActiveFormsByDate(existingForms, overtimeDate, editingForm?.id ?? null),
-    [existingForms, overtimeDate, editingForm?.id]
-  );
-
   const uniqueConflictCodes = useMemo(
     () =>
       Array.from(
@@ -522,9 +512,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     const block = previewData[index];
     if (!block) return;
     setEditingBlockId(block.id);
-    setOvertimeDate(block.overtimeDate || initialDate);
+    setOvertimeDate(block.overtimeDate || getLocalTodayIsoDate());
     setCurrentStartTime(block.startTime || '16:10');
-    setCurrentEndTime(block.endTime || '20:10');
+    setCurrentEndTime(block.endTime || '18:10');
     setCurrentSelectedEmployeeIds([...block.selectedEmployeeIds]);
     const nextCustom: Record<string, { startTime: string; endTime: string }> = {};
     for (const p of block.participants || []) {
@@ -562,7 +552,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     }
 
     const normalizedStart = OvertimeFormService.normalize24hTime(currentStartTime, '16:10');
-    const normalizedEnd = OvertimeFormService.normalize24hTime(currentEndTime, '20:10');
+    const normalizedEnd = OvertimeFormService.normalize24hTime(currentEndTime, '18:10');
     setCurrentStartTime(normalizedStart);
     setCurrentEndTime(normalizedEnd);
 
@@ -589,7 +579,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
     const newBlock: OvertimeTaskBlock = {
       id: editingBlockId || `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      overtimeDate: overtimeDate || '2026-11-16',
+      overtimeDate: overtimeDate || getLocalTodayIsoDate(),
       reasonVi: cleanReasonVi,
       reasonKr: finalReasonKr.trim(),
       startTime: normalizedStart,
@@ -723,7 +713,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               startTime: customTimes[id]?.startTime ? OvertimeFormService.normalize24hTime(customTimes[id].startTime, currentStartTime) : currentStartTime,
               endTime: customTimes[id]?.endTime ? OvertimeFormService.normalize24hTime(customTimes[id].endTime, currentEndTime) : currentEndTime,
             }))
-          : [{ employeeId: '__EMPTY_PARTICIPANT__', startTime: currentStartTime || '16:10', endTime: currentEndTime || '20:10' }];
+          : [{ employeeId: '__EMPTY_PARTICIPANT__', startTime: currentStartTime || '16:10', endTime: currentEndTime || '18:10' }];
 
       const combinedReason = buildCombinedReasonText(currentReasonVi || 'Trực sản xuất', currentReasonKr || '생산 당직');
       return [{
@@ -805,22 +795,16 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               <span>Hủy sửa</span>
             </button>
           ) : (
-            <span className="text-xs font-mono font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-[#14539E] border border-blue-200 shrink-0 whitespace-nowrap">
-              TV-PSGC2022
+            <span
+              data-testid="overtime-main-department-label"
+              className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-[#14539E] border border-blue-200 shrink-0 whitespace-nowrap"
+            >
+              {formDepartment}
             </span>
           )}
         </div>
 
         <div className="p-3.5 sm:p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
-          {/* BỘ PHẬN CHÍNH CỐ ĐỊNH CỦA PHIẾU */}
-          <div
-            data-testid="overtime-main-department-label"
-            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px]"
-          >
-            <span className="text-slate-500 font-medium">Bộ phận phiếu:</span>
-            <span className="font-bold text-[#14539E] truncate">{formDepartment}</span>
-          </div>
-
           {/* HÀNG 1 */}
           <div className="grid grid-cols-2 gap-2.5">
             <div>
@@ -852,49 +836,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   type="date"
                   value={overtimeDate}
                   onChange={(e) => setOvertimeDate(e.target.value)}
-                  className={`w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border bg-white focus:outline-none cursor-pointer ${
-                    selectedDateExistingForms.length > 0
-                      ? 'border-amber-400 focus:border-red-500'
-                      : 'border-slate-200 focus:border-[#14539E]'
-                  }`}
+                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
                 />
               </div>
             </div>
           </div>
-
-          {selectedDateExistingForms.length > 0 && (
-            <div
-              data-testid="overtime-date-input-notice"
-              className="rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-1.5 text-[11px] text-amber-900 flex items-start justify-between gap-2 leading-snug"
-            >
-              <div className="flex items-start gap-1.5 min-w-0">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Ngày{' '}
-                  <strong className="font-mono">
-                    {formatDateToFormStyle(overtimeDate)}
-                  </strong>{' '}
-                  đã có phiếu{' '}
-                  <strong className="font-mono">
-                    {formatOvertimeFormCodeDisplay(
-                      selectedDateExistingForms[0].form_code
-                    )}
-                  </strong>
-                  . Phiếu 1 ngày sẽ bị chặn lưu (chỉ lưu được nếu sửa phiếu cũ hoặc
-                  gộp ≥ 2 ngày).
-                </span>
-              </div>
-              {onOpenExistingForm && (
-                <button
-                  type="button"
-                  onClick={() => onOpenExistingForm(selectedDateExistingForms[0])}
-                  className="text-[10px] font-semibold text-[#14539E] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  Sửa phiếu cũ
-                </button>
-              )}
-            </div>
-          )}
 
           {/* HÀNG 2 */}
           <div className="grid grid-cols-2 gap-2.5">
@@ -924,17 +870,17 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   inputMode="numeric"
                   maxLength={5}
                   list="overtime-24h-slots"
-                  placeholder="20:10"
+                  placeholder="18:10"
                   value={currentEndTime}
                   onChange={(e) => setCurrentEndTime(OvertimeFormService.sanitize24hTimeInput(e.target.value))}
-                  onBlur={() => setCurrentEndTime((prev) => OvertimeFormService.normalize24hTime(prev, '20:10'))}
+                  onBlur={() => setCurrentEndTime((prev) => OvertimeFormService.normalize24hTime(prev, '18:10'))}
                   className="w-full h-9 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
                 />
               </div>
             </div>
             <datalist id="overtime-24h-slots">
               <option value="07:00" /><option value="08:00" /><option value="12:00" /><option value="16:10" /><option value="17:00" />
-              <option value="18:30" /><option value="20:00" /><option value="20:10" /><option value="20:30" /><option value="21:30" />
+              <option value="18:10" /><option value="18:30" /><option value="20:00" /><option value="20:10" /><option value="20:30" /><option value="21:30" />
             </datalist>
           </div>
 
@@ -1277,100 +1223,54 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             )}
           </div>
 
-          {/* HÀNG 4: TỪ ĐIỂN MẪU & LÝ DO VIỆT - HÀN */}
+          {/* HÀNG 4: LÝ DO TĂNG CA (VIỆT - HÀN) */}
           <div className="space-y-2">
             <div>
-              <label
-                htmlFor="overtime-glossary-select"
-                className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 mb-1"
-              >
-                <BookOpen className="w-3 h-3 text-[#14539E]" />
-                <span>Mẫu lý do đã lưu ({glossaryEntries.length})</span>
-              </label>
-              <select
-                id="overtime-glossary-select"
-                value=""
-                onChange={(e) => handleSelectGlossaryTemplate(e.target.value)}
-                aria-label="Mẫu lý do đã lưu"
-                className="w-full h-8 px-2 text-xs font-medium text-slate-700 rounded-lg border border-slate-200 bg-slate-50/70 hover:border-slate-300 focus:outline-none focus:border-[#14539E] focus:bg-white cursor-pointer"
-              >
-                <option value="">-- Chọn nhanh mẫu câu Việt - Hàn --</option>
-                {glossaryEntries.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.reasonVi} — {item.reasonKr}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label
+                  htmlFor="overtime-reason-vi"
+                  className="block text-[11px] font-semibold text-slate-600"
+                >
+                  Lý do (Tiếng Việt)
+                </label>
+                {isAutoTranslating && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Đang dịch...</span>
+                  </span>
+                )}
+              </div>
+              <input
+                type="text"
+                id="overtime-reason-vi"
+                value={currentReasonVi}
+                onChange={(e) => setCurrentReasonVi(e.target.value)}
+                placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp..."
+                className="w-full h-9 px-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+              />
             </div>
 
-            <div className="flex items-center justify-between gap-2">
-              <label
-                htmlFor="overtime-reason-vi"
-                className="block text-[11px] font-semibold text-slate-600"
-              >
-                Lý do (Tiếng Việt)
-              </label>
-              {isAutoTranslating && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>Đang dịch...</span>
-                </span>
-              )}
-            </div>
-            <textarea
-              id="overtime-reason-vi"
-              rows={2}
-              value={currentReasonVi}
-              onChange={(e) => setCurrentReasonVi(e.target.value)}
-              placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp..."
-              className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
-            />
-
-            <div className="flex items-center justify-between gap-2 pt-0.5">
+            <div className="flex items-center gap-2">
               <label
                 htmlFor="overtime-reason-kr"
-                className="block text-[11px] font-semibold text-slate-600 truncate"
+                className="text-[11px] font-semibold text-slate-600 shrink-0 whitespace-nowrap min-w-[105px]"
               >
-                Lý do (Tiếng Hàn)
+                Lý do (Tiếng Hàn):
               </label>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  disabled={isAutoTranslating || !currentReasonVi.trim()}
-                  onClick={handleSuggestTranslation}
-                  className="h-6 px-2 rounded-md border border-[#14539E]/30 bg-blue-50/70 hover:bg-[#14539E] hover:text-white text-[#14539E] text-[10px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
-                  title="Dịch gợi ý theo ngữ cảnh làm thêm giờ nhà máy"
-                >
-                  {isAutoTranslating ? (
-                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-2.5 h-2.5" />
-                  )}
-                  <span>Dịch gợi ý</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!currentReasonVi.trim() || !currentReasonKr.trim()}
-                  onClick={handleSaveGlossaryTemplate}
-                  className="h-6 px-2 rounded-md border border-slate-200 bg-white hover:border-[#14539E] hover:text-[#14539E] text-slate-600 text-[10px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
-                  title="Lưu cặp Việt - Hàn hiện tại vào từ điển nội bộ"
-                >
-                  <BookmarkPlus className="w-2.5 h-2.5" />
-                  <span>+ Lưu mẫu</span>
-                </button>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  id="overtime-reason-kr"
+                  value={currentReasonKr}
+                  onChange={(e) => {
+                    setCurrentReasonKr(e.target.value);
+                    setIsReasonKrManuallyEdited(true);
+                  }}
+                  placeholder="생산 당직 (Tự động điền theo từ điển)..."
+                  className="w-full h-8 px-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+                />
               </div>
             </div>
-            <textarea
-              id="overtime-reason-kr"
-              rows={2}
-              value={currentReasonKr}
-              onChange={(e) => {
-                setCurrentReasonKr(e.target.value);
-                setIsReasonKrManuallyEdited(true);
-              }}
-              placeholder="생산 당직 (Tự động điền từ từ điển hoặc bấm Dịch gợi ý)..."
-              className="w-full p-2 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
-            />
           </div>
 
         </div>
@@ -1449,106 +1349,100 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
       {/* CỘT PHẢI (2/3) - A4 PREVIEW */}
       <div className="w-full lg:w-2/3 bg-slate-100 rounded-2xl border border-slate-200 shadow-inner flex flex-col lg:h-full min-h-0 overflow-hidden relative">
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 flex flex-col items-center justify-start">
-          <div style={{ fontFamily: "'Times New Roman', 'Malgun Gothic', Arial, sans-serif" }} className="bg-white shadow-2xl p-6 sm:p-8 w-full max-w-[794px] min-h-[1123px] shrink-0 mx-auto text-black rounded-sm space-y-4 flex flex-col">
-            <div className="flex items-center justify-between text-xs mb-2">
-              <span>Transon Viet nam Co., Ltd</span><span className="pr-12">Biểu mẫu số: TV-PSGC2022</span>
-            </div>
-
-            <div className="flex items-start justify-between gap-4 mb-2">
-              <div className="pt-3">
-                <div className="text-lg font-bold leading-snug">PHIẾU ĐỀ NGHỊ LÀM THÊM</div>
-                <div className="text-base font-bold leading-snug">잔업. 특근 신청서</div>
-                <div
-                  data-testid="tv-psgc-header-date"
-                  className="text-[11px] mt-1 font-normal text-black"
-                >
-                  Ngày phiếu / 작성일:{' '}
-                  <span className="font-bold">
-                    {formatDateToFormStyle(representativeOvertimeDate)}
-                  </span>
-                </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 flex flex-col items-center justify-start">
+          <div style={{ fontFamily: "'Times New Roman', 'Malgun Gothic', Arial, sans-serif" }} className="bg-white shadow-2xl p-5 sm:p-6 w-full max-w-[794px] min-h-[1123px] shrink-0 mx-auto text-black rounded-sm space-y-3 flex flex-col justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span>Transon Viet nam Co., Ltd</span><span className="pr-12">Biểu mẫu số: TV-PSGC2022</span>
               </div>
-              <table className="border-collapse border border-black text-[11px] text-center">
-                <thead>
-                  <tr>
-                    <th className="border border-black px-2 py-0.5 font-normal">결</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">작성</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">검사</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">검사</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">검사</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">승인</th>
-                  </tr>
-                  <tr>
-                    <th className="border border-black px-2 py-0.5 font-normal">xác</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">Người lập</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">Kiểm tra</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">Kiểm tra</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">Kiểm tra</th>
-                    <th className="border border-black px-3 py-0.5 font-normal">Phê duyệt</th>
-                  </tr>
-                </thead>
+
+              <div className="flex items-start justify-between gap-4 mb-2">
+                <div className="pt-2">
+                  <div className="text-lg font-bold leading-snug">PHIẾU ĐỀ NGHỊ LÀM THÊM</div>
+                  <div className="text-base font-bold leading-snug">잔업. 특근 신청서</div>
+                </div>
+                <table className="border-collapse border border-black text-[11px] text-center">
+                  <thead>
+                    <tr>
+                      <th className="border border-black px-2 py-0.5 font-normal">결</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">작성</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">검사</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">검사</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">검사</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">승인</th>
+                    </tr>
+                    <tr>
+                      <th className="border border-black px-2 py-0.5 font-normal">xác</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">Người lập</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">Kiểm tra</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">Kiểm tra</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">Kiểm tra</th>
+                      <th className="border border-black px-3 py-0.5 font-normal">Phê duyệt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="h-14">
+                      <td className="border border-black px-2 align-bottom pb-1 text-[10px]"><div>nhận</div><div className="border-t border-black mt-0.5 pt-0.5">재</div></td>
+                      <td className="border border-black w-16" /><td className="border border-black w-16" /><td className="border border-black w-16" /><td className="border border-black w-16" /><td className="border border-black w-16" />
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <table className="w-full border-collapse text-[11px]">
                 <tbody>
-                  <tr className="h-14">
-                    <td className="border border-black px-2 align-bottom pb-1 text-[10px]"><div>nhận</div><div className="border-t border-black mt-0.5 pt-0.5">재</div></td>
-                    <td className="border border-black w-16" /><td className="border border-black w-16" /><td className="border border-black w-16" /><td className="border border-black w-16" /><td className="border border-black w-16" />
-                  </tr>
+                  {printableDateGroups.map((dateGroup, dateIdx) => (
+                    <React.Fragment key={dateGroup.date}>
+                      <tr className={dateIdx === 0 ? 'h-7' : 'h-8'}>
+                        <td
+                          colSpan={3}
+                          data-testid={dateIdx === 0 ? 'tv-psgc-department-header' : undefined}
+                          className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'}`}
+                        >
+                          {dateIdx === 0 ? formatDepartmentHeaderLabel(formDepartment, departmentOptions) : ''}
+                        </td>
+                        <td colSpan={4} className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'}`}>
+                          {dateGroup.formattedDate}
+                        </td>
+                      </tr>
+                      <tr className="text-center font-normal">
+                        <th className="border border-black px-1.5 py-0.5 w-8 min-w-[32px] font-normal">No</th>
+                        <th className="border border-black px-2 py-0.5 w-40 min-w-[145px] font-normal">Danh sách làm thêm</th>
+                        <th className="border border-black px-2.5 py-0.5 min-w-[220px] font-normal">Lý do làm thêm</th>
+                        <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">Giờ bắt đầu</th>
+                        <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">Giờ kết thúc</th>
+                        <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">Tổng thời gian</th>
+                        <th className="border border-black px-1.5 py-0.5 w-14 min-w-[50px] font-normal">Ký nhận</th>
+                      </tr>
+                      <tr className="text-center font-normal">
+                        <th className="border border-black px-1.5 py-0.5 font-normal" />
+                        <th className="border border-black px-2 py-0.5 font-normal">명단</th>
+                        <th className="border border-black px-2.5 py-0.5 font-normal">잔업. 특근사유</th>
+                        <th className="border border-black px-1.5 py-0.5 font-normal">시작</th>
+                        <th className="border border-black px-1.5 py-0.5 font-normal">종료</th>
+                        <th className="border border-black px-1.5 py-0.5 font-normal">총 시간</th>
+                        <th className="border border-black px-1.5 py-0.5 font-normal">싸인</th>
+                      </tr>
+                      {dateGroup.blocks.map((group) =>
+                        group.rows.map((row) => (
+                          <tr key={`${group.blockId}-${row.no}`} className="h-7 min-h-[26px]">
+                            <td className="border border-black px-1.5 py-0.5 text-center font-normal">{row.no}</td>
+                            <td className="border border-black px-2 py-0.5 text-left font-normal">{row.fullName}</td>
+                            {row.isFirstInBlock && <td rowSpan={row.rowSpan} className="border border-black px-2.5 py-1 text-left align-middle whitespace-pre-line font-normal leading-snug">{row.combinedReason}</td>}
+                            <td className={`border border-black px-1.5 py-0.5 text-center align-middle ${isTimeBold(row.startTimeFormatted) ? 'font-bold' : 'font-normal'}`}>{row.startTimeFormatted}</td>
+                            <td className={`border border-black px-1.5 py-0.5 text-center align-middle ${isTimeBold(row.endTimeFormatted) ? 'font-bold' : 'font-normal'}`}>{row.endTimeFormatted}</td>
+                            <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
+                            <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
+                          </tr>
+                        ))
+                      )}
+                    </React.Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
 
-            <table className="w-full border-collapse text-[11px]">
-              <tbody>
-                {printableDateGroups.map((dateGroup, dateIdx) => (
-                  <React.Fragment key={dateGroup.date}>
-                    <tr className={dateIdx === 0 ? 'h-7' : 'h-9'}>
-                      <td
-                        colSpan={4}
-                        data-testid={dateIdx === 0 ? 'tv-psgc-department-header' : undefined}
-                        className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'}`}
-                      >
-                        {dateIdx === 0 ? formatDepartmentHeaderLabel(formDepartment, departmentOptions) : ''}
-                      </td>
-                      <td colSpan={3} className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'}`}>
-                        {dateGroup.formattedDate}
-                      </td>
-                    </tr>
-                    <tr className="text-center font-normal">
-                      <th className="border border-black px-1.5 py-1 w-8 font-normal">No</th>
-                      <th className="border border-black px-2 py-1 w-44 font-normal">Danh sách làm thêm</th>
-                      <th className="border border-black px-2 py-1 font-normal">Lý do làm thêm</th>
-                      <th className="border border-black px-2 py-1 w-20 font-normal">Giờ bắt đầu</th>
-                      <th className="border border-black px-2 py-1 w-20 font-normal">Giờ kết thúc</th>
-                      <th className="border border-black px-2 py-1 w-24 font-normal">Tổng thời gian</th>
-                      <th className="border border-black px-2 py-1 w-20 font-normal">Ký nhận</th>
-                    </tr>
-                    <tr className="text-center font-normal">
-                      <th className="border border-black px-1.5 py-1 font-normal" />
-                      <th className="border border-black px-2 py-1 font-normal">명단</th>
-                      <th className="border border-black px-2 py-1 font-normal">잔업. 특근사유</th>
-                      <th className="border border-black px-2 py-1 font-normal">시작</th>
-                      <th className="border border-black px-2 py-1 font-normal">종료</th>
-                      <th className="border border-black px-2 py-1 font-normal">총 시간</th>
-                      <th className="border border-black px-2 py-1 font-normal">싸인</th>
-                    </tr>
-                    {dateGroup.blocks.map((group) =>
-                      group.rows.map((row) => (
-                        <tr key={`${group.blockId}-${row.no}`} className="h-7">
-                          <td className="border border-black px-1.5 py-1 text-center font-normal">{row.no}</td>
-                          <td className="border border-black px-2 py-1 text-left font-normal">{row.fullName}</td>
-                          {row.isFirstInBlock && <td rowSpan={row.rowSpan} className="border border-black px-2.5 py-1.5 text-left align-middle whitespace-pre-line font-normal">{row.combinedReason}</td>}
-                          <td className={`border border-black px-2 py-1 text-center align-middle ${isTimeBold(row.startTimeFormatted) ? 'font-bold' : 'font-normal'}`}>{row.startTimeFormatted}</td>
-                          <td className={`border border-black px-2 py-1 text-center align-middle ${isTimeBold(row.endTimeFormatted) ? 'font-bold' : 'font-normal'}`}>{row.endTimeFormatted}</td>
-                          <td className="border border-black px-2 py-1 text-center align-middle" />
-                          <td className="border border-black px-2 py-1 text-center align-middle" />
-                        </tr>
-                      ))
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-2 text-[11px] space-y-0.5 leading-snug">
+            <div className="mt-2 text-[11px] space-y-0.5 leading-snug shrink-0">
               <div>Ghi chú 비고</div>
               <div>1) Nếu phát sinh dài hạn ghi rõ vào đây: từ năm 2022/........./............~ 2022/........./ ............</div>
               <div>Phát sinh giờ ghi ở biểu trên/ 긴시간 발생할 경우 는 여기서 기록할것</div>
@@ -1556,9 +1450,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           </div>
         </div>
 
-        {/* CẢNH BÁO / NHẮC NHỞ TRÙNG NGÀY & QUY TẮC NGÀY ĐẠI DIỆN */}
-        {(dateConflictEval.mode === 'single_day_blocked' ||
-          dateConflictEval.mode === 'representative_date_blocked') && (
+        {/* CẢNH BÁO TRÙNG NGÀY ĐẠI DIỆN HÔM NAY (NẾU GỘP ≥ 2 NGÀY MÀ HÔM NAY ĐÃ CÓ PHIẾU) */}
+        {dateConflictEval.mode === 'representative_date_blocked' && (
           <div
             role="alert"
             data-testid="overtime-duplicate-block-banner"
@@ -1567,34 +1460,16 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             <div className="flex items-start gap-2.5 min-w-0">
               <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <div className="text-xs text-red-900 leading-relaxed">
-                {dateConflictEval.mode === 'single_day_blocked' ? (
-                  <>
-                    <span className="font-bold">
-                      Ngày {formatDateToFormStyle(dateConflictEval.uniqueDates[0])} đã
-                      tồn tại trong Nhật ký
-                    </span>{' '}
-                    — mã phiếu:{' '}
-                    <span className="font-mono font-bold text-red-700">
-                      {uniqueConflictCodes.join(', ')}
-                    </span>
-                    . Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu cũ để chỉnh
-                    sửa, hoặc ghi nhận thêm ngày tăng ca khác (từ 2 ngày trở lên) nếu
-                    cần lập phiếu điều chỉnh phát sinh giờ.
-                  </>
-                ) : (
-                  <>
-                    <span className="font-bold">
-                      Ngày lập phiếu hôm nay (
-                      {formatDateToFormStyle(representativeOvertimeDate)}) đã có phiếu
-                    </span>{' '}
-                    — mã phiếu:{' '}
-                    <span className="font-mono font-bold text-red-700">
-                      {uniqueConflictCodes.join(', ')}
-                    </span>
-                    . Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu hôm nay để
-                    bổ sung/điều chỉnh trực tiếp.
-                  </>
-                )}
+                <span className="font-bold">
+                  Ngày lập phiếu hôm nay (
+                  {formatDateToFormStyle(representativeOvertimeDate)}) đã có phiếu
+                </span>{' '}
+                — mã phiếu:{' '}
+                <span className="font-mono font-bold text-red-700">
+                  {uniqueConflictCodes.join(', ')}
+                </span>
+                . Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu hôm nay để
+                bổ sung/điều chỉnh trực tiếp.
               </div>
             </div>
             {onOpenExistingForm && dateConflictEval.conflictingForms[0] && (

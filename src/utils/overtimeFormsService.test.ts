@@ -382,7 +382,7 @@ describe('overtimeFormsService pure logic', () => {
       },
     ];
 
-    // Case A: 1 unique date matching active form EVEN WITH A DIFFERENT DEPARTMENT (Bảo trì vs ST) -> BLOCKED globally
+    // Case A: 1 unique date matching active form -> ALLOWED (single-day forms are no longer blocked)
     const caseADiffDept = evaluateOvertimeDateConflict({
       blocks: singleDayConflictBlock,
       selectedDepartment: 'Bảo trì',
@@ -390,10 +390,9 @@ describe('overtimeFormsService pure logic', () => {
       existingForms,
       todayIso: '2026-11-20',
     });
-    assert.equal(caseADiffDept.mode, 'single_day_blocked');
-    assert.equal(caseADiffDept.isBlocked, true);
+    assert.equal(caseADiffDept.mode, 'none');
+    assert.equal(caseADiffDept.isBlocked, false);
     assert.equal(caseADiffDept.representativeDate, '2026-11-19');
-    assert.equal(caseADiffDept.conflictingForms[0].form_code, 'TC-20261119');
 
     // Editing the same form excludes itself -> allowed
     const selfEdit = evaluateOvertimeDateConflict({

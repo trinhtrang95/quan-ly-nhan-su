@@ -547,31 +547,26 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 style={{
                   fontFamily: "'Times New Roman', 'Malgun Gothic', Arial, sans-serif",
                 }}
-                className="overtime-print-sheet bg-white shadow-xl p-6 sm:p-8 w-full max-w-[794px] min-h-[1123px] mx-auto text-black rounded-sm space-y-4 flex flex-col"
+                className="overtime-print-sheet bg-white shadow-xl p-5 sm:p-6 w-full max-w-[794px] min-h-[1123px] mx-auto text-black rounded-sm space-y-3 flex flex-col justify-between"
               >
-                {/* Header top */}
-                <div className="flex items-center justify-between text-xs mb-2">
-                  <span>Transon Viet nam Co., Ltd</span>
-                  <span className="pr-12">Biểu mẫu số: TV-PSGC2022</span>
-                </div>
-
-                {/* Title + 6-column signature block */}
-                <div className="flex items-start justify-between gap-4 mb-2">
-                  <div className="pt-3">
-                    <div className="text-lg font-bold leading-snug">
-                      PHIẾU ĐỀ NGHỊ LÀM THÊM
-                    </div>
-                    <div className="text-base font-bold leading-snug">
-                      잔업. 특근 신청서
-                    </div>
-                    <div className="text-[11px] mt-1 font-normal text-black">
-                      Ngày phiếu / 작성일:{' '}
-                      <span className="font-bold">
-                        {formatDateToFormStyle(viewingForm.overtime_date)}
-                      </span>
-                    </div>
+                <div className="space-y-3">
+                  {/* Header top */}
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span>Transon Viet nam Co., Ltd</span>
+                    <span className="pr-12">Biểu mẫu số: TV-PSGC2022</span>
                   </div>
-                  <table className="border-collapse border border-black text-[11px] text-center">
+
+                  {/* Title + 6-column signature block */}
+                  <div className="flex items-start justify-between gap-4 mb-2">
+                    <div className="pt-2">
+                      <div className="text-lg font-bold leading-snug">
+                        PHIẾU ĐỀ NGHỊ LÀM THÊM
+                      </div>
+                      <div className="text-base font-bold leading-snug">
+                        잔업. 특근 신청서
+                      </div>
+                    </div>
+                    <table className="border-collapse border border-black text-[11px] text-center">
                     <thead>
                       <tr>
                         <th className="border border-black px-2 py-0.5 font-normal">
@@ -637,11 +632,11 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   <tbody>
                     {modalPrintableGroups.map((dateGroup, dateIdx) => (
                       <React.Fragment key={dateGroup.date}>
-                        <tr className={dateIdx === 0 ? 'h-7' : 'h-9'}>
+                        <tr className={dateIdx === 0 ? 'h-7' : 'h-8'}>
                           <td
                             colSpan={4}
                             className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${
-                              dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'
+                              dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
                             }`}
                           >
                             {dateIdx === 0
@@ -654,53 +649,53 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           <td
                             colSpan={3}
                             className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${
-                              dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'
+                              dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
                             }`}
                           >
                             {dateGroup.formattedDate}
                           </td>
                         </tr>
                         <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-1 w-8 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 w-8 min-w-[32px] font-normal">
                             No
                           </th>
-                          <th className="border border-black px-2 py-1 w-44 font-normal">
+                          <th className="border border-black px-2 py-0.5 w-40 min-w-[145px] font-normal">
                             Danh sách làm thêm
                           </th>
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-2.5 py-0.5 min-w-[220px] font-normal">
                             Lý do làm thêm
                           </th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
                             Giờ bắt đầu
                           </th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
                             Giờ kết thúc
                           </th>
-                          <th className="border border-black px-2 py-1 w-24 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
                             Tổng thời gian
                           </th>
-                          <th className="border border-black px-2 py-1 w-20 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 w-14 min-w-[50px] font-normal">
                             Ký nhận
                           </th>
                         </tr>
                         <tr className="text-center font-normal">
-                          <th className="border border-black px-1.5 py-1 font-normal" />
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 font-normal" />
+                          <th className="border border-black px-2 py-0.5 font-normal">
                             명단
                           </th>
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-2.5 py-0.5 font-normal">
                             잔업. 특근사유
                           </th>
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 font-normal">
                             시작
                           </th>
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 font-normal">
                             종료
                           </th>
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 font-normal">
                             총 시간
                           </th>
-                          <th className="border border-black px-2 py-1 font-normal">
+                          <th className="border border-black px-1.5 py-0.5 font-normal">
                             싸인
                           </th>
                         </tr>
@@ -708,24 +703,24 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           block.rows.map((row) => (
                             <tr
                               key={`${block.blockId}-${row.no}`}
-                              className="h-7"
+                              className="h-7 min-h-[26px]"
                             >
-                              <td className="border border-black px-1.5 py-1 text-center font-normal">
+                              <td className="border border-black px-1.5 py-0.5 text-center font-normal">
                                 {row.no}
                               </td>
-                              <td className="border border-black px-2 py-1 text-left font-normal">
+                              <td className="border border-black px-2 py-0.5 text-left font-normal">
                                 {row.fullName}
                               </td>
                               {row.isFirstInBlock && (
                                 <td
                                   rowSpan={row.rowSpan}
-                                  className="border border-black px-2.5 py-1.5 text-left align-middle whitespace-pre-line font-normal"
+                                  className="border border-black px-2.5 py-1 text-left align-middle whitespace-pre-line font-normal leading-snug"
                                 >
                                   {row.combinedReason}
                                 </td>
                               )}
                               <td
-                                className={`border border-black px-2 py-1 text-center align-middle ${
+                                className={`border border-black px-1.5 py-0.5 text-center align-middle ${
                                   isOvertimeTimeBold(row.startTimeFormatted)
                                     ? 'font-bold'
                                     : 'font-normal'
@@ -734,7 +729,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 {row.startTimeFormatted}
                               </td>
                               <td
-                                className={`border border-black px-2 py-1 text-center align-middle ${
+                                className={`border border-black px-1.5 py-0.5 text-center align-middle ${
                                   isOvertimeTimeBold(row.endTimeFormatted)
                                     ? 'font-bold'
                                     : 'font-normal'
@@ -742,8 +737,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                               >
                                 {row.endTimeFormatted}
                               </td>
-                              <td className="border border-black px-2 py-1 text-center align-middle" />
-                              <td className="border border-black px-2 py-1 text-center align-middle" />
+                              <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
+                              <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
                             </tr>
                           ))
                         )}
@@ -751,6 +746,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
 
                 {/* Notes Footer */}
                 <div className="mt-2 text-[11px] space-y-0.5 leading-snug">

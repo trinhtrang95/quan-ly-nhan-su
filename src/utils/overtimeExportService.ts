@@ -140,14 +140,14 @@ export class OvertimeExportService {
 
     worksheet.columns = [
       { key: 'colA', width: 6 },
-      { key: 'colB', width: 22 },
-      { key: 'colC', width: 22 },
+      { key: 'colB', width: 20 },
+      { key: 'colC', width: 28 },
       { key: 'colD', width: 5.5 },
-      { key: 'colE', width: 11.5 },
-      { key: 'colF', width: 11.5 },
-      { key: 'colG', width: 11.5 },
-      { key: 'colH', width: 11.5 },
-      { key: 'colI', width: 11.5 },
+      { key: 'colE', width: 10 },
+      { key: 'colF', width: 10 },
+      { key: 'colG', width: 10 },
+      { key: 'colH', width: 9 },
+      { key: 'colI', width: 9 },
     ];
 
     worksheet.mergeCells('A1:C1');
@@ -201,25 +201,7 @@ export class OvertimeExportService {
 
     worksheet.mergeCells('A2:C6');
     const titleCell = worksheet.getCell('A2');
-    const repDateLabel = formatDateToFormStyle(overtimeDate || sortedDates[0] || '');
-    titleCell.value = repDateLabel
-      ? {
-          richText: [
-            {
-              font: { name: FONT_NAME, size: 14, bold: true },
-              text: 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서\n',
-            },
-            {
-              font: { name: FONT_NAME, size: 10, bold: false },
-              text: 'Ngày phiếu / 작성일: ',
-            },
-            {
-              font: { name: FONT_NAME, size: 10, bold: true },
-              text: repDateLabel,
-            },
-          ],
-        }
-      : 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서';
+    titleCell.value = 'PHIẾU ĐỀ NGHỊ LÀM THÊM\n잔업. 특근 신청서';
     titleCell.font = { name: FONT_NAME, size: 14, bold: true };
     titleCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
 

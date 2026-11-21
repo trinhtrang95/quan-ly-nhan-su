@@ -241,11 +241,19 @@ export function calculateHoursBetween(
  */
 export function generateOvertimeFormCode(
   dateStr: string,
-  _existingCodes: string[] = []
+  existingCodes: string[] = []
 ): string {
   const digits = (dateStr || '').replace(/\D/g, '');
   const datePart = digits.length === 8 ? digits : '20261116';
-  return `TC-${datePart}`;
+  const base = `TC-${datePart}`;
+  if (!existingCodes || !existingCodes.includes(base)) {
+    return base;
+  }
+  let seq = 2;
+  while (existingCodes.includes(`${base}-${String(seq).padStart(3, '0')}`)) {
+    seq++;
+  }
+  return `${base}-${String(seq).padStart(3, '0')}`;
 }
 
 /**
@@ -1095,19 +1103,8 @@ export function evaluateOvertimeDateConflict({
 
   const conflictingForms = Array.from(conflictingFormMap.values());
 
-  // Case A: Single-day form -> block if that date already exists in ANY active form
+  // Case A: Single-day form -> no longer blocked per user request (bỏ chặn lưu phiếu 1 ngày)
   if (uniqueDates.length === 1) {
-    if (conflicts.length > 0) {
-      return {
-        mode: 'single_day_blocked',
-        isBlocked: true,
-        uniqueDates,
-        representativeDate,
-        resolvedDepartment,
-        conflicts,
-        conflictingForms,
-      };
-    }
     return {
       mode: 'none',
       isBlocked: false,
@@ -1331,7 +1328,10 @@ export async function saveOvertimeFormToHistory(
       ? crypto.randomUUID()
       : `ot-form-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  const formCode = generateOvertimeFormCode(representativeDate);
+  const formCode = generateOvertimeFormCode(
+    representativeDate,
+    existingLocal.map((f) => f.form_code)
+  );
 
   const items = buildOvertimeFormItemsFromBlocks(
     formId,
