@@ -387,93 +387,40 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* Thanh Tạo vỏ phiếu tăng ca mới theo ngày */}
-      <div className="bg-white border border-blue-200/80 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-2xs no-print">
-        <div className="flex flex-wrap items-center gap-3 min-w-0">
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="overtime-shell-date-input"
-              className="text-xs font-bold text-[#14539E] whitespace-nowrap"
-            >
-              Ngày phiếu:
-            </label>
-            <div className="relative w-40">
-              <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="overtime-shell-date-input"
-                type="date"
-                value={createShellDate}
-                onChange={(e) => setCreateShellDate(e.target.value)}
-                className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
-              />
-            </div>
-          </div>
-
-          <div className="text-xs text-slate-600 flex items-center gap-2">
-            <span>Mã phiếu:</span>
-            <span className="font-mono font-bold text-[#14539E] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
-              {targetShellCode}
-            </span>
-            {existingActiveShellForSelectedDate ? (
-              <span className="text-[11px] font-medium text-amber-700">
-                (Đã tồn tại — bấm nút để mở chỉnh sửa)
-              </span>
-            ) : (
-              <span className="text-[11px] text-slate-400">
-                (Tạo vỏ phiếu trống cho ngày {formatDateToFormStyle(createShellDate)})
-              </span>
-            )}
-          </div>
-        </div>
-
-        <button
-          type="button"
-          disabled={isCreatingShell}
-          onClick={() => void handleCreateShellClick()}
-          className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
-        >
-          {isCreatingShell ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <FilePlus2 className="w-3.5 h-3.5" />
-          )}
-          <span>+ Tạo phiếu tăng ca mới</span>
-        </button>
-      </div>
-
-      {/* Filter Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 no-print">
-        <div className="flex flex-1 flex-wrap items-center gap-2.5">
-          <div className="relative flex-1 min-w-[220px] max-w-sm">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      {/* Thanh công cụ ngang hợp nhất: Bộ lọc bên trái | Tạo vỏ phiếu căn sát phải */}
+      <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs no-print">
+        {/* Cụm bên trái: Tìm kiếm, lọc ngày, bộ đếm & Làm mới */}
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <div className="relative w-48 sm:w-52">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Tìm mã phiếu hoặc bộ phận..."
               aria-label="Tìm mã phiếu hoặc bộ phận"
-              className="w-full h-9 pl-9 pr-8 text-xs rounded-lg border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 focus:border-[#14539E] focus:outline-none"
+              className="w-full h-9 pl-8 pr-7 text-xs rounded-lg border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 focus:border-[#14539E] focus:outline-none"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
                 aria-label="Xóa từ khóa tìm kiếm"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          <div className="relative w-44">
-            <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="relative w-36">
+            <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="date"
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
               aria-label="Lọc theo ngày tăng ca"
-              className="w-full h-9 pl-8 pr-2.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-800 font-mono focus:border-[#14539E] focus:outline-none"
+              className="w-full h-9 pl-8 pr-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-800 font-mono focus:border-[#14539E] focus:outline-none"
             />
           </div>
 
@@ -484,26 +431,24 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 setSearchQuery('');
                 setDateFilter('');
               }}
-              className="h-9 px-3 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="h-9 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               Xóa lọc
             </button>
           )}
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 justify-between md:justify-end">
           {selectedFormIds.length > 0 && (
             <button
               type="button"
               onClick={handleOpenBulkDeleteModal}
-              className="h-9 px-3.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-2xs"
+              className="h-9 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-2xs"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Xóa đã chọn ({formatNumberVN(selectedFormIds.length)})</span>
             </button>
           )}
 
-          <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap">
+          <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap px-1">
             Hiển thị{' '}
             <strong className="font-semibold text-slate-800">
               {formatNumberVN(filteredForms.length)}
@@ -515,7 +460,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             type="button"
             onClick={handleRefreshClick}
             disabled={isRefreshing || isLoading}
-            className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="h-9 px-3 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 text-[#14539E] ${
@@ -523,6 +468,64 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               }`}
             />
             <span>Làm mới</span>
+          </button>
+        </div>
+
+        {/* Cụm bên phải: Ngày phiếu, Mã phiếu + trạng thái & nút + Tạo phiếu tăng ca mới (luôn căn sát phải) */}
+        <div className="ml-auto shrink-0 max-w-full flex flex-wrap items-center justify-end gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <label
+              htmlFor="overtime-shell-date-input"
+              className="text-xs font-bold text-[#14539E] whitespace-nowrap"
+            >
+              Ngày phiếu:
+            </label>
+            <div className="relative w-36">
+              <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="overtime-shell-date-input"
+                type="date"
+                value={createShellDate}
+                onChange={(e) => setCreateShellDate(e.target.value)}
+                className="w-full h-9 pl-8 pr-2 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-600 flex items-center gap-1.5 whitespace-nowrap shrink-0">
+            <span>Mã phiếu:</span>
+            <span className="font-mono font-bold text-[#14539E] bg-blue-50 border border-blue-200 px-2 py-1 rounded-md">
+              {targetShellCode}
+            </span>
+            {existingActiveShellForSelectedDate ? (
+              <span
+                title={`Ngày ${formatDateToFormStyle(createShellDate)} đã có phiếu ${targetShellCode} — bấm nút để mở sửa`}
+                className="text-[11px] font-medium text-amber-700"
+              >
+                (Đã tồn tại — mở sửa)
+              </span>
+            ) : (
+              <span
+                title={`Tạo vỏ phiếu trống cho ngày ${formatDateToFormStyle(createShellDate)}`}
+                className="text-[11px] text-slate-400"
+              >
+                (Chưa có phiếu)
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            disabled={isCreatingShell}
+            onClick={() => void handleCreateShellClick()}
+            className="h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+          >
+            {isCreatingShell ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FilePlus2 className="w-3.5 h-3.5" />
+            )}
+            <span>+ Tạo phiếu tăng ca mới</span>
           </button>
         </div>
       </div>
