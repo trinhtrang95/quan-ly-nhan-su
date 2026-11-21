@@ -32,7 +32,6 @@ import {
   buildPrintableDateGroupsFromItems,
   fetchOvertimeFormById,
   filterOvertimeForms,
-  formatCreatedAtVN,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
   getLocalTodayIsoDate,
@@ -546,7 +545,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 </th>
                 <th className="py-3 px-3 w-12 text-center">STT</th>
                 <th className="py-3 px-3.5 min-w-[150px]">
-                  Ngày tạo
+                  Mã phiếu
                 </th>
                 <th className="py-3 px-3.5 min-w-[155px]">Ngày tăng ca</th>
                 <th className="py-3 px-3.5 min-w-[150px]">Bộ phận</th>
@@ -658,9 +657,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                         {formatNumberVN(index + 1)}
                       </td>
 
-                      {/* 2. Ngày tạo */}
-                      <td className="py-3 px-3.5 font-mono text-slate-700 font-medium tabular-nums whitespace-nowrap">
-                        {formatCreatedAtVN(form.created_at)}
+                      {/* 2. Mã phiếu */}
+                      <td className="py-3 px-3.5 font-mono font-semibold text-[#14539E] tabular-nums whitespace-nowrap">
+                        {formatOvertimeFormCodeDisplay(form.form_code)}
                       </td>
 
                       {/* 3. Ngày tăng ca */}
