@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { Employee } from '../../types/hr';
+import { DepartmentGroup, Employee } from '../../types/hr';
 import {
   formatNumberVN,
   getFriendlyErrorMessage,
@@ -33,11 +33,13 @@ import {
   isOvertimeTimeBold,
   OvertimeFormWithItems,
   reconstructBlocksFromItems,
+  resolveOvertimeMainDepartment,
 } from '../../utils/overtimeFormsService';
 
 export interface OvertimeLogProps {
   forms: OvertimeFormWithItems[];
   employees: Employee[];
+  groups?: DepartmentGroup[];
   isLoading: boolean;
   onRefresh: () => Promise<void> | void;
   onEdit: (form: OvertimeFormWithItems) => void;
@@ -49,6 +51,7 @@ export interface OvertimeLogProps {
 export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   forms,
   employees,
+  groups = [],
   isLoading,
   onRefresh,
   onEdit,
@@ -68,9 +71,23 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [exportingFormId, setExportingFormId] = useState<string | null>(null);
 
+  const knownSubGroups = useMemo(() => {
+    const names = new Set<string>();
+    groups.forEach((g) => {
+      if (g.name?.trim()) names.add(g.name.trim());
+    });
+    employees.forEach((emp) => {
+      if (emp.department?.trim()) names.add(emp.department.trim());
+    });
+    return Array.from(names);
+  }, [groups, employees]);
+
+  const getDisplayDepartment = (rawDepartment?: string | null) =>
+    resolveOvertimeMainDepartment(rawDepartment, knownSubGroups);
+
   const filteredForms = useMemo(
-    () => filterOvertimeForms(forms, searchQuery, dateFilter),
-    [forms, searchQuery, dateFilter]
+    () => filterOvertimeForms(forms, searchQuery, dateFilter, knownSubGroups),
+    [forms, searchQuery, dateFilter, knownSubGroups]
   );
 
   const hasActiveFilters = Boolean(searchQuery.trim() || dateFilter.trim());
@@ -92,16 +109,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         onShowToast?.('Phiếu không có dữ liệu nhân sự để xuất Excel.');
         return;
       }
+      const mainDepartment = getDisplayDepartment(form.department);
       const mergedEmployees = buildMergedEmployeesForExport(
         form.items,
         employees,
-        form.department
+        mainDepartment
       );
       await overtimeExportService.exportExcel({
-        department: form.department,
+        department: mainDepartment,
         overtimeDate: form.overtime_date,
         blocks,
         employees: mergedEmployees,
+        knownSubGroups,
       });
       onShowToast?.(
         `Đã xuất file Excel cho phiếu ${formatOvertimeFormCodeDisplay(
@@ -363,7 +382,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                       {/* 4. Bộ phận */}
                       <td className="py-3 px-3.5 font-medium text-slate-800">
-                        {form.department}
+                        {getDisplayDepartment(form.department)}
                       </td>
 
                       {/* 5. Số lượng */}
@@ -463,7 +482,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     {formatOvertimeFormCodeDisplay(viewingForm.form_code)}
                   </span>
                   <span className="text-slate-300">•</span>
-                  <span className="truncate">{viewingForm.department}</span>
+                  <span className="truncate">
+                    {getDisplayDepartment(viewingForm.department)}
+                  </span>
                 </h2>
                 <p className="text-[11px] text-slate-500 tabular-nums mt-0.5">
                   Biểu mẫu TV-PSGC2022 •{' '}
@@ -625,7 +646,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           >
                             {dateIdx === 0
                               ? formatDepartmentHeaderLabel(
-                                  viewingForm.department
+                                  getDisplayDepartment(viewingForm.department),
+                                  knownSubGroups
                                 )
                               : ''}
                           </td>
@@ -797,7 +819,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-500">Bộ phận:</span>
                 <span className="font-semibold text-slate-800">
-                  {deletingForm.department}
+                  {getDisplayDepartment(deletingForm.department)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">

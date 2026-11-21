@@ -27,12 +27,14 @@ import {
   getFriendlyErrorMessage,
 } from '../../utils/errorAndSecurityService';
 import {
+  DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
   findActiveFormsByDate,
   formatOvertimeFormCodeDisplay,
   getLocalTodayIsoDate,
   OvertimeFormWithItems,
   reconstructBlocksFromItems,
+  resolveOvertimeMainDepartment,
 } from '../../utils/overtimeFormsService';
 import {
   findExactGlossaryMatch,
@@ -170,7 +172,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   groups = INITIAL_DEPARTMENT_GROUPS,
   existingForms = [],
   isCheckingExistingForms = false,
-  initialDepartment = 'ALL',
+  initialDepartment = DEFAULT_OVERTIME_DEPARTMENT,
   initialDate = getLocalTodayIsoDate(),
   editingForm = null,
   onOpenExistingForm,
@@ -178,10 +180,10 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   onSaveOnly,
 }) => {
 
-  // Auto-load state từ LocalStorage (hoặc từ phiếu đang chỉnh sửa)
-  const [selectedDepartment, setSelectedDepartment] = useState<string>(() => {
-    if (editingForm) return editingForm.department || initialDepartment;
-    return localStorage.getItem(`${DRAFT_STORAGE_KEY}_dept`) || initialDepartment;
+  // Bộ lọc nhóm trực thuộc (chỉ dùng để lọc/chọn nhân sự, KHÔNG ghi đè Bộ phận chính của phiếu)
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>(() => {
+    if (editingForm) return 'ALL';
+    return localStorage.getItem(`${DRAFT_STORAGE_KEY}_group_filter`) || 'ALL';
   });
   const [overtimeDate, setOvertimeDate] = useState<string>(() => {
     if (editingForm) return editingForm.overtime_date || initialDate;
@@ -236,10 +238,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         ...b,
         isTranslating: false,
       }));
-      const matchedDept = groups.some((g) => g.name === editingForm.department)
-        ? editingForm.department
-        : 'ALL';
-      setSelectedDepartment(matchedDept);
+      setSelectedGroupFilter('ALL');
       setOvertimeDate(editingForm.overtime_date || initialDate);
       setPreviewData(reconstructed);
       setEditingBlockId(null);
@@ -252,7 +251,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       setCurrentReasonKr('');
       setIsReasonKrManuallyEdited(false);
     }
-  }, [editingForm, groups, initialDate]);
+  }, [editingForm, initialDate]);
 
   // Tự động đóng danh sách nhân sự sổ xuống khi bấm ra ngoài vùng tìm kiếm
   useEffect(() => {
@@ -274,10 +273,10 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   // Auto-save vào LocalStorage chỉ khi đang tạo phiếu mới (tránh ghi đè nháp khi sửa phiếu cũ)
   useEffect(() => {
     if (editingForm) return;
-    localStorage.setItem(`${DRAFT_STORAGE_KEY}_dept`, selectedDepartment);
+    localStorage.setItem(`${DRAFT_STORAGE_KEY}_group_filter`, selectedGroupFilter);
     localStorage.setItem(`${DRAFT_STORAGE_KEY}_date`, overtimeDate);
     localStorage.setItem(`${DRAFT_STORAGE_KEY}_preview`, JSON.stringify(previewData));
-  }, [selectedDepartment, overtimeDate, previewData, editingForm]);
+  }, [selectedGroupFilter, overtimeDate, previewData, editingForm]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -294,6 +293,16 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     employees.forEach((emp) => { if (emp.department?.trim()) names.add(emp.department.trim()); });
     return Array.from(names);
   }, [groups, employees]);
+
+  // Bộ phận chính cố định là "Bộ phận Kỹ thuật" (trừ khi phiếu được cấu hình riêng cho bộ phận khác)
+  const formDepartment = useMemo(
+    () =>
+      resolveOvertimeMainDepartment(
+        editingForm ? editingForm.department : initialDepartment,
+        departmentOptions
+      ),
+    [editingForm, initialDepartment, departmentOptions]
+  );
 
   const alreadyRecordedIdsForCurrentDate = useMemo(() => {
     const set = new Set<string>();
@@ -313,18 +322,18 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   const filteredEmployeesForInput = useMemo(() => {
     const available = employees.filter((emp) => !alreadyRecordedIdsForCurrentDate.has(emp.id));
-    const normalizedDept = (selectedDepartment || '').trim();
-    const byDepartment = !normalizedDept || normalizedDept === 'ALL'
+    const normalizedGroup = (selectedGroupFilter || '').trim();
+    const byGroup = !normalizedGroup || normalizedGroup === 'ALL'
       ? available
-      : available.filter((emp) => (emp.department || '').trim() === normalizedDept);
+      : available.filter((emp) => (emp.department || '').trim() === normalizedGroup);
     const query = employeeSearchQuery.trim().toLowerCase();
-    if (!query) return byDepartment;
-    return byDepartment.filter(
+    if (!query) return byGroup;
+    return byGroup.filter(
       (emp) => emp.fullName.toLowerCase().includes(query) ||
                emp.employeeCode.toLowerCase().includes(query) ||
                emp.department.toLowerCase().includes(query)
     );
-  }, [employees, selectedDepartment, employeeSearchQuery, alreadyRecordedIdsForCurrentDate]);
+  }, [employees, selectedGroupFilter, employeeSearchQuery, alreadyRecordedIdsForCurrentDate]);
 
   useEffect(() => {
     setCurrentSelectedEmployeeIds((prev) => {
@@ -360,7 +369,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     () =>
       evaluateOvertimeDateConflict({
         blocks: previewData,
-        selectedDepartment,
+        selectedDepartment: formDepartment,
         employees,
         existingForms,
         editingFormId: editingForm?.id ?? null,
@@ -368,7 +377,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       }),
     [
       previewData,
-      selectedDepartment,
+      formDepartment,
       employees,
       existingForms,
       editingForm?.id,
@@ -660,7 +669,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setIsSubmitting(true);
     try {
       await onSaveOnly?.({
-        department: selectedDepartment,
+        department: formDepartment,
         overtimeDate: representativeOvertimeDate,
         blocks: previewData,
       });
@@ -688,10 +697,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setIsSubmitting(true);
     try {
       await overtimeExportService.exportExcel({
-        department: selectedDepartment,
+        department: formDepartment,
         overtimeDate: representativeOvertimeDate,
         blocks: previewData,
         employees,
+        knownSubGroups: departmentOptions,
       });
       showToast('Đã tạo và tải file Excel thành công!');
     } catch (error: any) {
@@ -802,6 +812,15 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         </div>
 
         <div className="p-3.5 sm:p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
+          {/* BỘ PHẬN CHÍNH CỐ ĐỊNH CỦA PHIẾU */}
+          <div
+            data-testid="overtime-main-department-label"
+            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px]"
+          >
+            <span className="text-slate-500 font-medium">Bộ phận phiếu:</span>
+            <span className="font-bold text-[#14539E] truncate">{formDepartment}</span>
+          </div>
+
           {/* HÀNG 1 */}
           <div className="grid grid-cols-2 gap-2.5">
             <div>
@@ -809,18 +828,18 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 htmlFor="overtime-department-select"
                 className="block text-[11px] font-semibold text-slate-600 mb-1"
               >
-                Bộ phận / Nhóm
+                Lọc nhóm nhân sự
               </label>
               <select
                 id="overtime-department-select"
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
+                value={selectedGroupFilter}
+                onChange={(e) => setSelectedGroupFilter(e.target.value)}
                 className="w-full h-9 px-2.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
               >
-                <option value="ALL">Tất cả bộ phận</option>
-                {departmentOptions.map((deptName) => (
-                  <option key={deptName} value={deptName}>
-                    {deptName}
+                <option value="ALL">Tất cả nhóm</option>
+                {departmentOptions.map((groupName) => (
+                  <option key={groupName} value={groupName}>
+                    {groupName}
                   </option>
                 ))}
               </select>
@@ -1012,12 +1031,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   {/* Thanh đầu danh sách sổ xuống */}
                   <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-2 text-[11px]">
                     <span className="text-slate-500 truncate">
-                      {selectedDepartment && selectedDepartment !== 'ALL' ? (
+                      {selectedGroupFilter && selectedGroupFilter !== 'ALL' ? (
                         <>
-                          Nhóm <strong className="text-slate-700">{selectedDepartment}</strong> • {filteredEmployeesForInput.length} người
+                          Nhóm <strong className="text-slate-700">{selectedGroupFilter}</strong> • {filteredEmployeesForInput.length} người
                         </>
                       ) : (
-                        <>Tất cả bộ phận • {filteredEmployeesForInput.length} người</>
+                        <>Tất cả nhóm ({formDepartment}) • {filteredEmployeesForInput.length} người</>
                       )}
                     </span>
                     <button
@@ -1075,7 +1094,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                                 </span>
                               </div>
                             </div>
-                            {(!selectedDepartment || selectedDepartment === 'ALL') && emp.department && (
+                            {(!selectedGroupFilter || selectedGroupFilter === 'ALL') && emp.department && (
                               <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0 max-w-[90px] truncate">
                                 {emp.department}
                               </span>
@@ -1398,7 +1417,21 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                         <span className="font-bold text-slate-800 font-mono text-[11px]">[{formatDateToFormStyle(b.overtimeDate)}]</span>
                         <span className="text-slate-800 font-medium truncate">{b.reasonVi || 'Không có lý do'}</span>
                       </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">{b.selectedEmployeeIds.length} nhân sự • {b.startTime}-{b.endTime}</div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                        {b.selectedEmployeeIds.length} nhân sự
+                        {(() => {
+                          const groupNames = Array.from(
+                            new Set(
+                              b.selectedEmployeeIds
+                                .map((id) => employeeMap.get(id)?.department?.trim())
+                                .filter((name): name is string => Boolean(name))
+                            )
+                          );
+                          return groupNames.length > 0 ? ` • ${groupNames.join(', ')}` : '';
+                        })()}
+                        {' • '}
+                        {b.startTime}-{b.endTime}
+                      </div>
                     </div>
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button type="button" onClick={() => handleEditPreviewBlock(idx)} className="p-1 rounded text-[#14539E] hover:bg-blue-50 cursor-pointer" title="Sửa nhóm"><Pencil className="w-3.5 h-3.5" /></button>
@@ -1469,8 +1502,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 {printableDateGroups.map((dateGroup, dateIdx) => (
                   <React.Fragment key={dateGroup.date}>
                     <tr className={dateIdx === 0 ? 'h-7' : 'h-9'}>
-                      <td colSpan={4} className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'}`}>
-                        {dateIdx === 0 ? formatDepartmentHeaderLabel(selectedDepartment) : ''}
+                      <td
+                        colSpan={4}
+                        data-testid={dateIdx === 0 ? 'tv-psgc-department-header' : undefined}
+                        className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'}`}
+                      >
+                        {dateIdx === 0 ? formatDepartmentHeaderLabel(formDepartment, departmentOptions) : ''}
                       </td>
                       <td colSpan={3} className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${dateIdx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'}`}>
                         {dateGroup.formattedDate}

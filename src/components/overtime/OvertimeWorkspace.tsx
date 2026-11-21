@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardList, FilePlus2, Pencil } from 'lucide-react';
 import { DepartmentGroup, Employee } from '../../types/hr';
 import { formatNumberVN } from '../../utils/errorAndSecurityService';
@@ -7,6 +7,7 @@ import {
   fetchOvertimeForms,
   formatOvertimeFormCodeDisplay,
   OvertimeFormWithItems,
+  resolveOvertimeMainDepartment,
   saveOvertimeFormToHistory,
   softDeleteOvertimeForm,
   updateOvertimeFormInHistory,
@@ -39,6 +40,17 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     null
   );
 
+  const knownSubGroups = useMemo(() => {
+    const names = new Set<string>();
+    groups.forEach((g) => {
+      if (g.name?.trim()) names.add(g.name.trim());
+    });
+    employees.forEach((emp) => {
+      if (emp.department?.trim()) names.add(emp.department.trim());
+    });
+    return Array.from(names);
+  }, [groups, employees]);
+
   const loadForms = useCallback(async () => {
     setIsLoadingForms(true);
     try {
@@ -64,9 +76,14 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       // Fallback to in-memory forms
     }
 
+    const mainDepartment = resolveOvertimeMainDepartment(
+      payload.department,
+      knownSubGroups
+    );
+
     const conflictEval = evaluateOvertimeDateConflict({
       blocks: payload.blocks,
-      selectedDepartment: payload.department,
+      selectedDepartment: mainDepartment,
       employees,
       existingForms: latestForms,
       editingFormId: editingForm?.id ?? null,
@@ -90,10 +107,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
 
     if (editingForm) {
       const updated = await updateOvertimeFormInHistory(editingForm, {
-        department: payload.department,
+        department: mainDepartment,
         overtimeDate: effectiveDate,
         blocks: payload.blocks,
         employees,
+        knownSubGroups,
       });
       setForms((prev) =>
         prev.map((f) => (f.id === updated.id ? updated : f))
@@ -109,10 +127,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     }
 
     const saved = await saveOvertimeFormToHistory({
-      department: payload.department,
+      department: mainDepartment,
       overtimeDate: effectiveDate,
       blocks: payload.blocks,
       employees,
+      knownSubGroups,
     });
 
     setForms((prev) => [saved, ...prev.filter((f) => f.id !== saved.id)]);
@@ -232,6 +251,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
           <OvertimeLog
             forms={forms}
             employees={employees}
+            groups={groups}
             isLoading={isLoadingForms}
             onRefresh={loadForms}
             onEdit={handleStartEditForm}

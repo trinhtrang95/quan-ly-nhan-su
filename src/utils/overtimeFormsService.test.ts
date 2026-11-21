@@ -5,12 +5,16 @@ import {
   buildPrintableDateGroupsFromItems,
   buildUpdatedOvertimeForm,
   calculateHoursBetween,
+  DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
   filterOvertimeForms,
+  formatOvertimeDepartmentHeaderLabel,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
   isOvertimeTimeBold,
   reconstructBlocksFromItems,
+  resolveDepartmentLabel,
+  resolveOvertimeMainDepartment,
   resolveRepresentativeOvertimeDate,
   type OvertimeBlockInput,
   type OvertimeFormWithItems,
@@ -471,5 +475,103 @@ describe('overtimeFormsService pure logic', () => {
     assert.equal(caseBBlocked.mode, 'representative_date_blocked');
     assert.equal(caseBBlocked.isBlocked, true);
     assert.equal(caseBBlocked.conflictingForms[0].form_code, 'TC-20261120');
+  });
+
+  it('fixes main department to "Bộ phận Kỹ thuật" even when selecting sub-groups (IOT/ST/Bảo trì), while preserving explicitly configured other departments', () => {
+    const knownSubGroups = ['IOT', 'ST', 'Bảo trì', 'PE', 'AUTO 1', 'JIG/AUTO 2'];
+
+    // Default / aliases / sub-groups -> always "Bộ phận Kỹ thuật"
+    assert.equal(
+      resolveOvertimeMainDepartment('', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('ALL', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('Kỹ Thuật', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('Toàn bộ bộ phận', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('IOT', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('Bảo trì', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('ST', knownSubGroups),
+      DEFAULT_OVERTIME_DEPARTMENT
+    );
+
+    // Explicitly configured separate department -> preserved
+    assert.equal(
+      resolveOvertimeMainDepartment('Sản Xuất', knownSubGroups),
+      'Sản Xuất'
+    );
+    assert.equal(
+      resolveOvertimeMainDepartment('Bộ phận Nhân sự', knownSubGroups),
+      'Bộ phận Nhân sự'
+    );
+
+    // resolveDepartmentLabel never overwrites main department with employee sub-groups
+    const iotEmployees: Employee[] = [
+      { ...sampleEmployees[0], department: 'IOT' },
+      { ...sampleEmployees[1], department: 'ST' },
+    ];
+    const blocks: OvertimeBlockInput[] = [
+      {
+        id: 'b-iot',
+        overtimeDate: '2026-11-21',
+        reasonVi: 'Trực sản xuất',
+        reasonKr: '생산 당직',
+        startTime: '16:10',
+        endTime: '20:10',
+        selectedEmployeeIds: ['emp-1'],
+        participants: [
+          { employeeId: 'emp-1', startTime: '16:10', endTime: '20:10' },
+        ],
+      },
+    ];
+    assert.equal(
+      resolveDepartmentLabel('IOT', blocks, iotEmployees, knownSubGroups),
+      'Bộ phận Kỹ thuật'
+    );
+    assert.equal(
+      resolveDepartmentLabel('ALL', blocks, iotEmployees, knownSubGroups),
+      'Bộ phận Kỹ thuật'
+    );
+    assert.equal(
+      resolveDepartmentLabel('Sản Xuất', blocks, iotEmployees, knownSubGroups),
+      'Sản Xuất'
+    );
+
+    // TV-PSGC2022 header label & Excel header formatting
+    assert.equal(
+      formatOvertimeDepartmentHeaderLabel('Bộ phận Kỹ thuật', knownSubGroups),
+      'Bộ phận Kỹ thuật / 부서: 기술'
+    );
+    assert.equal(
+      formatOvertimeDepartmentHeaderLabel('IOT', knownSubGroups),
+      'Bộ phận Kỹ thuật / 부서: 기술'
+    );
+    assert.equal(
+      formatOvertimeDepartmentHeaderLabel('ALL', knownSubGroups),
+      'Bộ phận Kỹ thuật / 부서: 기술'
+    );
+    assert.equal(
+      formatOvertimeDepartmentHeaderLabel('Sản Xuất', knownSubGroups),
+      'Bộ phận / 부서: Sản Xuất'
+    );
+    assert.equal(
+      formatOvertimeDepartmentHeaderLabel('Bộ phận Sản xuất', knownSubGroups),
+      'Bộ phận Sản xuất / 부서'
+    );
   });
 });

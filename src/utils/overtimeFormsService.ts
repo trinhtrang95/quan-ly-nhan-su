@@ -87,11 +87,14 @@ export interface OvertimeFormWithItems extends OvertimeFormRecord {
   items: OvertimeFormItemRecord[];
 }
 
+export const DEFAULT_OVERTIME_DEPARTMENT = 'Bộ phận Kỹ thuật';
+
 export interface SaveOvertimeFormInput {
   department: string;
   overtimeDate: string;
   blocks: OvertimeBlockInput[];
   employees: Employee[];
+  knownSubGroups?: string[];
   createdBy?: string | null;
 }
 
@@ -380,7 +383,7 @@ export function buildMergedEmployeesForExport(
         cccd: '',
         phone: '',
         address: '',
-        department: fallbackDepartment || 'Kỹ Thuật',
+        department: fallbackDepartment || DEFAULT_OVERTIME_DEPARTMENT,
         position: 'Nhân viên',
         joinDate: '',
         avatarUrl: '',
@@ -486,7 +489,8 @@ function normalizeSearchText(str: string): string {
 export function filterOvertimeForms(
   forms: OvertimeFormWithItems[],
   searchQuery: string,
-  dateFilter: string
+  dateFilter: string,
+  knownSubGroups: string[] = []
 ): OvertimeFormWithItems[] {
   const normalizedQuery = normalizeSearchText(searchQuery);
   const cleanDate = (dateFilter || '').trim();
@@ -506,10 +510,18 @@ export function filterOvertimeForms(
 
     if (normalizedQuery) {
       const codeNorm = normalizeSearchText(form.form_code);
-      const deptNorm = normalizeSearchText(form.department);
+      const displayCodeNorm = normalizeSearchText(
+        formatOvertimeFormCodeDisplay(form.form_code)
+      );
+      const rawDeptNorm = normalizeSearchText(form.department);
+      const mainDeptNorm = normalizeSearchText(
+        resolveOvertimeMainDepartment(form.department, knownSubGroups)
+      );
       if (
         !codeNorm.includes(normalizedQuery) &&
-        !deptNorm.includes(normalizedQuery)
+        !displayCodeNorm.includes(normalizedQuery) &&
+        !rawDeptNorm.includes(normalizedQuery) &&
+        !mainDeptNorm.includes(normalizedQuery)
       ) {
         return false;
       }
@@ -566,7 +578,7 @@ function createSampleOvertimeForms(): OvertimeFormWithItems[] {
     {
       id: form1Id,
       form_code: 'TC-20261116',
-      department: 'Kỹ Thuật',
+      department: DEFAULT_OVERTIME_DEPARTMENT,
       overtime_date: '2026-11-16',
       overtime_dates: ['2026-11-16', '2026-11-17'],
       total_blocks: 2,
@@ -867,30 +879,87 @@ export function extractActiveFormWorkDates(
   return form.overtime_date?.trim() ? [form.overtime_date.trim()] : [];
 }
 
+const TECHNICAL_DEPARTMENT_ALIASES = new Set<string>([
+  '',
+  'all',
+  'tat ca',
+  'tat ca nhom',
+  'tat ca bo phan',
+  'toan bo bo phan',
+  'ky thuat',
+  'bo phan ky thuat',
+  'phong ky thuat',
+]);
+
 /**
- * Pure helper: resolves a clean department display name from selection or employees.
+ * Pure helper: resolves the canonical main department for an overtime form.
+ * - Defaults to "Bộ phận Kỹ thuật" (including when empty, 'ALL', 'Kỹ Thuật',
+ *   'Toàn bộ bộ phận', or when a sub-group name under Bộ phận Kỹ thuật such as
+ *   IOT / ST / Bảo trì / PE is passed).
+ * - Preserves an explicitly configured distinct top-level department (e.g. 'Sản Xuất')
+ *   if it is not one of the known sub-groups under Bộ phận Kỹ thuật.
+ */
+export function resolveOvertimeMainDepartment(
+  configuredDepartment?: string | null,
+  knownSubGroups: string[] = []
+): string {
+  const trimmed = (configuredDepartment || '').trim();
+  const norm = normalizeSearchText(trimmed);
+
+  if (TECHNICAL_DEPARTMENT_ALIASES.has(norm)) {
+    return DEFAULT_OVERTIME_DEPARTMENT;
+  }
+
+  if (knownSubGroups.length > 0) {
+    const normalizedSubGroups = new Set(
+      knownSubGroups
+        .map((g) => normalizeSearchText(g))
+        .filter((g) => g.length > 0)
+    );
+    if (normalizedSubGroups.has(norm)) {
+      return DEFAULT_OVERTIME_DEPARTMENT;
+    }
+  }
+
+  return trimmed;
+}
+
+/**
+ * Pure helper: resolves the main department label for an overtime form.
+ * Selecting a sub-group or employees from a sub-group NEVER overwrites "Bộ phận Kỹ thuật".
  */
 export function resolveDepartmentLabel(
   department: string,
-  blocks: OvertimeBlockInput[],
-  employees: Employee[]
+  _blocks: OvertimeBlockInput[],
+  employees: Employee[],
+  knownSubGroups: string[] = []
 ): string {
-  if (department && department !== 'ALL' && department.trim()) {
-    return department.trim();
-  }
-  const empById = new Map(employees.map((e) => [e.id, e]));
-  const matchedDepts = new Set<string>();
-  for (const block of blocks) {
-    const ids =
-      block.participants?.length > 0
-        ? block.participants.map((p) => p.employeeId)
-        : block.selectedEmployeeIds;
-    for (const id of ids) {
-      const dept = empById.get(id)?.department?.trim();
-      if (dept) matchedDepts.add(dept);
+  const subGroupNames = new Set<string>(knownSubGroups);
+  for (const emp of employees || []) {
+    if (emp?.department?.trim()) {
+      subGroupNames.add(emp.department.trim());
     }
   }
-  return matchedDepts.size === 1 ? Array.from(matchedDepts)[0] : 'Kỹ Thuật';
+  return resolveOvertimeMainDepartment(department, Array.from(subGroupNames));
+}
+
+/**
+ * Pure helper: formats the bilingual TV-PSGC2022 department header line.
+ * Always keeps "Bộ phận Kỹ thuật / 부서: 기술" for Bộ phận Kỹ thuật and its sub-groups,
+ * while preserving explicitly configured distinct top-level departments.
+ */
+export function formatOvertimeDepartmentHeaderLabel(
+  department?: string | null,
+  knownSubGroups: string[] = []
+): string {
+  const mainDept = resolveOvertimeMainDepartment(department, knownSubGroups);
+  if (mainDept === DEFAULT_OVERTIME_DEPARTMENT) {
+    return 'Bộ phận Kỹ thuật / 부서: 기술';
+  }
+  if (/^bộ phận\b/i.test(mainDept)) {
+    return `${mainDept} / 부서`;
+  }
+  return `Bộ phận / 부서: ${mainDept}`;
 }
 
 export interface OvertimeDateConflictMatch {
@@ -1125,7 +1194,8 @@ export function buildUpdatedOvertimeForm(
   const departmentLabel = resolveDepartmentLabel(
     input.department,
     input.blocks,
-    input.employees
+    input.employees,
+    input.knownSubGroups
   );
   const items = buildOvertimeFormItemsFromBlocks(
     existingForm.id,
@@ -1200,7 +1270,7 @@ export async function fetchOvertimeForms(): Promise<{
         return {
           id: f.id,
           form_code: f.form_code,
-          department: f.department || 'Kỹ Thuật',
+          department: f.department || DEFAULT_OVERTIME_DEPARTMENT,
           overtime_date: f.overtime_date || derivedDates[0] || '',
           overtime_dates:
             derivedDates.length > 0
@@ -1252,7 +1322,8 @@ export async function saveOvertimeFormToHistory(
   const departmentLabel = resolveDepartmentLabel(
     input.department,
     input.blocks,
-    input.employees
+    input.employees,
+    input.knownSubGroups
   );
 
   const formId =

@@ -1,6 +1,9 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { Employee } from '../types/hr';
+import {
+  formatOvertimeDepartmentHeaderLabel,
+} from './overtimeFormsService';
 
 export interface OvertimeExportParticipant {
   employeeId: string;
@@ -24,6 +27,7 @@ export interface OvertimeExportPayload {
   overtimeDate: string;
   blocks: OvertimeExportTaskBlock[];
   employees: Employee[];
+  knownSubGroups?: string[];
 }
 
 const FONT_NAME = 'Times New Roman';
@@ -62,11 +66,11 @@ export function formatDateToFormStyle(dateStr: string): string {
   return dateStr;
 }
 
-export function formatDepartmentHeaderLabel(department: string): string {
-  if (!department || department === 'ALL' || department.toLowerCase().includes('kỹ thuật')) {
-    return 'Bộ phận 부서: Kỹ Thuật 기술';
-  }
-  return `Bộ phận 부서: ${department} 기술`;
+export function formatDepartmentHeaderLabel(
+  department?: string,
+  knownSubGroups: string[] = []
+): string {
+  return formatOvertimeDepartmentHeaderLabel(department, knownSubGroups);
 }
 
 export function buildCombinedReasonText(reasonVi: string, reasonKr: string): string {
@@ -88,8 +92,14 @@ export function buildCombinedReasonText(reasonVi: string, reasonKr: string): str
 
 export class OvertimeExportService {
   async exportExcel(payload: OvertimeExportPayload): Promise<void> {
-    const { department, overtimeDate, blocks, employees } = payload;
+    const { department, overtimeDate, blocks, employees, knownSubGroups = [] } = payload;
     const empById = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+    const allKnownSubGroups = Array.from(
+      new Set([
+        ...knownSubGroups,
+        ...employees.map((e) => (e.department || '').trim()).filter(Boolean),
+      ])
+    );
 
     const mapByDate = new Map<string, OvertimeExportTaskBlock[]>();
     const effectiveBlocks = blocks.length > 0 ? blocks : [
@@ -222,7 +232,10 @@ export class OvertimeExportService {
       worksheet.getRow(currentRowIndex).height = dateIdx === 0 ? 20 : 24;
       worksheet.mergeCells(`A${currentRowIndex}:D${currentRowIndex}`);
       const deptCell = worksheet.getCell(`A${currentRowIndex}`);
-      deptCell.value = dateIdx === 0 ? formatDepartmentHeaderLabel(department) : '';
+      deptCell.value =
+        dateIdx === 0
+          ? formatDepartmentHeaderLabel(department, allKnownSubGroups)
+          : '';
       deptCell.font = { name: FONT_NAME, size: 11, bold: false };
       deptCell.alignment = { vertical: 'middle', horizontal: 'left' };
 
