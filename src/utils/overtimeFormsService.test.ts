@@ -14,6 +14,7 @@ import {
   generateOvertimeFormCode,
   getLeaveTypeShortLabel,
   isLeaveRecordCoveringDate,
+  isOvertimeFormLocked,
   isOvertimeTimeBold,
   reconstructBlocksFromItems,
   resolveDefaultPrimaryOvertimeDate,
@@ -206,6 +207,15 @@ describe('overtimeFormsService pure logic', () => {
     assert.equal(filterOvertimeForms(forms, 'TC-20261115', '')[0].id, 'f2');
     assert.equal(filterOvertimeForms(forms, '', '2026-11-17')[0].id, 'f1');
     assert.equal(filterOvertimeForms(forms, 'san xuat', '2026-11-16').length, 0);
+    assert.equal(filterOvertimeForms(forms, '', '2026-11').length, 2);
+    assert.equal(filterOvertimeForms(forms, '', '2026-10').length, 0);
+
+    // isOvertimeFormLocked checks both is_locked boolean and 'Đã chốt' status
+    assert.equal(isOvertimeFormLocked(null), false);
+    assert.equal(isOvertimeFormLocked({ is_locked: false, status: 'Mới tạo' }), false);
+    assert.equal(isOvertimeFormLocked({ is_locked: false, status: 'Đã lưu' }), false);
+    assert.equal(isOvertimeFormLocked({ is_locked: true, status: 'Đã lưu' }), true);
+    assert.equal(isOvertimeFormLocked({ is_locked: false, status: 'Đã chốt' }), true);
   });
 
   it('builds an updated overtime form preserving id, form_code, and created_at while recalculating totals', () => {

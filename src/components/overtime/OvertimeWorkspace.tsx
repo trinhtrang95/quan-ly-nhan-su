@@ -22,12 +22,15 @@ import {
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
   getLocalTodayIsoDate,
+  isOvertimeFormLocked,
+  lockOvertimeForm,
   OvertimeFormWithItems,
   OvertimeLeaveCheckEntry,
   resolveOvertimeMainDepartment,
   softDeleteOvertimeForms,
   subscribeToLeaveLogsRealtime,
   subscribeToOvertimeRealtime,
+  unlockOvertimeForm,
   updateOvertimeFormInHistory,
 } from '../../utils/overtimeFormsService';
 import {
@@ -202,9 +205,15 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         `Đã tạo vỏ phiếu mới ${displayCode} (Ngày ${displayDate}). Vui lòng thêm chi tiết lượt tăng ca.`
       );
     } else if (res.action === 'opened_existing') {
-      onShowToast?.(
-        `Ngày ${displayDate} đã tồn tại phiếu ${displayCode} — đã mở trực tiếp để chỉnh sửa.`
-      );
+      if (isOvertimeFormLocked(res.form)) {
+        onShowToast?.(
+          `Phiếu ${displayCode} (Ngày ${displayDate}) đã được chốt. Đang mở ở chế độ chỉ xem.`
+        );
+      } else {
+        onShowToast?.(
+          `Ngày ${displayDate} đã tồn tại phiếu ${displayCode} — đã mở trực tiếp để chỉnh sửa.`
+        );
+      }
     } else {
       onShowToast?.(
         `Đã khôi phục vỏ phiếu ${displayCode} (Ngày ${displayDate}) để nhập chi tiết.`
@@ -227,9 +236,26 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         await loadForms({ silent: true });
         return;
       }
+      if (isOvertimeFormLocked(freshForm)) {
+        onShowToast?.(
+          `Phiếu ${formatOvertimeFormCodeDisplay(
+            freshForm.form_code
+          )} đã chốt nên không thể sửa. Vui lòng mở khóa khẩn cấp nếu cần cập nhật.`
+        );
+        await loadForms({ silent: true });
+        return;
+      }
       setEditingForm(freshForm);
       setActiveTab('create');
     } catch {
+      if (isOvertimeFormLocked(form)) {
+        onShowToast?.(
+          `Phiếu ${formatOvertimeFormCodeDisplay(
+            form.form_code
+          )} đã chốt nên không thể sửa.`
+        );
+        return;
+      }
       setEditingForm(form);
       setActiveTab('create');
     }
@@ -239,6 +265,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     if (!editingForm) {
       throw new Error(
         'Vui lòng tạo hoặc chọn một vỏ phiếu từ Nhật ký trước khi lưu chi tiết.'
+      );
+    }
+    if (isOvertimeFormLocked(editingForm)) {
+      throw new Error(
+        'Phiếu tăng ca đã chốt, không thể chỉnh sửa hoặc lưu lại.'
       );
     }
 
@@ -284,6 +315,34 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     }
     // Tải lại danh sách trực tiếp từ Supabase (.is('deleted_at', null)), không giữ state local cũ
     await loadForms({ silent: true });
+  };
+
+  const handleLockForm = async (form: OvertimeFormWithItems) => {
+    const locked = await lockOvertimeForm(form.id);
+    if (editingForm && editingForm.id === locked.id) {
+      setEditingForm(locked);
+    }
+    await loadForms({ silent: true });
+    onShowToast?.(
+      `Đã chốt phiếu ${formatOvertimeFormCodeDisplay(
+        locked.form_code
+      )} (Ngày ${formatDateToFormStyle(
+        locked.overtime_date
+      )}). Dữ liệu đã được khóa và cập nhật vào báo cáo Giờ Tăng ca.`
+    );
+  };
+
+  const handleUnlockForm = async (form: OvertimeFormWithItems) => {
+    const unlocked = await unlockOvertimeForm(form);
+    if (editingForm && editingForm.id === unlocked.id) {
+      setEditingForm(unlocked);
+    }
+    await loadForms({ silent: true });
+    onShowToast?.(
+      `Đã mở khóa khẩn cấp phiếu ${formatOvertimeFormCodeDisplay(
+        unlocked.form_code
+      )}. Phiếu tạm thời không tính vào báo cáo Giờ Tăng ca cho đến khi chốt lại.`
+    );
   };
 
   const activeFormsCount = forms.filter((f) => !f.deleted_at).length;
@@ -368,6 +427,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             onRefresh={() => loadForms({ silent: false })}
             onCreateOrOpenShell={handleCreateOrOpenShell}
             onEdit={(form) => void handleStartEditForm(form)}
+            onLockForm={handleLockForm}
+            onUnlockForm={handleUnlockForm}
             onSoftDelete={handleSoftDeleteForms}
             onShowToast={onShowToast}
           />

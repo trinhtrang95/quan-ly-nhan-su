@@ -66,6 +66,7 @@ export interface OvertimeFormRecord {
   total_participants: number;
   total_hours: number;
   status: string;
+  is_locked?: boolean;
   created_by?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -137,6 +138,7 @@ interface SupabaseOvertimeFormRow {
   total_employees: number | null;
   total_hours: number | null;
   status: string | null;
+  is_locked?: boolean | null;
   created_by?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -165,8 +167,9 @@ export const OVERTIME_FORMS_STORAGE_KEY = 'hr_pro_overtime_forms_v1';
 export const OVERTIME_FORMS_DELETED_KEY = 'hr_pro_overtime_forms_deleted_v1';
 export const OVERTIME_FORMS_UPDATED_KEY = 'hr_pro_overtime_forms_updated_v1';
 
-export const SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL = `-- 1. Bổ sung cột deleted_at cho cả 2 bảng overtime_forms và overtime_form_items
+export const SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL = `-- 1. Bổ sung cột deleted_at và is_locked cho bảng overtime_forms / overtime_form_items
 ALTER TABLE public.overtime_forms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.overtime_forms ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE public.overtime_form_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
 
 -- 2. Chuẩn hóa RLS Policy (cho phép đọc/ghi/cập nhật deleted_at không bị chặn lỗi 42501)
@@ -579,8 +582,18 @@ function normalizeSearchText(str: string): string {
 }
 
 /**
+ * Pure helper: returns true when an overtime form is locked ("Đã chốt").
+ */
+export function isOvertimeFormLocked(
+  form?: { is_locked?: boolean | null; status?: string | null } | null
+): boolean {
+  if (!form) return false;
+  return form.is_locked === true || (form.status || '').trim() === 'Đã chốt';
+}
+
+/**
  * Pure helper: filters overtime form records by search query (form code or department)
- * and overtime date, always excluding soft-deleted records.
+ * and overtime date or month (`YYYY-MM` or `YYYY-MM-DD`), always excluding soft-deleted records.
  */
 export function filterOvertimeForms(
   forms: OvertimeFormWithItems[],
@@ -590,6 +603,7 @@ export function filterOvertimeForms(
 ): OvertimeFormWithItems[] {
   const normalizedQuery = normalizeSearchText(searchQuery);
   const cleanDate = (dateFilter || '').trim();
+  const isMonthFilter = /^\d{4}-\d{2}$/.test(cleanDate);
 
   return forms.filter((form) => {
     if (form.deleted_at) return false;
@@ -599,7 +613,13 @@ export function filterOvertimeForms(
         Array.isArray(form.overtime_dates) && form.overtime_dates.length > 0
           ? form.overtime_dates
           : [form.overtime_date];
-      if (form.overtime_date !== cleanDate && !dates.includes(cleanDate)) {
+      if (isMonthFilter) {
+        const primaryMatches = (form.overtime_date || '').startsWith(cleanDate);
+        const anyItemMatches = dates.some((d) => (d || '').startsWith(cleanDate));
+        if (!primaryMatches && !anyItemMatches) {
+          return false;
+        }
+      } else if (form.overtime_date !== cleanDate && !dates.includes(cleanDate)) {
         return false;
       }
     }
@@ -1326,6 +1346,8 @@ function hydrateOvertimeFormRow(
   const computedHours = Number(
     activeItems.reduce((acc, item) => acc + item.total_hours, 0).toFixed(2)
   );
+  const isLocked =
+    Boolean(f.is_locked) || (f.status || '').trim() === 'Đã chốt';
   return {
     id: f.id,
     form_code: f.form_code,
@@ -1340,7 +1362,10 @@ function hydrateOvertimeFormRow(
     total_blocks: Number(f.total_blocks ?? 0),
     total_participants: Number(f.total_employees ?? activeItems.length),
     total_hours: Number(f.total_hours ?? computedHours),
-    status: f.status || 'Đã lưu',
+    status: isLocked
+      ? 'Đã chốt'
+      : f.status || (activeItems.length > 0 ? 'Đã lưu' : 'Mới tạo'),
+    is_locked: isLocked,
     created_by: f.created_by ?? null,
     created_at: f.created_at,
     updated_at: f.updated_at ?? null,
@@ -1351,9 +1376,11 @@ function hydrateOvertimeFormRow(
 
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
   if (!err) return false;
+  const msg = (err.message || '').toLowerCase();
   return (
     err.code === '42703' ||
-    Boolean(err.message && err.message.toLowerCase().includes('deleted_at'))
+    msg.includes('deleted_at') ||
+    msg.includes('is_locked')
   );
 }
 
@@ -1727,22 +1754,33 @@ export async function createOrOpenOvertimeShell(
         .is('deleted_at', null);
     }
 
-    const restoreRes = await client
+    const baseRestorePayload = {
+      form_code: canonicalCode,
+      department: departmentLabel,
+      overtime_date: cleanDate,
+      total_blocks: 0,
+      total_employees: 0,
+      total_hours: 0,
+      status: 'Mới tạo',
+      deleted_at: null,
+      updated_at: nowIso,
+    };
+
+    let restoreRes = await client
       .from('overtime_forms')
-      .update({
-        form_code: canonicalCode,
-        department: departmentLabel,
-        overtime_date: cleanDate,
-        total_blocks: 0,
-        total_employees: 0,
-        total_hours: 0,
-        status: 'Mới tạo',
-        deleted_at: null,
-        updated_at: nowIso,
-      })
+      .update({ ...baseRestorePayload, is_locked: false })
       .eq('id', deletedRow.id)
       .select('*')
       .single();
+
+    if (restoreRes.error && isUndefinedColumnError(restoreRes.error)) {
+      restoreRes = await client
+        .from('overtime_forms')
+        .update(baseRestorePayload)
+        .eq('id', deletedRow.id)
+        .select('*')
+        .single();
+    }
 
     if (restoreRes.error) {
       const code = restoreRes.error.code;
@@ -1925,12 +1963,38 @@ export async function updateOvertimeFormInHistory(
   existingForm: OvertimeFormWithItems,
   input: SaveOvertimeFormInput
 ): Promise<OvertimeFormWithItems> {
+  if (isOvertimeFormLocked(existingForm)) {
+    throw new OvertimeSupabaseActionError(
+      'Phiếu tăng ca đã chốt, không thể chỉnh sửa hoặc lưu lại. Vui lòng thực hiện mở khóa khẩn cấp nếu cần cập nhật.',
+      'FORM_LOCKED'
+    );
+  }
+
   const client = getOvertimeSupabaseClient();
   const updatedForm = buildUpdatedOvertimeForm(existingForm, input);
   const nowIso = updatedForm.updated_at || new Date().toISOString();
 
   let syncedToSupabase = false;
   try {
+    // Kiểm tra lại trạng thái chốt mới nhất trên Supabase trước khi ghi đè
+    const latestCheckRes = await client
+      .from('overtime_forms')
+      .select('*')
+      .eq('id', existingForm.id)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (
+      !latestCheckRes.error &&
+      latestCheckRes.data &&
+      isOvertimeFormLocked(latestCheckRes.data as SupabaseOvertimeFormRow)
+    ) {
+      throw new OvertimeSupabaseActionError(
+        'Phiếu tăng ca đã được chốt trên hệ thống, không thể lưu thay đổi.',
+        'FORM_LOCKED'
+      );
+    }
+
     const updateFormRes = await client
       .from('overtime_forms')
       .update({
@@ -1996,7 +2060,10 @@ export async function updateOvertimeFormInHistory(
       }
     }
     syncedToSupabase = true;
-  } catch {
+  } catch (err) {
+    if (err instanceof OvertimeSupabaseActionError) {
+      throw err;
+    }
     // Graceful fallback: local override ensures edits persist across reloads
   }
 
@@ -2016,6 +2083,195 @@ export async function updateOvertimeFormInHistory(
   return updatedForm;
 }
 
+/**
+ * Locks an overtime form ("Chốt phiếu"): sets `is_locked = true` and `status = 'Đã chốt'`
+ * in Supabase (`overtime_forms`), gracefully falling back to `status = 'Đã chốt'` if `is_locked`
+ * column has not yet been migrated.
+ */
+export async function lockOvertimeForm(
+  formId: string
+): Promise<OvertimeFormWithItems> {
+  const cleanId = (formId || '').trim();
+  if (!cleanId) {
+    throw new OvertimeSupabaseActionError('Không xác định được phiếu cần chốt.');
+  }
+
+  const client = getOvertimeSupabaseClient();
+  const nowIso = new Date().toISOString();
+
+  let updateRes = await client
+    .from('overtime_forms')
+    .update({
+      is_locked: true,
+      status: 'Đã chốt',
+      updated_at: nowIso,
+    })
+    .eq('id', cleanId)
+    .is('deleted_at', null)
+    .select('*')
+    .maybeSingle();
+
+  if (updateRes.error && isUndefinedColumnError(updateRes.error)) {
+    updateRes = await client
+      .from('overtime_forms')
+      .update({
+        status: 'Đã chốt',
+        updated_at: nowIso,
+      })
+      .eq('id', cleanId)
+      .is('deleted_at', null)
+      .select('*')
+      .maybeSingle();
+  }
+
+  if (updateRes.error) {
+    const code = updateRes.error.code;
+    const isRls =
+      code === '42501' ||
+      updateRes.error.message.toLowerCase().includes('row-level security');
+    throw new OvertimeSupabaseActionError(
+      isRls
+        ? 'Supabase RLS đang chặn thao tác chốt phiếu trên bảng overtime_forms (lỗi 42501). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.'
+        : `Không thể chốt phiếu trên Supabase: ${updateRes.error.message}`,
+      code,
+      isRls
+    );
+  }
+
+  if (!updateRes.data) {
+    const stillExists = await client
+      .from('overtime_forms')
+      .select('id')
+      .eq('id', cleanId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (stillExists.data) {
+      throw new OvertimeSupabaseActionError(
+        'Supabase không cho phép cập nhật trạng thái chốt phiếu (RLS policy). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.',
+        '42501',
+        true
+      );
+    }
+    throw new OvertimeSupabaseActionError(
+      'Phiếu tăng ca không còn tồn tại hoặc đã bị xóa.'
+    );
+  }
+
+  const freshForm =
+    (await fetchOvertimeFormById(cleanId)) ||
+    hydrateOvertimeFormRow(updateRes.data as SupabaseOvertimeFormRow, []);
+  const lockedForm: OvertimeFormWithItems = {
+    ...freshForm,
+    is_locked: true,
+    status: 'Đã chốt',
+  };
+
+  clearLocalUpdatedForm(cleanId);
+  const localForms = readLocalForms(false);
+  const nextLocal = localForms.some((f) => f.id === cleanId)
+    ? localForms.map((f) => (f.id === cleanId ? lockedForm : f))
+    : [lockedForm, ...localForms];
+  writeLocalForms(nextLocal);
+
+  return lockedForm;
+}
+
+/**
+ * Emergency unlock for a locked overtime form ("Mở khóa khẩn cấp"):
+ * clears `is_locked = false` and restores status to `'Đã lưu'` (when form has items)
+ * or `'Mới tạo'` (when empty).
+ */
+export async function unlockOvertimeForm(
+  form: OvertimeFormWithItems
+): Promise<OvertimeFormWithItems> {
+  const cleanId = (form?.id || '').trim();
+  if (!cleanId) {
+    throw new OvertimeSupabaseActionError('Không xác định được phiếu cần mở khóa.');
+  }
+
+  const client = getOvertimeSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const freshBefore = await fetchOvertimeFormById(cleanId);
+  const activeItems = freshBefore?.items ?? form.items ?? [];
+  const restoredStatus = activeItems.length > 0 ? 'Đã lưu' : 'Mới tạo';
+
+  let updateRes = await client
+    .from('overtime_forms')
+    .update({
+      is_locked: false,
+      status: restoredStatus,
+      updated_at: nowIso,
+    })
+    .eq('id', cleanId)
+    .is('deleted_at', null)
+    .select('*')
+    .maybeSingle();
+
+  if (updateRes.error && isUndefinedColumnError(updateRes.error)) {
+    updateRes = await client
+      .from('overtime_forms')
+      .update({
+        status: restoredStatus,
+        updated_at: nowIso,
+      })
+      .eq('id', cleanId)
+      .is('deleted_at', null)
+      .select('*')
+      .maybeSingle();
+  }
+
+  if (updateRes.error) {
+    const code = updateRes.error.code;
+    const isRls =
+      code === '42501' ||
+      updateRes.error.message.toLowerCase().includes('row-level security');
+    throw new OvertimeSupabaseActionError(
+      isRls
+        ? 'Supabase RLS đang chặn mở khóa phiếu trên bảng overtime_forms (lỗi 42501). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.'
+        : `Không thể mở khóa phiếu trên Supabase: ${updateRes.error.message}`,
+      code,
+      isRls
+    );
+  }
+
+  if (!updateRes.data) {
+    const stillExists = await client
+      .from('overtime_forms')
+      .select('id')
+      .eq('id', cleanId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (stillExists.data) {
+      throw new OvertimeSupabaseActionError(
+        'Supabase không cho phép mở khóa phiếu (RLS policy). Vui lòng chạy mã SQL chuẩn hóa trên Supabase.',
+        '42501',
+        true
+      );
+    }
+    throw new OvertimeSupabaseActionError(
+      'Phiếu tăng ca không còn tồn tại hoặc đã bị xóa.'
+    );
+  }
+
+  const hydrated = hydrateOvertimeFormRow(
+    {
+      ...(updateRes.data as SupabaseOvertimeFormRow),
+      is_locked: false,
+      status: restoredStatus,
+    },
+    activeItems
+  );
+
+  clearLocalUpdatedForm(cleanId);
+  const localForms = readLocalForms(false);
+  const nextLocal = localForms.some((f) => f.id === cleanId)
+    ? localForms.map((f) => (f.id === cleanId ? hydrated : f))
+    : [hydrated, ...localForms];
+  writeLocalForms(nextLocal);
+
+  return hydrated;
+}
+
 export interface SoftDeleteOvertimeResult {
   deletedIds: string[];
   deletedAt: string;
@@ -2025,6 +2281,7 @@ export interface SoftDeleteOvertimeResult {
 /**
  * Soft-deletes one or multiple overtime forms by setting `deleted_at = new Date().toISOString()`
  * on BOTH `overtime_forms` and related `overtime_form_items` rows (never hard-deleting).
+ * Rejects soft-deletion of locked ("Đã chốt") forms.
  * Throws `OvertimeSupabaseActionError` if Supabase RLS/permissions reject the update so
  * callers never hide unsaved deletions only in local state.
  */
@@ -2042,6 +2299,25 @@ export async function softDeleteOvertimeForms(
 
   const client = getOvertimeSupabaseClient();
   let itemsSchemaMissing = false;
+
+  // 0. Chặn xóa phiếu đã chốt trên Supabase
+  const lockCheckRes = await client
+    .from('overtime_forms')
+    .select('*')
+    .in('id', cleanIds)
+    .is('deleted_at', null);
+
+  if (!lockCheckRes.error && Array.isArray(lockCheckRes.data)) {
+    const lockedTargets = (lockCheckRes.data as SupabaseOvertimeFormRow[]).filter(
+      (row) => isOvertimeFormLocked(row)
+    );
+    if (lockedTargets.length > 0) {
+      throw new OvertimeSupabaseActionError(
+        'Phiếu tăng ca đã chốt nên không thể xóa. Vui lòng thực hiện mở khóa khẩn cấp trước nếu cần xóa.',
+        'FORM_LOCKED'
+      );
+    }
+  }
 
   // 1. Soft-delete child records in overtime_form_items first
   const itemsUpdateRes = await client

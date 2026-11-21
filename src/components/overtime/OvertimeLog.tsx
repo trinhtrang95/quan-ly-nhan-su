@@ -10,11 +10,13 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
+  Lock,
   Pencil,
   Printer,
-  RefreshCw,
   Search,
+  ShieldAlert,
   Trash2,
+  Unlock,
   X,
 } from 'lucide-react';
 import { DepartmentGroup, Employee } from '../../types/hr';
@@ -33,8 +35,8 @@ import {
   fetchOvertimeFormById,
   filterOvertimeForms,
   formatOvertimeFormCodeDisplay,
-  generateOvertimeFormCode,
   getLocalTodayIsoDate,
+  isOvertimeFormLocked,
   isOvertimeTimeBold,
   OvertimeFormWithItems,
   OvertimeSupabaseActionError,
@@ -52,9 +54,17 @@ export interface OvertimeLogProps {
   onRefresh: () => Promise<void> | void;
   onCreateOrOpenShell?: (overtimeDate: string) => Promise<void> | void;
   onEdit: (form: OvertimeFormWithItems) => void;
+  onLockForm?: (form: OvertimeFormWithItems) => Promise<void>;
+  onUnlockForm?: (form: OvertimeFormWithItems) => Promise<void>;
   onSoftDelete: (formIds: string[]) => Promise<void>;
   onSwitchToCreate?: () => void;
   onShowToast?: (message: string) => void;
+}
+
+function formatMonthLabel(monthKey: string): string {
+  const match = monthKey.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return monthKey;
+  return `Tháng ${match[2]}/${match[1]}`;
 }
 
 export const OvertimeLog: React.FC<OvertimeLogProps> = ({
@@ -66,17 +76,24 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   onRefresh,
   onCreateOrOpenShell,
   onEdit,
+  onLockForm,
+  onUnlockForm,
   onSoftDelete,
   onSwitchToCreate,
   onShowToast,
 }) => {
+  const currentMonthKey = useMemo(
+    () => getLocalTodayIsoDate().slice(0, 7),
+    []
+  );
   const [createShellDate, setCreateShellDate] = useState<string>(() =>
     getLocalTodayIsoDate()
   );
   const [isCreatingShell, setIsCreatingShell] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [dateFilter, setDateFilter] = useState<string>('');
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [monthFilter, setMonthFilter] = useState<string>(
+    () => getLocalTodayIsoDate().slice(0, 7)
+  );
   const [viewingForm, setViewingForm] = useState<OvertimeFormWithItems | null>(
     null
   );
@@ -86,9 +103,16 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   const [deletingForms, setDeletingForms] = useState<OvertimeFormWithItems[]>(
     []
   );
-  const [selectedFormIds, setSelectedFormIds] = useState<string[]>([]);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [lockingForm, setLockingForm] = useState<OvertimeFormWithItems | null>(
+    null
+  );
+  const [isLocking, setIsLocking] = useState<boolean>(false);
+  const [unlockingForm, setUnlockingForm] =
+    useState<OvertimeFormWithItems | null>(null);
+  const [unlockKeywordInput, setUnlockKeywordInput] = useState<string>('');
+  const [isUnlocking, setIsUnlocking] = useState<boolean>(false);
   const [exportingFormId, setExportingFormId] = useState<string | null>(null);
   const [isSqlModalOpen, setIsSqlModalOpen] = useState<boolean>(false);
   const [sqlErrorContext, setSqlErrorContext] = useState<string | null>(null);
@@ -108,79 +132,50 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   const getDisplayDepartment = (rawDepartment?: string | null) =>
     resolveOvertimeMainDepartment(rawDepartment, knownSubGroups);
 
+  const monthOptions = useMemo(() => {
+    const keys = new Set<string>([currentMonthKey]);
+    if (monthFilter && /^\d{4}-\d{2}$/.test(monthFilter)) {
+      keys.add(monthFilter);
+    }
+    for (const form of forms) {
+      if (form.deleted_at) continue;
+      if (form.overtime_date && /^\d{4}-\d{2}/.test(form.overtime_date)) {
+        keys.add(form.overtime_date.slice(0, 7));
+      }
+      if (Array.isArray(form.overtime_dates)) {
+        for (const d of form.overtime_dates) {
+          if (d && /^\d{4}-\d{2}/.test(d)) {
+            keys.add(d.slice(0, 7));
+          }
+        }
+      }
+    }
+    return Array.from(keys).sort((a, b) => b.localeCompare(a));
+  }, [forms, currentMonthKey, monthFilter]);
+
   const filteredForms = useMemo(
-    () => filterOvertimeForms(forms, searchQuery, dateFilter, knownSubGroups),
-    [forms, searchQuery, dateFilter, knownSubGroups]
+    () => filterOvertimeForms(forms, searchQuery, monthFilter, knownSubGroups),
+    [forms, searchQuery, monthFilter, knownSubGroups]
   );
 
-  // Tự động đồng bộ selection và modal xem chi tiết khi danh sách thay đổi qua Realtime
+  // Tự động đồng bộ modal xem chi tiết khi danh sách thay đổi qua Realtime
   useEffect(() => {
-    const activeIds = new Set(
-      forms.filter((f) => !f.deleted_at).map((f) => f.id)
-    );
-    setSelectedFormIds((prev) => prev.filter((id) => activeIds.has(id)));
-    if (viewingForm && !activeIds.has(viewingForm.id)) {
-      setViewingForm(null);
-      onShowToast?.('Phiếu đang xem vừa được xóa khỏi hệ thống.');
+    const activeForms = forms.filter((f) => !f.deleted_at);
+    const activeById = new Map(activeForms.map((f) => [f.id, f]));
+    if (viewingForm) {
+      const updatedView = activeById.get(viewingForm.id);
+      if (!updatedView) {
+        setViewingForm(null);
+        onShowToast?.('Phiếu đang xem vừa được xóa khỏi hệ thống.');
+      } else if (updatedView !== viewingForm) {
+        setViewingForm(updatedView);
+      }
     }
   }, [forms, viewingForm, onShowToast]);
 
-  const selectedSet = useMemo(
-    () => new Set(selectedFormIds),
-    [selectedFormIds]
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() || monthFilter !== currentMonthKey
   );
-
-  const visibleSelectedCount = useMemo(
-    () => filteredForms.filter((f) => selectedSet.has(f.id)).length,
-    [filteredForms, selectedSet]
-  );
-
-  const isAllVisibleSelected =
-    filteredForms.length > 0 && visibleSelectedCount === filteredForms.length;
-
-  const hasActiveFilters = Boolean(searchQuery.trim() || dateFilter.trim());
-
-  const handleToggleSelectAllVisible = () => {
-    const visibleIds = filteredForms.map((f) => f.id);
-    if (isAllVisibleSelected) {
-      const visibleSet = new Set(visibleIds);
-      setSelectedFormIds((prev) => prev.filter((id) => !visibleSet.has(id)));
-    } else {
-      setSelectedFormIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
-    }
-  };
-
-  const handleToggleSelectOne = (formId: string) => {
-    setSelectedFormIds((prev) =>
-      prev.includes(formId)
-        ? prev.filter((id) => id !== formId)
-        : [...prev, formId]
-    );
-  };
-
-  const handleRefreshClick = async () => {
-    setIsRefreshing(true);
-    try {
-      await onRefresh();
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const targetShellCode = useMemo(
-    () => generateOvertimeFormCode(createShellDate || getLocalTodayIsoDate()),
-    [createShellDate]
-  );
-
-  const existingActiveShellForSelectedDate = useMemo(() => {
-    const cleanDate = (createShellDate || '').trim();
-    return forms.find(
-      (f) =>
-        !f.deleted_at &&
-        ((f.overtime_date || '').trim() === cleanDate ||
-          formatOvertimeFormCodeDisplay(f.form_code) === targetShellCode)
-    );
-  }, [forms, createShellDate, targetShellCode]);
 
   const handleCreateShellClick = async () => {
     if (isCreatingShell) return;
@@ -276,13 +271,83 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
   const handleOpenDeleteModal = (targets: OvertimeFormWithItems[]) => {
     if (targets.length === 0) return;
+    if (targets.some((f) => isOvertimeFormLocked(f))) {
+      onShowToast?.(
+        'Phiếu đã chốt nên không thể xóa. Vui lòng thực hiện mở khóa khẩn cấp trước nếu cần xóa.'
+      );
+      return;
+    }
     setIsDeleteConfirmed(false);
     setDeletingForms(targets);
   };
 
-  const handleOpenBulkDeleteModal = () => {
-    const targets = forms.filter((f) => !f.deleted_at && selectedSet.has(f.id));
-    handleOpenDeleteModal(targets);
+  const handleOpenLockModal = (form: OvertimeFormWithItems) => {
+    if (isOvertimeFormLocked(form)) return;
+    setLockingForm(form);
+  };
+
+  const handleCloseLockModal = () => {
+    if (isLocking) return;
+    setLockingForm(null);
+  };
+
+  const handleConfirmLock = async () => {
+    if (!lockingForm || !onLockForm) return;
+    setIsLocking(true);
+    try {
+      await onLockForm(lockingForm);
+      setLockingForm(null);
+    } catch (error) {
+      if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
+        setLockingForm(null);
+        setSqlErrorContext(error.message);
+        setIsSqlModalOpen(true);
+        onShowToast?.(error.message);
+      } else if (error instanceof OvertimeSupabaseActionError) {
+        onShowToast?.(error.message);
+      } else {
+        onShowToast?.(getFriendlyErrorMessage(error));
+      }
+    } finally {
+      setIsLocking(false);
+    }
+  };
+
+  const handleOpenUnlockModal = (form: OvertimeFormWithItems) => {
+    if (!isOvertimeFormLocked(form)) return;
+    setUnlockKeywordInput('');
+    setUnlockingForm(form);
+  };
+
+  const handleCloseUnlockModal = () => {
+    if (isUnlocking) return;
+    setUnlockingForm(null);
+    setUnlockKeywordInput('');
+  };
+
+  const handleConfirmUnlock = async () => {
+    if (!unlockingForm || !onUnlockForm) return;
+    if (unlockKeywordInput.trim() !== 'MO KHOA') return;
+    setIsUnlocking(true);
+    try {
+      await onUnlockForm(unlockingForm);
+      setUnlockingForm(null);
+      setUnlockKeywordInput('');
+    } catch (error) {
+      if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
+        setUnlockingForm(null);
+        setUnlockKeywordInput('');
+        setSqlErrorContext(error.message);
+        setIsSqlModalOpen(true);
+        onShowToast?.(error.message);
+      } else if (error instanceof OvertimeSupabaseActionError) {
+        onShowToast?.(error.message);
+      } else {
+        onShowToast?.(getFriendlyErrorMessage(error));
+      }
+    } finally {
+      setIsUnlocking(false);
+    }
   };
 
   const handleCloseDeleteModal = () => {
@@ -304,7 +369,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       if (viewingForm && targetIdSet.has(viewingForm.id)) {
         setViewingForm(null);
       }
-      setSelectedFormIds((prev) => prev.filter((id) => !targetIdSet.has(id)));
       setDeletingForms([]);
       setIsDeleteConfirmed(false);
 
@@ -389,9 +453,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
       {/* Thanh công cụ ngang hợp nhất: Bộ lọc bên trái | Tạo vỏ phiếu căn sát phải */}
       <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs no-print">
-        {/* Cụm bên trái: Tìm kiếm, lọc ngày, bộ đếm & Làm mới */}
+        {/* Cụm bên trái: Tìm kiếm & Dropdown chọn tháng */}
         <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <div className="relative w-48 sm:w-52">
+          <div className="relative w-48 sm:w-56">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -413,15 +477,22 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             )}
           </div>
 
-          <div className="relative w-36">
-            <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              aria-label="Lọc theo ngày tăng ca"
-              className="w-full h-9 pl-8 pr-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-800 font-mono focus:border-[#14539E] focus:outline-none"
-            />
+          <div className="relative">
+            <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              aria-label="Lọc theo tháng tăng ca"
+              data-testid="overtime-log-month-select"
+              className="h-9 pl-8 pr-7 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-800 focus:border-[#14539E] focus:outline-none cursor-pointer"
+            >
+              <option value="">Tất cả các tháng</option>
+              {monthOptions.map((monthKey) => (
+                <option key={monthKey} value={monthKey}>
+                  {formatMonthLabel(monthKey)}
+                </option>
+              ))}
+            </select>
           </div>
 
           {hasActiveFilters && (
@@ -429,49 +500,16 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               type="button"
               onClick={() => {
                 setSearchQuery('');
-                setDateFilter('');
+                setMonthFilter(currentMonthKey);
               }}
               className="h-9 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               Xóa lọc
             </button>
           )}
-
-          {selectedFormIds.length > 0 && (
-            <button
-              type="button"
-              onClick={handleOpenBulkDeleteModal}
-              className="h-9 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-2xs"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Xóa đã chọn ({formatNumberVN(selectedFormIds.length)})</span>
-            </button>
-          )}
-
-          <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap px-1">
-            Hiển thị{' '}
-            <strong className="font-semibold text-slate-800">
-              {formatNumberVN(filteredForms.length)}
-            </strong>{' '}
-            / {formatNumberVN(forms.filter((f) => !f.deleted_at).length)} phiếu
-          </span>
-
-          <button
-            type="button"
-            onClick={handleRefreshClick}
-            disabled={isRefreshing || isLoading}
-            className="h-9 px-3 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`w-3.5 h-3.5 text-[#14539E] ${
-                isRefreshing || isLoading ? 'animate-spin' : ''
-              }`}
-            />
-            <span>Làm mới</span>
-          </button>
         </div>
 
-        {/* Cụm bên phải: Ngày phiếu, Mã phiếu + trạng thái & nút + Tạo phiếu tăng ca mới (luôn căn sát phải) */}
+        {/* Cụm bên phải: Ngày phiếu & nút + Tạo phiếu tăng ca mới (luôn căn sát phải) */}
         <div className="ml-auto shrink-0 max-w-full flex flex-wrap items-center justify-end gap-2">
           <div className="flex items-center gap-1.5 shrink-0">
             <label
@@ -490,28 +528,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 className="w-full h-9 pl-8 pr-2 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
               />
             </div>
-          </div>
-
-          <div className="text-xs text-slate-600 flex items-center gap-1.5 whitespace-nowrap shrink-0">
-            <span>Mã phiếu:</span>
-            <span className="font-mono font-bold text-[#14539E] bg-blue-50 border border-blue-200 px-2 py-1 rounded-md">
-              {targetShellCode}
-            </span>
-            {existingActiveShellForSelectedDate ? (
-              <span
-                title={`Ngày ${formatDateToFormStyle(createShellDate)} đã có phiếu ${targetShellCode} — bấm nút để mở sửa`}
-                className="text-[11px] font-medium text-amber-700"
-              >
-                (Đã tồn tại — mở sửa)
-              </span>
-            ) : (
-              <span
-                title={`Tạo vỏ phiếu trống cho ngày ${formatDateToFormStyle(createShellDate)}`}
-                className="text-[11px] text-slate-400"
-              >
-                (Chưa có phiếu)
-              </span>
-            )}
           </div>
 
           <button
@@ -536,36 +552,17 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                <th className="py-3 pl-3.5 pr-1.5 w-10 text-center">
-                  <input
-                    type="checkbox"
-                    checked={isAllVisibleSelected}
-                    disabled={filteredForms.length === 0 || isLoading}
-                    onChange={handleToggleSelectAllVisible}
-                    aria-label="Chọn tất cả phiếu đang hiển thị"
-                    className="w-4 h-4 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer disabled:opacity-40"
-                  />
-                </th>
-                <th className="py-3 px-3 w-12 text-center">STT</th>
-                <th className="py-3 px-3.5 min-w-[150px]">
-                  Mã phiếu
-                </th>
-                <th className="py-3 px-3.5 min-w-[155px]">Ngày tăng ca</th>
-                <th className="py-3 px-3.5 min-w-[150px]">Bộ phận</th>
-                <th className="py-3 px-3.5 min-w-[140px] text-right">
-                  Số lượng
-                </th>
-                <th className="py-3 px-3.5 w-32 text-center">Trạng thái</th>
-                <th className="py-3 px-3.5 w-80 text-right">Thao tác</th>
+                <th className="py-3 px-3 w-14 text-center">STT</th>
+                <th className="py-3 px-3.5 min-w-[160px]">Mã phiếu</th>
+                <th className="py-3 px-3.5 min-w-[175px]">Ngày tăng ca</th>
+                <th className="py-3 px-3.5 w-36 text-center">Trạng thái</th>
+                <th className="py-3 px-3.5 w-52 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {isLoading ? (
                 Array.from({ length: 4 }).map((_, idx) => (
                   <tr key={`skeleton-${idx}`} className="h-14 animate-pulse">
-                    <td className="py-3 pl-3.5 pr-1.5 text-center">
-                      <div className="h-4 w-4 bg-slate-200 rounded mx-auto" />
-                    </td>
                     <td className="py-3 px-3 text-center">
                       <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
                     </td>
@@ -576,32 +573,30 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       <div className="h-3.5 w-24 bg-slate-200 rounded" />
                     </td>
                     <td className="py-3 px-3.5">
-                      <div className="h-3.5 w-28 bg-slate-200 rounded" />
+                      <div className="h-5 w-20 bg-slate-200 rounded-full mx-auto" />
                     </td>
                     <td className="py-3 px-3.5">
-                      <div className="h-3.5 w-20 bg-slate-200 rounded ml-auto" />
-                    </td>
-                    <td className="py-3 px-3.5">
-                      <div className="h-3.5 w-16 bg-slate-200 rounded mx-auto" />
-                    </td>
-                    <td className="py-3 px-3.5">
-                      <div className="h-7 w-36 bg-slate-200 rounded ml-auto" />
+                      <div className="h-8 w-44 bg-slate-200 rounded ml-auto" />
                     </td>
                   </tr>
                 ))
               ) : filteredForms.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-14 px-6 text-center">
+                  <td colSpan={5} className="py-14 px-6 text-center">
                     <div className="max-w-sm mx-auto flex flex-col items-center">
                       <FileText className="w-9 h-9 text-slate-300 mb-3" />
                       <p className="text-sm font-semibold text-slate-800">
                         {hasActiveFilters
                           ? 'Không tìm thấy phiếu tăng ca phù hợp'
-                          : 'Chưa có phiếu tăng ca nào được lưu'}
+                          : monthFilter
+                            ? `Chưa có phiếu tăng ca nào trong ${formatMonthLabel(
+                                monthFilter
+                              )}`
+                            : 'Chưa có phiếu tăng ca nào được lưu'}
                       </p>
                       <p className="text-xs text-slate-500 mt-1">
-                        {hasActiveFilters
-                          ? 'Thử thay đổi từ khóa bộ phận, mã phiếu hoặc ngày tăng ca.'
+                        {hasActiveFilters || monthFilter
+                          ? 'Thử chọn tháng khác, chuyển về Tất cả các tháng hoặc tạo phiếu mới.'
                           : 'Chọn Ngày phiếu ở thanh trên và bấm "+ Tạo phiếu tăng ca mới" để tạo vỏ phiếu theo ngày.'}
                       </p>
                       {!hasActiveFilters && (onCreateOrOpenShell || onSwitchToCreate) && (
@@ -631,30 +626,21 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       : [form.overtime_date].filter(Boolean);
                   const isExporting = exportingFormId === form.id;
                   const isViewingLoading = loadingViewFormId === form.id;
-                  const isSelected = selectedSet.has(form.id);
+                  const isLocked = isOvertimeFormLocked(form);
+                  const isNewShell =
+                    !isLocked &&
+                    (form.status === 'Mới tạo' || form.total_participants === 0);
+                  const displayCode = formatOvertimeFormCodeDisplay(form.form_code);
 
                   return (
                     <tr
                       key={form.id}
                       className={`transition-colors ${
-                        isSelected
-                          ? 'bg-blue-50/60 hover:bg-blue-50/90'
+                        isLocked
+                          ? 'bg-slate-50/40 hover:bg-blue-50/30'
                           : 'hover:bg-slate-50/90'
                       }`}
                     >
-                      {/* Checkbox */}
-                      <td className="py-3 pl-3.5 pr-1.5 text-center">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleSelectOne(form.id)}
-                          aria-label={`Chọn phiếu ${formatOvertimeFormCodeDisplay(
-                            form.form_code
-                          )}`}
-                          className="w-4 h-4 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
-                        />
-                      </td>
-
                       {/* 1. STT */}
                       <td className="py-3 px-3 text-center font-mono text-slate-500 tabular-nums">
                         {formatNumberVN(index + 1)}
@@ -662,7 +648,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                       {/* 2. Mã phiếu */}
                       <td className="py-3 px-3.5 font-mono font-semibold text-[#14539E] tabular-nums whitespace-nowrap">
-                        {formatOvertimeFormCodeDisplay(form.form_code)}
+                        {displayCode}
                       </td>
 
                       {/* 3. Ngày tăng ca */}
@@ -686,65 +672,66 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                         )}
                       </td>
 
-                      {/* 4. Bộ phận */}
-                      <td className="py-3 px-3.5 font-medium text-slate-800">
-                        {getDisplayDepartment(form.department)}
-                      </td>
-
-                      {/* 5. Số lượng */}
-                      <td className="py-3 px-3.5 text-right tabular-nums">
-                        <div className="font-semibold text-slate-800">
-                          {formatNumberVN(form.total_participants)} lượt
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {formatNumberVN(form.total_blocks)} nhóm •{' '}
-                          {formatNumberVN(form.total_hours)} giờ
-                        </div>
-                      </td>
-
-                      {/* 6. Trạng thái */}
+                      {/* 4. Trạng thái */}
                       <td className="py-3 px-3.5 text-center">
-                        {form.status === 'Mới tạo' ||
-                        form.total_participants === 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#14539E]">
+                        {isLocked ? (
+                          <span
+                            data-testid={`form-status-locked-${form.id}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#14539E]/10 text-[#14539E] border border-[#14539E]/25 text-[11px] font-bold whitespace-nowrap"
+                          >
+                            <Lock className="w-3 h-3" />
+                            <span>Đã chốt</span>
+                          </span>
+                        ) : isNewShell ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#14539E] whitespace-nowrap">
                             <span className="w-1.5 h-1.5 rounded-full bg-[#14539E]" />
                             Mới tạo
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 whitespace-nowrap">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
                             {form.status || 'Đã lưu'}
                           </span>
                         )}
                       </td>
 
-                      {/* 7. Thao tác */}
+                      {/* 5. Thao tác (Icon-only kèm tooltip) */}
                       <td className="py-3 px-3.5 text-right">
                         <div className="inline-flex items-center justify-end gap-1.5">
                           <button
                             type="button"
                             disabled={isViewingLoading}
                             onClick={() => void handleViewForm(form)}
-                            className="h-8 px-2.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
-                            title="Xem tờ phiếu A4 chuẩn TV-PSGC2022"
+                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+                            title="Xem phiếu"
+                            aria-label={`Xem phiếu ${displayCode}`}
                           >
                             {isViewingLoading ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                               <Eye className="w-3.5 h-3.5" />
                             )}
-                            <span>Xem phiếu</span>
                           </button>
 
                           <button
                             type="button"
-                            onClick={() => onEdit(form)}
-                            className="h-8 px-2.5 rounded-lg border border-[#14539E]/30 bg-blue-50/60 text-[#14539E] hover:bg-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
-                            title="Sửa / Nhập chi tiết lượt tăng ca"
-                            aria-label={`Sửa / Nhập chi tiết phiếu ${form.form_code}`}
+                            disabled={isLocked}
+                            onClick={() => {
+                              if (!isLocked) onEdit(form);
+                            }}
+                            className="h-8 w-8 rounded-lg border border-[#14539E]/30 bg-blue-50/60 text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+                            title={
+                              isLocked
+                                ? 'Phiếu đã chốt — không thể sửa'
+                                : 'Sửa / Nhập chi tiết'
+                            }
+                            aria-label={
+                              isLocked
+                                ? `Phiếu ${displayCode} đã chốt, khóa chức năng sửa`
+                                : `Sửa / Nhập chi tiết phiếu ${displayCode}`
+                            }
                           >
                             <Pencil className="w-3.5 h-3.5" />
-                            <span>Sửa / Nhập chi tiết</span>
                           </button>
 
                           <button
@@ -752,8 +739,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             disabled={isExporting}
                             onClick={() => void handleExportFormExcel(form)}
                             className="h-8 w-8 rounded-lg border border-slate-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
-                            title="Xuất lại file Excel"
-                            aria-label={`Xuất Excel phiếu ${form.form_code}`}
+                            title="Xuất Excel"
+                            aria-label={`Xuất Excel phiếu ${displayCode}`}
                           >
                             {isExporting ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -762,12 +749,45 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             )}
                           </button>
 
+                          {isLocked ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenUnlockModal(form)}
+                              data-testid={`unlock-form-btn-${form.id}`}
+                              className="h-8 w-8 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white hover:border-amber-600 inline-flex items-center justify-center transition-colors cursor-pointer"
+                              title="Mở khóa khẩn cấp"
+                              aria-label={`Mở khóa khẩn cấp phiếu ${displayCode}`}
+                            >
+                              <Unlock className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenLockModal(form)}
+                              data-testid={`lock-form-btn-${form.id}`}
+                              className="h-8 w-8 rounded-lg border border-[#14539E]/30 bg-white text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer"
+                              title="Chốt phiếu"
+                              aria-label={`Chốt phiếu ${displayCode}`}
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
                           <button
                             type="button"
+                            disabled={isLocked}
                             onClick={() => handleOpenDeleteModal([form])}
-                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer"
-                            title="Xóa phiếu"
-                            aria-label={`Xóa phiếu ${form.form_code}`}
+                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:bg-slate-100 disabled:hover:border-slate-200 disabled:cursor-not-allowed"
+                            title={
+                              isLocked
+                                ? 'Phiếu đã chốt — không thể xóa'
+                                : 'Xóa mềm phiếu'
+                            }
+                            aria-label={
+                              isLocked
+                                ? `Phiếu ${displayCode} đã chốt, khóa chức năng xóa`
+                                : `Xóa mềm phiếu ${displayCode}`
+                            }
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -805,6 +825,12 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   <span className="truncate">
                     {getDisplayDepartment(viewingForm.department)}
                   </span>
+                  {isOvertimeFormLocked(viewingForm) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#14539E]/10 text-[#14539E] border border-[#14539E]/25 text-[11px] font-bold shrink-0">
+                      <Lock className="w-3 h-3" />
+                      <span>Đã chốt</span>
+                    </span>
+                  )}
                 </h2>
                 <p className="text-[11px] text-slate-500 tabular-nums mt-0.5">
                   Biểu mẫu TV-PSGC2022 •{' '}
@@ -816,12 +842,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={isOvertimeFormLocked(viewingForm)}
+                  title={
+                    isOvertimeFormLocked(viewingForm)
+                      ? 'Phiếu đã chốt — không thể sửa'
+                      : 'Sửa / Nhập chi tiết lượt tăng ca'
+                  }
                   onClick={() => {
+                    if (isOvertimeFormLocked(viewingForm)) return;
                     const target = viewingForm;
                     setViewingForm(null);
                     onEdit(target);
                   }}
-                  className="h-9 px-3.5 rounded-lg border border-[#14539E] text-[#14539E] hover:bg-blue-50 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  className="h-9 px-3.5 rounded-lg border border-[#14539E] text-[#14539E] hover:bg-blue-50 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:border-slate-300 disabled:text-slate-400 disabled:hover:bg-transparent disabled:cursor-not-allowed"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   <span>Sửa / Nhập chi tiết</span>
@@ -1084,7 +1117,200 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* In-app Soft Delete Confirmation Modal (hỗ trợ xóa 1 phiếu hoặc nhiều phiếu) */}
+      {/* Modal Xác nhận Chốt phiếu tăng ca */}
+      {lockingForm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lock-overtime-title"
+          data-testid="lock-overtime-modal"
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4 no-print"
+        >
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-md p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-200 text-[#14539E] flex items-center justify-center shrink-0 mt-0.5">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3
+                    id="lock-overtime-title"
+                    className="text-sm font-bold text-slate-900"
+                  >
+                    Chốt phiếu tăng ca
+                  </h3>
+                  <p className="text-xs text-slate-700 mt-1 leading-relaxed">
+                    Xác nhận chốt phiếu tăng ca ngày{' '}
+                    <strong className="font-mono text-[#14539E]">
+                      {formatDateToFormStyle(lockingForm.overtime_date)}
+                    </strong>
+                    ? Sau khi chốt sẽ khóa chức năng sửa và xóa phiếu này.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isLocking}
+                onClick={handleCloseLockModal}
+                aria-label="Đóng hộp thoại chốt phiếu"
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">Mã phiếu:</span>
+                <span className="font-mono font-bold text-[#14539E]">
+                  {formatOvertimeFormCodeDisplay(lockingForm.form_code)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">Quy mô ghi nhận:</span>
+                <span className="font-semibold text-slate-800 tabular-nums">
+                  {formatNumberVN(lockingForm.total_participants)} lượt •{' '}
+                  {formatNumberVN(lockingForm.total_hours)} giờ
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isLocking}
+                onClick={handleCloseLockModal}
+                className="h-9 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={isLocking}
+                onClick={() => void handleConfirmLock()}
+                data-testid="confirm-lock-overtime-btn"
+                className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isLocking ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Lock className="w-3.5 h-3.5" />
+                )}
+                <span>Xác nhận chốt phiếu</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Mở khóa khẩn cấp (yêu cầu nhập đúng từ khóa MO KHOA) */}
+      {unlockingForm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unlock-overtime-title"
+          data-testid="unlock-overtime-modal"
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center p-4 no-print"
+        >
+          <div className="bg-white rounded-xl border border-amber-200 shadow-xl w-full max-w-md p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+                  <ShieldAlert className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h3
+                    id="unlock-overtime-title"
+                    className="text-sm font-bold text-slate-900"
+                  >
+                    Mở khóa khẩn cấp phiếu tăng ca
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Thao tác này chỉ dành cho trường hợp cần điều chỉnh khẩn cấp dữ liệu đã chốt.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isUnlocking}
+                onClick={handleCloseUnlockModal}
+                aria-label="Đóng hộp thoại mở khóa khẩn cấp"
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="rounded-lg bg-red-50 border border-red-200 px-3.5 py-2.5 text-xs text-red-900 space-y-1 leading-relaxed">
+              <div className="font-bold flex items-center gap-1.5 text-red-800">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>Cảnh báo tác động dữ liệu:</span>
+              </div>
+              <p>
+                Sau khi mở khóa phiếu{' '}
+                <strong className="font-mono">
+                  {formatOvertimeFormCodeDisplay(unlockingForm.form_code)}
+                </strong>{' '}
+                (ngày{' '}
+                <strong className="font-mono">
+                  {formatDateToFormStyle(unlockingForm.overtime_date)}
+                </strong>
+                ), phiếu sẽ cho phép sửa/xóa lại và <strong>tạm thời bị loại khỏi báo cáo Giờ Tăng ca</strong> cho đến khi được chốt lại.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="unlock-keyword-input"
+                className="block text-xs font-semibold text-slate-700"
+              >
+                Nhập chính xác từ khóa{' '}
+                <code className="font-mono font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+                  MO KHOA
+                </code>{' '}
+                để xác nhận:
+              </label>
+              <input
+                id="unlock-keyword-input"
+                type="text"
+                autoFocus
+                value={unlockKeywordInput}
+                onChange={(e) => setUnlockKeywordInput(e.target.value)}
+                placeholder="Nhập MO KHOA..."
+                data-testid="unlock-keyword-input"
+                className="w-full h-9 px-3 text-xs font-mono font-semibold rounded-lg border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-600 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isUnlocking}
+                onClick={handleCloseUnlockModal}
+                className="h-9 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isUnlocking || unlockKeywordInput.trim() !== 'MO KHOA'}
+                onClick={() => void handleConfirmUnlock()}
+                data-testid="confirm-unlock-overtime-btn"
+                className="h-9 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                {isUnlocking ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Unlock className="w-3.5 h-3.5" />
+                )}
+                <span>Xác nhận mở khóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-app Soft Delete Confirmation Modal */}
       {deletingForms.length > 0 && (
         <div
           role="dialog"
@@ -1135,9 +1361,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Bộ phận:</span>
-                  <span className="font-semibold text-slate-800">
-                    {getDisplayDepartment(deletingForms[0].department)}
+                  <span className="text-slate-500">Ngày tăng ca:</span>
+                  <span className="font-mono font-semibold text-slate-800">
+                    {formatDateToFormStyle(deletingForms[0].overtime_date)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">

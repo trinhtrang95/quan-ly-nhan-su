@@ -1,6 +1,7 @@
 import { Employee } from '../types/hr';
 import {
   calculateHoursBetween,
+  isOvertimeFormLocked,
   OvertimeFormWithItems,
 } from './overtimeFormsService';
 import { compareEmployeesByDefaultPriority } from './hrCalculations';
@@ -99,10 +100,10 @@ export function getFormEffectiveTimestamp(form: OvertimeFormWithItems): number {
 
 /**
  * Pure aggregation engine for the Monthly Overtime Hours Report ("Giờ Tăng ca").
- * - Aggregates saved `overtime_forms` + `overtime_form_items`
- * - Strictly excludes soft-deleted forms and items (`deleted_at != null`)
+ * - Aggregates ONLY locked (`is_locked === true || status === 'Đã chốt'`) `overtime_forms` + `overtime_form_items`
+ * - Strictly excludes unlocked (`Mới tạo` / `Đã lưu`) and soft-deleted forms/items (`deleted_at != null`)
  * - Sums multiple shifts/turns for the same employee on the same day within the same form
- * - When an employee appears on the same day in multiple forms (e.g. an earlier form and
+ * - When an employee appears on the same day in multiple locked forms (e.g. an earlier form and
  *   a later multi-day adjustment form), prioritizes the latest form by `updated_at` / `created_at`
  *   to avoid double-counting revised hours.
  * - Computes per-member totals, per-day totals, and grand total
@@ -160,9 +161,9 @@ export function calculateMonthlyOvertimeReport({
     });
   }
 
-  // Aggregate active (non-soft-deleted) overtime forms and items
+  // Aggregate active & locked ("Đã chốt") overtime forms and active items
   forms.forEach((form, formIndex) => {
-    if (!form || form.deleted_at) return;
+    if (!form || form.deleted_at || !isOvertimeFormLocked(form)) return;
     const formItems = Array.isArray(form.items) ? form.items : [];
     const activeFormDates = new Set<string>();
     for (const item of formItems) {

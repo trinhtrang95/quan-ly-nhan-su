@@ -15,6 +15,8 @@ import { DepartmentGroup, Employee } from '../../types/hr';
 import { formatNumberVN } from '../../utils/errorAndSecurityService';
 import {
   fetchOvertimeForms,
+  getLocalTodayIsoDate,
+  isOvertimeFormLocked,
   OvertimeFormWithItems,
   subscribeToOvertimeRealtime,
 } from '../../utils/overtimeFormsService';
@@ -43,8 +45,17 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
   groups,
   onShowToast,
 }) => {
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [selectedMonth, setSelectedMonth] = useState<number>(11);
+  const initialDateParts = useMemo(() => {
+    const today = getLocalTodayIsoDate();
+    const [y, m] = today.split('-').map(Number);
+    return {
+      year: Number.isFinite(y) ? y : 2026,
+      month: Number.isFinite(m) && m >= 1 && m <= 12 ? m : 11,
+    };
+  }, []);
+
+  const [selectedYear, setSelectedYear] = useState<number>(initialDateParts.year);
+  const [selectedMonth, setSelectedMonth] = useState<number>(initialDateParts.month);
   const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -90,13 +101,28 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
       scheduleReload();
     });
 
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void loadForms(false, true);
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
       if (realtimeTimerRef.current) {
         clearTimeout(realtimeTimerRef.current);
       }
       unsubscribe();
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
   }, [loadForms]);
+
+  const lockedFormsCount = useMemo(
+    () => forms.filter((f) => !f.deleted_at && isOvertimeFormLocked(f)).length,
+    [forms]
+  );
 
   const yearOptions = useMemo(() => {
     const set = new Set<number>([2025, 2026, 2027, selectedYear]);
@@ -360,8 +386,8 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
               </span>
             </span>
           </div>
-          <span className="text-[11px] text-slate-400">
-            Số ngày trong tháng: {report.daysInMonth} ngày
+          <span className="text-[11px] text-slate-500">
+            Chỉ tổng hợp phiếu <strong className="text-[#14539E]">Đã chốt</strong> ({formatNumberVN(lockedFormsCount)} phiếu) • Số ngày trong tháng: {report.daysInMonth} ngày
           </span>
         </div>
       </div>

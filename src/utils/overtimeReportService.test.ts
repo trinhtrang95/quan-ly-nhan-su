@@ -69,7 +69,8 @@ const SAMPLE_FORMS: OvertimeFormWithItems[] = [
     total_blocks: 1,
     total_participants: 2,
     total_hours: 7.5,
-    status: 'saved',
+    status: 'Đã chốt',
+    is_locked: true,
     created_at: '2026-11-16T08:00:00Z',
     deleted_at: null,
     items: [
@@ -134,7 +135,8 @@ const SAMPLE_FORMS: OvertimeFormWithItems[] = [
     total_blocks: 1,
     total_participants: 1,
     total_hours: 2.5,
-    status: 'saved',
+    status: 'Đã chốt',
+    is_locked: true,
     created_at: '2026-11-20T09:00:00Z',
     deleted_at: null,
     items: [
@@ -183,7 +185,8 @@ const SAMPLE_FORMS: OvertimeFormWithItems[] = [
     total_blocks: 1,
     total_participants: 1,
     total_hours: 8,
-    status: 'saved',
+    status: 'Đã chốt',
+    is_locked: true,
     created_at: '2026-11-18T08:00:00Z',
     deleted_at: '2026-11-18T12:00:00Z',
     items: [
@@ -257,7 +260,8 @@ test('overtimeReportService pure logic', async (t) => {
       total_blocks: 1,
       total_participants: 2,
       total_hours: 7.5,
-      status: 'Đã lưu',
+      status: 'Đã chốt',
+      is_locked: true,
       created_at: '2026-11-19T08:00:00Z',
       deleted_at: null,
       items: [
@@ -305,7 +309,8 @@ test('overtimeReportService pure logic', async (t) => {
       total_blocks: 2,
       total_participants: 2,
       total_hours: 9.5,
-      status: 'Đã lưu',
+      status: 'Đã chốt',
+      is_locked: true,
       created_at: '2026-11-20T09:00:00Z',
       updated_at: '2026-11-20T09:15:00Z',
       deleted_at: null,
@@ -439,6 +444,92 @@ test('overtimeReportService pure logic', async (t) => {
     assert.equal(report.dailyTotals[16], 0);
     assert.equal(report.dailyTotals[20], 2.5);
     assert.equal(report.grandTotalHours, 2.5);
+  });
+
+  await t.test('excludes unlocked forms (Mới tạo / Đã lưu) and only counts locked (Đã chốt) forms', () => {
+    const unlockedNewForm: OvertimeFormWithItems = {
+      id: 'form-unlocked-new',
+      form_code: 'TC-20261121',
+      department: 'Kỹ Thuật',
+      overtime_date: '2026-11-21',
+      overtime_dates: ['2026-11-21'],
+      total_blocks: 1,
+      total_participants: 1,
+      total_hours: 3,
+      status: 'Mới tạo',
+      is_locked: false,
+      created_at: '2026-11-21T08:00:00Z',
+      deleted_at: null,
+      items: [
+        {
+          id: 'item-unlocked-1',
+          form_id: 'form-unlocked-new',
+          overtime_date: '2026-11-21',
+          block_order: 0,
+          item_order: 0,
+          employee_id: 'emp-1',
+          employee_code: '13010601',
+          employee_name: 'Đoàn Văn Chiến',
+          reason_vi: 'Trực sản xuất',
+          reason_kr: '생산 당직',
+          start_time: '16:10',
+          end_time: '19:10',
+          total_hours: 3,
+          deleted_at: null,
+        },
+      ],
+    };
+
+    const unlockedSavedForm: OvertimeFormWithItems = {
+      ...unlockedNewForm,
+      id: 'form-unlocked-saved',
+      form_code: 'TC-20261122',
+      overtime_date: '2026-11-22',
+      overtime_dates: ['2026-11-22'],
+      status: 'Đã lưu',
+      is_locked: false,
+      items: [
+        {
+          ...unlockedNewForm.items[0],
+          id: 'item-unlocked-2',
+          form_id: 'form-unlocked-saved',
+          overtime_date: '2026-11-22',
+        },
+      ],
+    };
+
+    const lockedByStatusOnly: OvertimeFormWithItems = {
+      ...unlockedNewForm,
+      id: 'form-locked-status-only',
+      form_code: 'TC-20261123',
+      overtime_date: '2026-11-23',
+      overtime_dates: ['2026-11-23'],
+      status: 'Đã chốt',
+      is_locked: false,
+      items: [
+        {
+          ...unlockedNewForm.items[0],
+          id: 'item-locked-1',
+          form_id: 'form-locked-status-only',
+          overtime_date: '2026-11-23',
+        },
+      ],
+    };
+
+    const report = calculateMonthlyOvertimeReport({
+      employees: SAMPLE_EMPLOYEES,
+      forms: [unlockedNewForm, unlockedSavedForm, lockedByStatusOnly],
+      year: 2026,
+      month: 11,
+    });
+
+    const emp1 = report.rows.find((r) => r.employeeId === 'emp-1')!;
+    assert.equal(emp1.dailyHours[21], undefined);
+    assert.equal(emp1.dailyHours[22], undefined);
+    assert.equal(emp1.dailyHours[23], 3);
+    assert.equal(emp1.totalHours, 3);
+    assert.equal(report.grandTotalHours, 3);
+    assert.equal(report.activeMemberCount, 1);
   });
 
   await t.test('formats overtime hours in Vietnamese style', () => {
