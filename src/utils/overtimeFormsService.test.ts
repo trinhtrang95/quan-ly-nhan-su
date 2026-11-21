@@ -13,6 +13,7 @@ import {
   generateOvertimeFormCode,
   isOvertimeTimeBold,
   reconstructBlocksFromItems,
+  resolveDefaultPrimaryOvertimeDate,
   resolveDepartmentLabel,
   resolveOvertimeMainDepartment,
   resolveRepresentativeOvertimeDate,
@@ -75,14 +76,19 @@ describe('overtimeFormsService pure logic', () => {
     assert.equal(calculateHoursBetween('', '20:10'), 0);
   });
 
-  it('generates canonical TC-YYYYMMDD form codes without -001/-002 suffix and strips legacy suffixes on display', () => {
-    assert.equal(generateOvertimeFormCode('2026-11-16', []), 'TC-20261116');
+  it('generates globally unique TC-YYYYMMDD-XXXX form codes and preserves them on display while stripping soft-delete suffixes', () => {
+    const code1 = generateOvertimeFormCode('2026-11-16', []);
+    assert.match(code1, /^TC-20261116-[0-9A-Z]{4}$/);
+
+    const code2 = generateOvertimeFormCode('2026-11-16', [code1]);
+    assert.match(code2, /^TC-20261116-[0-9A-Z]{4}$/);
+    assert.notEqual(code2, code1);
+
+    assert.equal(formatOvertimeFormCodeDisplay('TC-20261116-A1B2'), 'TC-20261116-A1B2');
     assert.equal(
-      generateOvertimeFormCode('2026-11-16', ['TC-20261116-001', 'TC-20261116-003']),
-      'TC-20261116'
+      formatOvertimeFormCodeDisplay('TC-20261116-A1B2-DEL-1763600000000'),
+      'TC-20261116-A1B2'
     );
-    assert.equal(formatOvertimeFormCodeDisplay('TC-20261116-009'), 'TC-20261116');
-    assert.equal(formatOvertimeFormCodeDisplay('TC-20261116'), 'TC-20261116');
   });
 
   it('builds form items and reconstructs multi-date blocks with custom times intact', () => {
@@ -306,7 +312,7 @@ describe('overtimeFormsService pure logic', () => {
       existing,
       {
         department: 'Kỹ Thuật',
-        overtimeDate: '2026-11-19',
+        overtimeDate: '2026-11-20',
         blocks: multiDayBlocks,
         employees: sampleEmployees,
       },
@@ -316,13 +322,23 @@ describe('overtimeFormsService pure logic', () => {
     assert.deepEqual(updatedMulti.overtime_dates, ['2026-11-19', '2026-11-20']);
     assert.equal(updatedMulti.items[0].overtime_date, '2026-11-19');
     assert.equal(updatedMulti.items[1].overtime_date, '2026-11-20');
+
+    // resolveDefaultPrimaryOvertimeDate picks today if present in block dates, else latest block date
+    assert.equal(
+      resolveDefaultPrimaryOvertimeDate(['2026-11-19', '2026-11-20'], '2026-11-20'),
+      '2026-11-20'
+    );
+    assert.equal(
+      resolveDefaultPrimaryOvertimeDate(['2026-11-18', '2026-11-19'], '2026-11-21'),
+      '2026-11-19'
+    );
   });
 
-  it('enforces global 1-form-per-day duplicate blocking (regardless of department), ignores soft-deleted/self, allows multi-day when today is free, and blocks multi-day if today already has a form', () => {
+  it('blocks immediately when primaryOvertimeDate already has an active form, ignores soft-deleted/self, and allows earlier-day adjustment blocks when primary date is free', () => {
     const existingForms: OvertimeFormWithItems[] = [
       {
         id: 'existing-active',
-        form_code: 'TC-20261119',
+        form_code: 'TC-20261119-AB12',
         department: 'ST',
         overtime_date: '2026-11-19',
         overtime_dates: ['2026-11-19'],
@@ -353,7 +369,7 @@ describe('overtimeFormsService pure logic', () => {
       },
       {
         id: 'existing-deleted',
-        form_code: 'TC-20261118',
+        form_code: 'TC-20261118-CD34',
         department: 'Kỹ Thuật',
         overtime_date: '2026-11-18',
         overtime_dates: ['2026-11-18'],
@@ -382,17 +398,18 @@ describe('overtimeFormsService pure logic', () => {
       },
     ];
 
-    // Case A: 1 unique date matching active form -> ALLOWED (single-day forms are no longer blocked)
-    const caseADiffDept = evaluateOvertimeDateConflict({
-      blocks: singleDayConflictBlock,
+    // Immediate primaryOvertimeDate conflict check even before blocks are added
+    const immediatePrimaryBlocked = evaluateOvertimeDateConflict({
+      blocks: [],
       selectedDepartment: 'Bảo trì',
       employees: sampleEmployees,
       existingForms,
+      primaryOvertimeDate: '2026-11-19',
       todayIso: '2026-11-20',
     });
-    assert.equal(caseADiffDept.mode, 'none');
-    assert.equal(caseADiffDept.isBlocked, false);
-    assert.equal(caseADiffDept.representativeDate, '2026-11-19');
+    assert.equal(immediatePrimaryBlocked.mode, 'representative_date_blocked');
+    assert.equal(immediatePrimaryBlocked.isBlocked, true);
+    assert.equal(immediatePrimaryBlocked.conflictingForms[0].id, 'existing-active');
 
     // Editing the same form excludes itself -> allowed
     const selfEdit = evaluateOvertimeDateConflict({
@@ -401,6 +418,7 @@ describe('overtimeFormsService pure logic', () => {
       employees: sampleEmployees,
       existingForms,
       editingFormId: 'existing-active',
+      primaryOvertimeDate: '2026-11-19',
       todayIso: '2026-11-20',
     });
     assert.equal(selfEdit.mode, 'none');
@@ -412,12 +430,27 @@ describe('overtimeFormsService pure logic', () => {
       selectedDepartment: 'Kỹ Thuật',
       employees: sampleEmployees,
       existingForms,
+      primaryOvertimeDate: '2026-11-18',
       todayIso: '2026-11-20',
     });
     assert.equal(softDeletedDateEval.mode, 'none');
     assert.equal(softDeletedDateEval.isBlocked, false);
 
-    // Case B1: >= 2 unique dates overlapping yesterday (2026-11-19) while today (2026-11-20) has NO form -> ALLOWED with reminder
+    // Recording an earlier date (2026-11-19) while primaryOvertimeDate is free (2026-11-20) -> ALLOWED with reminder
+    const adjustmentAllowed = evaluateOvertimeDateConflict({
+      blocks: singleDayConflictBlock,
+      selectedDepartment: 'Kỹ Thuật',
+      employees: sampleEmployees,
+      existingForms,
+      primaryOvertimeDate: '2026-11-20',
+      todayIso: '2026-11-20',
+    });
+    assert.equal(adjustmentAllowed.mode, 'multi_day_reminder');
+    assert.equal(adjustmentAllowed.isBlocked, false);
+    assert.equal(adjustmentAllowed.representativeDate, '2026-11-20');
+    assert.equal(adjustmentAllowed.conflicts[0].date, '2026-11-19');
+
+    // Multi-day blocks when primaryOvertimeDate (2026-11-20) ALREADY has an active form -> BLOCKED
     const multiDayAdjustment: OvertimeBlockInput[] = [
       ...singleDayConflictBlock,
       {
@@ -433,25 +466,11 @@ describe('overtimeFormsService pure logic', () => {
         ],
       },
     ];
-    const caseBAllowed = evaluateOvertimeDateConflict({
-      blocks: multiDayAdjustment,
-      selectedDepartment: 'Bảo trì',
-      employees: sampleEmployees,
-      existingForms,
-      todayIso: '2026-11-20',
-    });
-    assert.equal(caseBAllowed.mode, 'multi_day_reminder');
-    assert.equal(caseBAllowed.isBlocked, false);
-    assert.equal(caseBAllowed.representativeDate, '2026-11-20');
-    assert.equal(caseBAllowed.conflicts.length, 1);
-    assert.equal(caseBAllowed.conflicts[0].date, '2026-11-19');
-
-    // Case B2: >= 2 unique dates when today (2026-11-20) ALREADY has an active form -> BLOCKED (1 form per day)
     const formsWithToday: OvertimeFormWithItems[] = [
       ...existingForms,
       {
         id: 'existing-today',
-        form_code: 'TC-20261120',
+        form_code: 'TC-20261120-XY99',
         department: 'Kỹ Thuật',
         overtime_date: '2026-11-20',
         overtime_dates: ['2026-11-20'],
@@ -469,11 +488,12 @@ describe('overtimeFormsService pure logic', () => {
       selectedDepartment: 'Bảo trì',
       employees: sampleEmployees,
       existingForms: formsWithToday,
+      primaryOvertimeDate: '2026-11-20',
       todayIso: '2026-11-20',
     });
     assert.equal(caseBBlocked.mode, 'representative_date_blocked');
     assert.equal(caseBBlocked.isBlocked, true);
-    assert.equal(caseBBlocked.conflictingForms[0].form_code, 'TC-20261120');
+    assert.equal(caseBBlocked.conflictingForms[0].form_code, 'TC-20261120-XY99');
   });
 
   it('fixes main department to "Bộ phận Kỹ thuật" even when selecting sub-groups (IOT/ST/Bảo trì), while preserving explicitly configured other departments', () => {

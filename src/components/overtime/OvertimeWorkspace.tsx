@@ -150,6 +150,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       employees,
       existingForms: latestForms,
       editingFormId: editingForm?.id ?? null,
+      primaryOvertimeDate: payload.overtimeDate,
       fallbackDate: payload.overtimeDate,
     });
 
@@ -162,7 +163,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         )
       ).join(', ');
       throw new Error(
-        `Không thể lưu: ngày tăng ca đã tồn tại trong Nhật ký (${codes}). Mỗi ngày chỉ được tạo 1 phiếu — vui lòng mở lại phiếu cũ để sửa hoặc gộp từ 2 ngày trở lên (nếu hôm nay chưa có phiếu).`
+        `Không thể lưu: Ngày tăng ca chính (${conflictEval.representativeDate}) đã tồn tại trong Nhật ký (${codes}). Vui lòng mở chỉnh sửa phiếu cũ hoặc chọn Ngày tăng ca chính khác.`
       );
     }
 

@@ -395,6 +395,33 @@ test('overtimeReportService pure logic', async (t) => {
     )!;
     assert.equal(emp1AfterDelete.dailyHours[19], 4);
     assert.equal(emp1AfterDelete.dailyHours[20], undefined);
+
+    // Next-day adjustment form with no updated_at (using created_at only) still overrides yesterday's hours
+    const nextDayNoUpdatedAt: OvertimeFormWithItems = {
+      ...newerAdjustmentMultiDayForm,
+      id: 'form-adj-21',
+      form_code: 'TC-20261121-99ZZ',
+      overtime_date: '2026-11-21',
+      created_at: '2026-11-21T08:00:00Z',
+      updated_at: null,
+      items: [
+        {
+          ...newerAdjustmentMultiDayForm.items[0],
+          form_id: 'form-adj-21',
+          total_hours: 6,
+        },
+      ],
+    };
+    const reportNextDayCreatedOnly = calculateMonthlyOvertimeReport({
+      employees: SAMPLE_EMPLOYEES,
+      forms: [oldSingleDayForm, nextDayNoUpdatedAt],
+      year: 2026,
+      month: 11,
+    });
+    const emp1CreatedOnly = reportNextDayCreatedOnly.rows.find(
+      (r) => r.employeeId === 'emp-1'
+    )!;
+    assert.equal(emp1CreatedOnly.dailyHours[19], 6);
   });
 
   await t.test('filters by department and recalculates row STT and footer totals', () => {

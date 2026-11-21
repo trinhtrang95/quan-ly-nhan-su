@@ -87,14 +87,14 @@ export function parseIsoDateParts(
 }
 
 /**
- * Resolves the effective timestamp (ms) of an overtime form using updated_at first, then created_at.
+ * Resolves the effective timestamp (ms) of an overtime form using the latest between updated_at and created_at.
  */
 export function getFormEffectiveTimestamp(form: OvertimeFormWithItems): number {
   const updatedMs = form.updated_at ? Date.parse(form.updated_at) : Number.NaN;
-  if (Number.isFinite(updatedMs)) return updatedMs;
   const createdMs = form.created_at ? Date.parse(form.created_at) : Number.NaN;
-  if (Number.isFinite(createdMs)) return createdMs;
-  return 0;
+  const validUpdated = Number.isFinite(updatedMs) ? updatedMs : 0;
+  const validCreated = Number.isFinite(createdMs) ? createdMs : 0;
+  return Math.max(validUpdated, validCreated);
 }
 
 /**
