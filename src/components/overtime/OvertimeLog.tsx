@@ -545,8 +545,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   />
                 </th>
                 <th className="py-3 px-3 w-12 text-center">STT</th>
-                <th className="py-3 px-3.5 min-w-[180px]">
-                  Mã phiếu / Ngày tạo
+                <th className="py-3 px-3.5 min-w-[150px]">
+                  Ngày tạo
                 </th>
                 <th className="py-3 px-3.5 min-w-[155px]">Ngày tăng ca</th>
                 <th className="py-3 px-3.5 min-w-[150px]">Bộ phận</th>
@@ -568,8 +568,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
                     </td>
                     <td className="py-3 px-3.5">
-                      <div className="h-3.5 w-32 bg-slate-200 rounded mb-1.5" />
-                      <div className="h-3 w-24 bg-slate-100 rounded" />
+                      <div className="h-3.5 w-28 bg-slate-200 rounded" />
                     </td>
                     <td className="py-3 px-3.5">
                       <div className="h-3.5 w-24 bg-slate-200 rounded" />
@@ -659,14 +658,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                         {formatNumberVN(index + 1)}
                       </td>
 
-                      {/* 2. Mã phiếu / Ngày tạo */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-mono font-semibold text-[#14539E] tabular-nums">
-                          {formatOvertimeFormCodeDisplay(form.form_code)}
-                        </div>
-                        <div className="text-[11px] text-slate-500 tabular-nums mt-0.5">
-                          Tạo: {formatCreatedAtVN(form.created_at)}
-                        </div>
+                      {/* 2. Ngày tạo */}
+                      <td className="py-3 px-3.5 font-mono text-slate-700 font-medium tabular-nums whitespace-nowrap">
+                        {formatCreatedAtVN(form.created_at)}
                       </td>
 
                       {/* 3. Ngày tăng ca */}

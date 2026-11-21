@@ -9,7 +9,6 @@ import {
   Clock,
   FileSpreadsheet,
   Info,
-  Lock,
   Save,
   Loader2,
   Pencil,
@@ -806,39 +805,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         </div>
 
         <div className="p-3.5 sm:p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
-          {/* HÀNG 0: THÔNG TIN VỎ PHIẾU CỐ ĐỊNH (MÃ PHIẾU & NGÀY PHIẾU) */}
-          <div
-            data-testid="overtime-fixed-shell-card"
-            className="rounded-xl border border-blue-200/80 bg-blue-50/50 p-2.5 space-y-1.5"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-[#14539E] inline-flex items-center gap-1.5">
-                <Lock className="w-3 h-3 shrink-0" />
-                <span>Thông tin vỏ phiếu cố định</span>
-              </span>
-              <span
-                data-testid="overtime-main-department-label"
-                className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white text-[#14539E] border border-blue-200 shrink-0 whitespace-nowrap"
-              >
-                {formDepartment}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-white/90 border border-blue-100 rounded-lg px-2.5 py-1.5">
-                <div className="text-[10px] text-slate-500">Mã phiếu</div>
-                <div className="font-mono font-bold text-[#14539E] truncate">
-                  {shellFormCode}
-                </div>
-              </div>
-              <div className="bg-white/90 border border-blue-100 rounded-lg px-2.5 py-1.5">
-                <div className="text-[10px] text-slate-500">Ngày phiếu</div>
-                <div className="font-mono font-bold text-slate-800 truncate">
-                  {formatDateToFormStyle(shellOvertimeDate)}
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* HÀNG 1: LỌC NHÓM & NGÀY LÀM THÊM CỦA LƯỢT GHI NHẬN */}
           <div className="grid grid-cols-2 gap-2.5">
             <div>
@@ -948,7 +914,57 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             </datalist>
           </div>
 
-          {/* HÀNG 3: CHỌN NHÂN SỰ (SEARCHABLE MULTI-SELECT POPOVER) */}
+          {/* HÀNG 3: LÝ DO TĂNG CA (VIỆT - HÀN) */}
+          <div className="space-y-2">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label
+                  htmlFor="overtime-reason-vi"
+                  className="block text-[11px] font-semibold text-slate-600"
+                >
+                  Lý do (Tiếng Việt)
+                </label>
+                {isAutoTranslating && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Đang dịch...</span>
+                  </span>
+                )}
+              </div>
+              <input
+                type="text"
+                id="overtime-reason-vi"
+                value={currentReasonVi}
+                onChange={(e) => setCurrentReasonVi(e.target.value)}
+                placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp..."
+                className="w-full h-9 px-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="overtime-reason-kr"
+                className="text-[11px] font-semibold text-slate-600 shrink-0 whitespace-nowrap min-w-[105px]"
+              >
+                Lý do (Tiếng Hàn):
+              </label>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  id="overtime-reason-kr"
+                  value={currentReasonKr}
+                  onChange={(e) => {
+                    setCurrentReasonKr(e.target.value);
+                    setIsReasonKrManuallyEdited(true);
+                  }}
+                  placeholder="생산 당직 (Tự động điền theo từ điển)..."
+                  className="w-full h-8 px-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* HÀNG 4: CHỌN NHÂN SỰ (SEARCHABLE MULTI-SELECT POPOVER) */}
           <div className="space-y-2" ref={employeePickerRef}>
             <div className="flex items-center justify-between gap-2">
               <label
@@ -1285,56 +1301,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 })}
               </div>
             )}
-          </div>
-
-          {/* HÀNG 4: LÝ DO TĂNG CA (VIỆT - HÀN) */}
-          <div className="space-y-2">
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <label
-                  htmlFor="overtime-reason-vi"
-                  className="block text-[11px] font-semibold text-slate-600"
-                >
-                  Lý do (Tiếng Việt)
-                </label>
-                {isAutoTranslating && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#14539E]">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Đang dịch...</span>
-                  </span>
-                )}
-              </div>
-              <input
-                type="text"
-                id="overtime-reason-vi"
-                value={currentReasonVi}
-                onChange={(e) => setCurrentReasonVi(e.target.value)}
-                placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp..."
-                className="w-full h-9 px-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="overtime-reason-kr"
-                className="text-[11px] font-semibold text-slate-600 shrink-0 whitespace-nowrap min-w-[105px]"
-              >
-                Lý do (Tiếng Hàn):
-              </label>
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  id="overtime-reason-kr"
-                  value={currentReasonKr}
-                  onChange={(e) => {
-                    setCurrentReasonKr(e.target.value);
-                    setIsReasonKrManuallyEdited(true);
-                  }}
-                  placeholder="생산 당직 (Tự động điền theo từ điển)..."
-                  className="w-full h-8 px-2.5 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all"
-                />
-              </div>
-            </div>
           </div>
 
         </div>
