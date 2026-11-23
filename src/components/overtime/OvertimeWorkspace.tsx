@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   ClipboardList,
@@ -28,8 +28,6 @@ import {
   OvertimeLeaveCheckEntry,
   resolveOvertimeMainDepartment,
   softDeleteOvertimeForms,
-  subscribeToLeaveLogsRealtime,
-  subscribeToOvertimeRealtime,
   unlockOvertimeForm,
   updateOvertimeFormInHistory,
 } from '../../utils/overtimeFormsService';
@@ -70,8 +68,6 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   const [supabaseLeaveRecords, setSupabaseLeaveRecords] = useState<
     OvertimeLeaveCheckEntry[] | null
   >(null);
-  const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const leaveReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const knownSubGroups = useMemo(() => {
     const names = new Set<string>();
@@ -117,77 +113,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   useEffect(() => {
     void loadForms();
     void loadLeaveRecords();
-  }, [loadForms, loadLeaveRecords, propLeaveRecords]);
-
-  // Đăng ký Supabase Realtime (postgres_changes: INSERT, UPDATE, DELETE) cho cả phiếu tăng ca & đơn nghỉ
-  useEffect(() => {
-    const scheduleSilentReload = () => {
-      if (realtimeReloadTimerRef.current) {
-        clearTimeout(realtimeReloadTimerRef.current);
-      }
-      realtimeReloadTimerRef.current = setTimeout(() => {
-        void loadForms({ silent: true });
-      }, 250);
-    };
-
-    const scheduleLeaveReload = () => {
-      if (leaveReloadTimerRef.current) {
-        clearTimeout(leaveReloadTimerRef.current);
-      }
-      leaveReloadTimerRef.current = setTimeout(() => {
-        void loadLeaveRecords();
-      }, 250);
-    };
-
-    const unsubscribe = subscribeToOvertimeRealtime((event) => {
-      if (event.table === 'overtime_forms') {
-        if (event.eventType === 'UPDATE') {
-          const updatedRow = event.payload.new as
-            | { id?: string; deleted_at?: string | null }
-            | undefined;
-          if (updatedRow?.id && updatedRow.deleted_at) {
-            setForms((prev) => prev.filter((f) => f.id !== updatedRow.id));
-            setEditingForm((prev) =>
-              prev && prev.id === updatedRow.id ? null : prev
-            );
-          }
-        } else if (event.eventType === 'DELETE') {
-          const oldRow = event.payload.old as { id?: string } | undefined;
-          if (oldRow?.id) {
-            setForms((prev) => prev.filter((f) => f.id !== oldRow.id));
-            setEditingForm((prev) =>
-              prev && prev.id === oldRow.id ? null : prev
-            );
-          }
-        }
-      }
-      scheduleSilentReload();
-    });
-
-    const unsubscribeLeaves = subscribeToLeaveLogsRealtime(scheduleLeaveReload);
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        void loadForms({ silent: true });
-        void loadLeaveRecords();
-      }
-    };
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-
-    return () => {
-      if (realtimeReloadTimerRef.current) {
-        clearTimeout(realtimeReloadTimerRef.current);
-      }
-      if (leaveReloadTimerRef.current) {
-        clearTimeout(leaveReloadTimerRef.current);
-      }
-      unsubscribe();
-      unsubscribeLeaves();
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-    };
-  }, [loadForms, loadLeaveRecords]);
+  }, []);
 
   const handleCreateOrOpenShell = async (overtimeDate: string) => {
     const res = await createOrOpenOvertimeShell(overtimeDate, {
@@ -360,10 +286,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             type="button"
             role="tab"
             aria-selected={activeTab === 'log'}
-            onClick={() => {
-              setActiveTab('log');
-              void loadForms({ silent: true });
-            }}
+            onClick={() => setActiveTab('log')}
             className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'log'
                 ? 'bg-[#14539E] text-white shadow-2xs'

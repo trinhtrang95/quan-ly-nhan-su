@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Clock,
   Download,
@@ -18,7 +18,6 @@ import {
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
   OvertimeFormWithItems,
-  subscribeToOvertimeRealtime,
 } from '../../utils/overtimeFormsService';
 import {
   calculateMonthlyOvertimeReport,
@@ -63,11 +62,10 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
-  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadForms = useCallback(
-    async (notify = false, silent = false) => {
-      if (!silent) setIsLoading(true);
+    async (notify = false) => {
+      setIsLoading(true);
       try {
         const res = await fetchOvertimeForms();
         setForms(res.forms);
@@ -77,46 +75,14 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
           );
         }
       } finally {
-        if (!silent) setIsLoading(false);
+        setIsLoading(false);
       }
     },
     [onShowToast]
   );
 
   useEffect(() => {
-    void loadForms(false, false);
-  }, [loadForms]);
-
-  useEffect(() => {
-    const scheduleReload = () => {
-      if (realtimeTimerRef.current) {
-        clearTimeout(realtimeTimerRef.current);
-      }
-      realtimeTimerRef.current = setTimeout(() => {
-        void loadForms(false, true);
-      }, 250);
-    };
-
-    const unsubscribe = subscribeToOvertimeRealtime(() => {
-      scheduleReload();
-    });
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        void loadForms(false, true);
-      }
-    };
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-
-    return () => {
-      if (realtimeTimerRef.current) {
-        clearTimeout(realtimeTimerRef.current);
-      }
-      unsubscribe();
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-    };
+    void loadForms(false);
   }, [loadForms]);
 
   const lockedFormsCount = useMemo(

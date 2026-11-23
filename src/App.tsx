@@ -108,9 +108,9 @@ const STORAGE_KEYS = {
 };
 
 /**
- * Purges stale localStorage data if the browser does not yet have `DATA_VERSION = 'v2_cloud_strict'`.
- * Ensures old cached employees, groups, and leave records on other users' machines are wiped clean
- * before loading 100% authoritative data from Supabase.
+- Purges stale localStorage data if the browser does not yet have `DATA_VERSION = 'v2_cloud_strict'`.
+- Ensures old cached employees, groups, and leave records on other users' machines are wiped clean
+- before loading 100% authoritative data from Supabase.
  */
 function enforceCloudStrictCacheVersion(): void {
   if (typeof window === 'undefined') return;
@@ -167,6 +167,19 @@ export default function App() {
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isProcessingData, setIsProcessingData] = useState<boolean>(false);
+
+  // Lazy Mount State để giải quyết khựng ~1 giây khi chuyển vào Tăng ca & Báo cáo
+  const [hasMountedReport, setHasMountedReport] = useState<boolean>(
+    initialRoute.module === 'annual_report'
+  );
+  const [hasMountedOvertime, setHasMountedOvertime] = useState<boolean>(
+    initialRoute.module === 'overtime'
+  );
+
+  useEffect(() => {
+    if (activeModule === 'annual_report') setHasMountedReport(true);
+    if (activeModule === 'overtime') setHasMountedOvertime(true);
+  }, [activeModule]);
 
   // Đồng bộ URL định tuyến thông qua Custom Hook độc lập (useHRRouteSync)
   useHRRouteSync(activeModule, leaveSubTab, reportSubTab, (resolved) => {
@@ -548,19 +561,6 @@ export default function App() {
 
   useEffect(() => {
     syncFromSupabase(true);
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        syncFromSupabase(true);
-      }
-    };
-
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    return () => {
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-    };
   }, []);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -1708,96 +1708,112 @@ export default function App() {
               />
             )}
 
-            {activeModule === 'annual_report' && (
-              <ReportDashboard
-                employees={companyEmployees}
-                records={companyRecords}
-                groups={effectiveGroups}
-                companyUnits={companyUnits}
-                activeCompanyId={activeCompany.id}
-                defaultAnnualLeaveQuota={
-                  activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
+            {/* Dùng Lazy Mount và class hidden thay vì && để tránh khựng */}
+            {hasMountedReport && (
+              <div
+                className={
+                  activeModule === 'annual_report' ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden' : 'hidden'
                 }
-                isAdmin={isAdmin}
-                activeSubTab={reportSubTab}
-                onSubTabChange={(subTab) => setReportSubTab(subTab)}
-                onUpdateEmployeeQuota={(emp, newQuota) => {
-                  const { id, ...rest } = emp;
-                  handleSaveEmployee(
-                    { ...rest, standardAnnualLeave: newQuota },
-                    id
-                  );
-                }}
-                onUpdateCompanyQuota={(compId, newQuota) => {
-                  const targetComp = companyUnits.find((c) => c.id === compId);
-                  if (targetComp) {
-                    const { id, ...rest } = targetComp;
-                    handleUpdateCompany(id, {
-                      ...rest,
-                      defaultLeaveQuota: newQuota,
-                    });
+              >
+                <ReportDashboard
+                  employees={companyEmployees}
+                  records={companyRecords}
+                  groups={effectiveGroups}
+                  companyUnits={companyUnits}
+                  activeCompanyId={activeCompany.id}
+                  defaultAnnualLeaveQuota={
+                    activeCompany.defaultLeaveQuota ?? defaultAnnualLeaveQuota
                   }
-                }}
-                onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
-                onImportOpeningBalances={(importedRows) => {
-                  const rowByCode = new Map(
-                    importedRows.map((r) => [
-                      r.employeeCode.trim().toUpperCase(),
-                      r,
-                    ])
-                  );
-                  setEmployees((prev) =>
-                    prev.map((emp) => {
-                      const matched = rowByCode.get(
-                        emp.employeeCode.trim().toUpperCase()
-                      );
-                      if (!matched) return emp;
-                      return {
-                        ...emp,
-                        carriedOverLeave: matched.carried_over,
-                        openingUsedLeave: matched.used_leave,
-                      };
+                  isAdmin={isAdmin}
+                  activeSubTab={reportSubTab}
+                  onSubTabChange={(subTab) => setReportSubTab(subTab)}
+                  onUpdateEmployeeQuota={(emp, newQuota) => {
+                    const { id, ...rest } = emp;
+                    handleSaveEmployee(
+                      { ...rest, standardAnnualLeave: newQuota },
+                      id
+                    );
+                  }}
+                  onUpdateCompanyQuota={(compId, newQuota) => {
+                    const targetComp = companyUnits.find((c) => c.id === compId);
+                    if (targetComp) {
+                      const { id, ...rest } = targetComp;
+                      handleUpdateCompany(id, {
+                        ...rest,
+                        defaultLeaveQuota: newQuota,
+                      });
+                    }
+                  }}
+                  onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
+                  onImportOpeningBalances={(importedRows) => {
+                    const rowByCode = new Map(
+                      importedRows.map((r) => [
+                        r.employeeCode.trim().toUpperCase(),
+                        r,
+                      ])
+                    );
+                    setEmployees((prev) =>
+                      prev.map((emp) => {
+                        const matched = rowByCode.get(
+                          emp.employeeCode.trim().toUpperCase()
+                        );
+                        if (!matched) return emp;
+                        return {
+                          ...emp,
+                          carriedOverLeave: matched.carried_over,
+                          openingUsedLeave: matched.used_leave,
+                        };
+                      })
+                    );
+                    showToast(
+                      `Đã chốt số dư phép đầu kỳ (đến 31/10/2026) cho ${importedRows.length} nhân sự vào bảng Quỹ phép năm.`
+                    );
+                  }}
+                  onExportMatrixExcel={(rows, year, viewMode) => {
+                    exportAnnualMatrixToExcel(rows, year, viewMode);
+                    showToast(`Đã xuất tệp Excel Báo cáo Ma trận Tồn phép năm ${year}.`);
+                  }}
+                  onExportMatrixPDF={(rows, year, viewMode) =>
+                    setPrintModalState({
+                      isOpen: true,
+                      reportType: 'annual_matrix',
+                      employees: companyEmployees,
+                      matrixRows: rows,
+                      year,
+                      viewMode,
                     })
-                  );
-                  showToast(
-                    `Đã chốt số dư phép đầu kỳ (đến 31/10/2026) cho ${importedRows.length} nhân sự vào bảng Quỹ phép năm.`
-                  );
-                }}
-                onExportMatrixExcel={(rows, year, viewMode) => {
-                  exportAnnualMatrixToExcel(rows, year, viewMode);
-                  showToast(`Đã xuất tệp Excel Báo cáo Ma trận Tồn phép năm ${year}.`);
-                }}
-                onExportMatrixPDF={(rows, year, viewMode) =>
-                  setPrintModalState({
-                    isOpen: true,
-                    reportType: 'annual_matrix',
-                    employees: companyEmployees,
-                    matrixRows: rows,
-                    year,
-                    viewMode,
-                  })
-                }
-                onInspectAttachment={(url, title) =>
-                  setLightboxImage({ url, title })
-                }
-                onQuickAddForEmployeeMonth={(empId, month, year) => {
-                  setEditingRecord(null);
-                  setLeaveDefaultEmpId(empId);
-                  setLeaveDefaultMonth(month);
-                  setLeaveDefaultYear(year);
-                  setIsLeaveModalOpen(true);
-                }}
-                onShowToast={showToast}
-              />
+                  }
+                  onInspectAttachment={(url, title) =>
+                    setLightboxImage({ url, title })
+                  }
+                  onQuickAddForEmployeeMonth={(empId, month, year) => {
+                    setEditingRecord(null);
+                    setLeaveDefaultEmpId(empId);
+                    setLeaveDefaultMonth(month);
+                    setLeaveDefaultYear(year);
+                    setIsLeaveModalOpen(true);
+                  }}
+                  onShowToast={showToast}
+                />
+              </div>
             )}
 
-            {activeModule === 'overtime' && (
-              <OvertimeWorkspace
-                employees={companyEmployees}
-                groups={effectiveGroups}
-                leaveRecords={companyRecords}
-                onShowToast={showToast}
-              />
+            {/* Dùng Lazy Mount và class hidden thay vì && để tránh khựng */}
+            {hasMountedOvertime && (
+              <div
+                className={
+                  activeModule === 'overtime'
+                    ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden'
+                    : 'hidden'
+                }
+              >
+                <OvertimeWorkspace
+                  employees={companyEmployees}
+                  groups={effectiveGroups}
+                  leaveRecords={companyRecords}
+                  onShowToast={showToast}
+                />
+              </div>
             )}
 
             {activeModule === 'settings' && isAdmin && (

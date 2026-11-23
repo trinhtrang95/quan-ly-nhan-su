@@ -158,7 +158,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     [forms, searchQuery, monthFilter, knownSubGroups]
   );
 
-  // Tự động đồng bộ modal xem chi tiết khi danh sách thay đổi qua Realtime
+  // Đồng bộ modal xem chi tiết khi danh sách phiếu được cập nhật trực tiếp trong phiên làm việc
   useEffect(() => {
     const activeForms = forms.filter((f) => !f.deleted_at);
     const activeById = new Map(activeForms.map((f) => [f.id, f]));
@@ -556,7 +556,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 <th className="py-3 px-3.5 min-w-[160px]">Mã phiếu</th>
                 <th className="py-3 px-3.5 min-w-[175px]">Ngày tăng ca</th>
                 <th className="py-3 px-3.5 w-36 text-center">Trạng thái</th>
-                <th className="py-3 px-3.5 w-52 text-right">Thao tác</th>
+                <th className="py-3 px-3.5 w-52 text-left">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -696,8 +696,10 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       </td>
 
                       {/* 5. Thao tác (Icon-only kèm tooltip) */}
-                      <td className="py-3 px-3.5 text-right">
-                        <div className="inline-flex items-center justify-end gap-1.5">
+                      {/* 5. Thao tác: Xem -> Sửa -> Xóa -> Chốt */}
+                      <td className="py-3 px-3.5 text-left">
+                        <div className="inline-flex items-center justify-start gap-1.5">
+                          {/* 1. Xem phiếu */}
                           <button
                             type="button"
                             disabled={isViewingLoading}
@@ -713,6 +715,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             )}
                           </button>
 
+                          {/* 2. Sửa phiếu */}
                           <button
                             type="button"
                             disabled={isLocked}
@@ -734,21 +737,27 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* 3. Xóa mềm */}
                           <button
                             type="button"
-                            disabled={isExporting}
-                            onClick={() => void handleExportFormExcel(form)}
-                            className="h-8 w-8 rounded-lg border border-slate-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
-                            title="Xuất Excel"
-                            aria-label={`Xuất Excel phiếu ${displayCode}`}
+                            disabled={isLocked}
+                            onClick={() => handleOpenDeleteModal([form])}
+                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:bg-slate-100 disabled:hover:border-slate-200 disabled:cursor-not-allowed"
+                            title={
+                              isLocked
+                                ? 'Phiếu đã chốt — không thể xóa'
+                                : 'Xóa mềm phiếu'
+                            }
+                            aria-label={
+                              isLocked
+                                ? `Phiếu ${displayCode} đã chốt, khóa chức năng xóa`
+                                : `Xóa mềm phiếu ${displayCode}`
+                            }
                           >
-                            {isExporting ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <FileSpreadsheet className="w-3.5 h-3.5" />
-                            )}
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* 4. Chốt / Mở khóa phiếu */}
                           {isLocked ? (
                             <button
                               type="button"
@@ -772,25 +781,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                               <Lock className="w-3.5 h-3.5" />
                             </button>
                           )}
-
-                          <button
-                            type="button"
-                            disabled={isLocked}
-                            onClick={() => handleOpenDeleteModal([form])}
-                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:bg-slate-100 disabled:hover:border-slate-200 disabled:cursor-not-allowed"
-                            title={
-                              isLocked
-                                ? 'Phiếu đã chốt — không thể xóa'
-                                : 'Xóa mềm phiếu'
-                            }
-                            aria-label={
-                              isLocked
-                                ? `Phiếu ${displayCode} đã chốt, khóa chức năng xóa`
-                                : `Xóa mềm phiếu ${displayCode}`
-                            }
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
                         </div>
                       </td>
                     </tr>
