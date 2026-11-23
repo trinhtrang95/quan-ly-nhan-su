@@ -1745,29 +1745,48 @@ export default function App() {
                     }
                   }}
                   onChangeDefaultAnnualLeaveQuota={handleUpdateDefaultQuota}
-                  onImportOpeningBalances={(importedRows) => {
+                  onImportOpeningBalances={async (importedRows) => {
                     const rowByCode = new Map(
                       importedRows.map((r) => [
                         r.employeeCode.trim().toUpperCase(),
                         r,
                       ])
                     );
+                    
+                    const updatedEmployees: Employee[] = [];
+
                     setEmployees((prev) =>
                       prev.map((emp) => {
                         const matched = rowByCode.get(
                           emp.employeeCode.trim().toUpperCase()
                         );
                         if (!matched) return emp;
-                        return {
+                        const newEmp = {
                           ...emp,
                           carriedOverLeave: matched.carried_over,
                           openingUsedLeave: matched.used_leave,
                         };
+                        updatedEmployees.push(newEmp);
+                        return newEmp;
                       })
                     );
-                    showToast(
-                      `Đã chốt số dư phép đầu kỳ (đến 31/10/2026) cho ${importedRows.length} nhân sự vào bảng Quỹ phép năm.`
-                    );
+
+                    if (updatedEmployees.length > 0) {
+                      showToast(`Đang đồng bộ số dư phép của ${updatedEmployees.length} nhân sự lên Cloud...`);
+                      try {
+                        // Đẩy đồng loạt các hồ sơ vừa được chốt phép lên Supabase
+                        await Promise.all(
+                          updatedEmployees.map((emp) => updateEmployeeInSupabase(emp.id, emp))
+                        );
+                        showToast(
+                          `Đã chốt và ĐỒNG BỘ THÀNH CÔNG số dư phép đầu kỳ cho ${updatedEmployees.length} nhân sự lên hệ thống Cloud.`
+                        );
+                      } catch (error) {
+                        showToast(`Lưu cục bộ thành công nhưng lỗi đồng bộ Cloud. Vui lòng kiểm tra lại mạng lưới.`);
+                      }
+                    } else {
+                      showToast(`Không tìm thấy mã nhân viên nào khớp để import.`);
+                    }
                   }}
                   onExportMatrixExcel={(rows, year, viewMode) => {
                     exportAnnualMatrixToExcel(rows, year, viewMode);
