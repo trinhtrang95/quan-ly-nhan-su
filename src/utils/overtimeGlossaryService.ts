@@ -299,6 +299,55 @@ export function upsertGlossaryEntryInList(
 }
 
 /**
+ * Pure helper: creates a new manually-added glossary entry (`is_verified: true`) at the top of the list.
+ * Throws if either field is empty or if an active entry with the same normalized Vietnamese text exists.
+ */
+export function createManualGlossaryEntryInList(
+  entries: OvertimeGlossaryEntry[],
+  reasonVi: string,
+  reasonKr: string,
+  nowIso: string = new Date().toISOString()
+): {
+  entries: OvertimeGlossaryEntry[];
+  createdEntry: OvertimeGlossaryEntry;
+} {
+  const cleanVi = (reasonVi || '').trim().replace(/\s+/g, ' ');
+  const cleanKr = (reasonKr || '').trim().replace(/\s+/g, ' ');
+  if (!cleanVi || !cleanKr) {
+    throw new Error(
+      'Vui lòng nhập đầy đủ cả Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn).'
+    );
+  }
+
+  const targetKey = normalizeGlossaryKey(cleanVi);
+  const duplicate = entries.find(
+    (e) => !e.deletedAt && normalizeGlossaryKey(e.reasonVi) === targetKey
+  );
+  if (duplicate) {
+    throw new Error(`Lý do "${cleanVi}" đã tồn tại trong từ điển.`);
+  }
+
+  const createdEntry: OvertimeGlossaryEntry = {
+    id:
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    reasonVi: cleanVi,
+    reasonKr: cleanKr,
+    created_at: nowIso,
+    updatedAt: nowIso,
+    deletedAt: null,
+    is_verified: true,
+    isVerified: true,
+  };
+
+  return {
+    entries: [createdEntry, ...entries],
+    createdEntry,
+  };
+}
+
+/**
  * Pure helper: updates both Vietnamese reason and Korean translation of an entry by id in memory.
  */
 export function updateGlossaryEntryInList(
@@ -567,7 +616,8 @@ export async function loadOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
  */
 export async function upsertOvertimeGlossaryEntry(
   reasonVi: string,
-  reasonKr: string
+  reasonKr: string,
+  options?: { isVerified?: boolean }
 ): Promise<{
   entries: OvertimeGlossaryEntry[];
   savedEntry: OvertimeGlossaryEntry | null;
@@ -583,8 +633,13 @@ export async function upsertOvertimeGlossaryEntry(
     };
   }
 
+  const defaultVerifiedOnInsert = options?.isVerified === true;
   const current = readLocalOvertimeGlossary();
   const result = upsertGlossaryEntryInList(current, cleanVi, cleanKr);
+  if (!result.isUpdate && defaultVerifiedOnInsert) {
+    result.savedEntry.is_verified = true;
+    result.savedEntry.isVerified = true;
+  }
   writeLocalOvertimeGlossary(result.entries);
 
   if (remoteGlossaryAvailable === true) {
@@ -636,7 +691,7 @@ export async function upsertOvertimeGlossaryEntry(
               reason_kr: result.savedEntry.reasonKr,
               updated_at: result.savedEntry.updatedAt,
               deleted_at: null,
-              is_verified: false,
+              is_verified: defaultVerifiedOnInsert,
             }),
           }
         );
@@ -902,6 +957,107 @@ export async function approveGlossaryEntry(id: string): Promise<{
       entries: syncedEntries,
       updatedEntry: syncedEntry,
     };
+  }
+
+  return result;
+}
+
+/**
+ * Manually creates a new glossary entry (`is_verified: true`) in localStorage and Supabase `overtime_glossary`.
+ * Returns full created entry metadata (`id`, `reasonVi`, `reasonKr`, `isVerified`, `created_at`).
+ */
+export async function createManualGlossaryEntry(
+  reasonVi: string,
+  reasonKr: string
+): Promise<{
+  entries: OvertimeGlossaryEntry[];
+  createdEntry: OvertimeGlossaryEntry;
+}> {
+  const nowIso = new Date().toISOString();
+  const current = readLocalOvertimeGlossary();
+  const result = createManualGlossaryEntryInList(
+    current,
+    reasonVi,
+    reasonKr,
+    nowIso
+  );
+  writeLocalOvertimeGlossary(result.entries);
+
+  if (remoteGlossaryAvailable !== false) {
+    try {
+      const normalizedVi = normalizeGlossaryKey(result.createdEntry.reasonVi);
+      const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
+          normalizedVi
+        )}&select=*&limit=1`
+      );
+      remoteGlossaryAvailable = true;
+      const existingRemote = Array.isArray(existingRows)
+        ? existingRows[0]
+        : null;
+
+      let persisted: SupabaseGlossaryRow | null = null;
+      if (existingRemote?.id) {
+        const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+          `overtime_glossary?id=eq.${encodeURIComponent(
+            existingRemote.id
+          )}&select=*`,
+          {
+            method: 'PATCH',
+            headers: {
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify({
+              reason_vi: result.createdEntry.reasonVi,
+              reason_kr: result.createdEntry.reasonKr,
+              updated_at: nowIso,
+              deleted_at: null,
+              is_verified: true,
+            }),
+          }
+        );
+        persisted = Array.isArray(patchedRows)
+          ? patchedRows[0]
+          : existingRemote;
+      } else {
+        const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+          'overtime_glossary?select=*',
+          {
+            method: 'POST',
+            headers: {
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify({
+              reason_vi: result.createdEntry.reasonVi,
+              reason_vi_normalized: normalizedVi,
+              reason_kr: result.createdEntry.reasonKr,
+              updated_at: nowIso,
+              deleted_at: null,
+              is_verified: true,
+            }),
+          }
+        );
+        persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
+      }
+
+      if (persisted?.id) {
+        const syncedEntry = mapSupabaseGlossaryRowToEntry({
+          ...persisted,
+          is_verified: true,
+          deleted_at: null,
+        });
+        const syncedEntries = result.entries.map((item) =>
+          item.id === result.createdEntry.id ? syncedEntry : item
+        );
+        writeLocalOvertimeGlossary(syncedEntries);
+        return {
+          entries: syncedEntries,
+          createdEntry: syncedEntry,
+        };
+      }
+    } catch {
+      // Keep local manual creation resilient if cloud sync is offline
+    }
   }
 
   return result;

@@ -4,7 +4,9 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Languages,
   Loader2,
+  Plus,
   Save,
   Search,
   Trash2,
@@ -13,17 +15,18 @@ import {
 import { formatNumberVN, getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   approveGlossaryEntry,
+  createManualGlossaryEntry,
   deleteGlossaryEntry,
   formatGlossaryDateDDMMYYYY,
   loadOvertimeGlossary,
   OvertimeGlossaryEntry,
   readLocalOvertimeGlossary,
+  suggestFactoryKoreanTranslation,
   updateGlossaryEntry,
 } from '../../utils/overtimeGlossaryService';
 
 export interface GlossaryManagerModalProps {
-  isOpen: boolean;
-  onClose: () => void;
+  isActive?: boolean;
   onShowToast?: (message: string) => void;
   onGlossaryUpdated?: () => void;
 }
@@ -31,8 +34,7 @@ export interface GlossaryManagerModalProps {
 type GlossaryStatusFilter = 'all' | 'pending' | 'verified';
 
 export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
-  isOpen,
-  onClose,
+  isActive = true,
   onShowToast,
   onGlossaryUpdated,
 }) => {
@@ -47,6 +49,10 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [newReasonVi, setNewReasonVi] = useState<string>('');
+  const [newReasonKr, setNewReasonKr] = useState<string>('');
+  const [isAddingManual, setIsAddingManual] = useState<boolean>(false);
+  const [isTranslatingNew, setIsTranslatingNew] = useState<boolean>(false);
 
   const syncDraftsFromEntries = useCallback((list: OvertimeGlossaryEntry[]) => {
     setDraftViById((prev) => {
@@ -66,7 +72,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isActive) return;
     let active = true;
     const localInitial = readLocalOvertimeGlossary();
     setEntries(localInitial);
@@ -101,18 +107,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     return () => {
       active = false;
     };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isActive]);
 
   const counts = useMemo(() => {
     const active = entries.filter((e) => !e.deletedAt);
@@ -260,57 +255,108 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  const handleSuggestNewKorean = async () => {
+    const cleanVi = newReasonVi.trim();
+    if (!cleanVi) {
+      onShowToast?.('Vui lòng nhập lý do Tiếng Việt trước khi dịch nháp.');
+      return;
+    }
+
+    setIsTranslatingNew(true);
+    try {
+      const { translation } = await suggestFactoryKoreanTranslation(
+        cleanVi,
+        entries
+      );
+      if (translation) {
+        setNewReasonKr(translation);
+      }
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setIsTranslatingNew(false);
+    }
+  };
+
+  const handleAddManualEntry = async () => {
+    const cleanVi = newReasonVi.trim();
+    const cleanKr = newReasonKr.trim();
+    if (!cleanVi || !cleanKr) {
+      onShowToast?.(
+        'Vui lòng nhập đầy đủ cả Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn).'
+      );
+      return;
+    }
+
+    setIsAddingManual(true);
+    try {
+      const res = await createManualGlossaryEntry(cleanVi, cleanKr);
+      setEntries(res.entries);
+      setDraftViById((prev) => ({
+        ...prev,
+        [res.createdEntry.id]: res.createdEntry.reasonVi,
+      }));
+      setDraftKrById((prev) => ({
+        ...prev,
+        [res.createdEntry.id]: res.createdEntry.reasonKr,
+      }));
+      setNewReasonVi('');
+      setNewReasonKr('');
+      if (statusFilter === 'pending') {
+        setStatusFilter('all');
+      }
+      if (
+        searchQuery.trim() &&
+        !res.createdEntry.reasonVi
+          .toLowerCase()
+          .includes(searchQuery.trim().toLowerCase()) &&
+        !res.createdEntry.reasonKr
+          .toLowerCase()
+          .includes(searchQuery.trim().toLowerCase())
+      ) {
+        setSearchQuery('');
+      }
+      onGlossaryUpdated?.();
+      onShowToast?.(
+        `Đã thêm từ vựng mới "${res.createdEntry.reasonVi}" vào từ điển.`
+      );
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setIsAddingManual(false);
+    }
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-[1px] p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="glossary-manager-modal-title"
-    >
-      <div className="bg-white rounded-xl border border-slate-200 shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-4 bg-white shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-[#14539E]/10 text-[#14539E] flex items-center justify-center shrink-0">
-              <BookOpen className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <h2
-                id="glossary-manager-modal-title"
-                className="text-sm font-bold text-slate-900 truncate"
-              >
-                Quản lý Từ điển Tăng ca (Việt - Hàn)
-              </h2>
-              <div className="flex items-center gap-2 text-[11px] text-slate-500 tabular-nums">
-                <span>{formatNumberVN(counts.total)} thuật ngữ</span>
-                <span aria-hidden="true">·</span>
-                <span className="text-emerald-700 font-medium">
-                  {formatNumberVN(counts.verified)} đã duyệt
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="text-amber-700 font-medium">
-                  {formatNumberVN(counts.pending)} chờ duyệt
-                </span>
-              </div>
+    <div className="w-full h-full flex-1 min-h-0 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-4 bg-white shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-[#14539E]/10 text-[#14539E] flex items-center justify-center shrink-0">
+            <BookOpen className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-slate-900 truncate">
+              Quản lý Từ điển Tăng ca (Việt - Hàn)
+            </h2>
+            <div className="flex items-center gap-2 text-[11px] text-slate-500 tabular-nums">
+              <span>{formatNumberVN(counts.total)} thuật ngữ</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-emerald-700 font-medium">
+                {formatNumberVN(counts.verified)} đã duyệt
+              </span>
+              <span aria-hidden="true">·</span>
+              <span className="text-amber-700 font-medium">
+                {formatNumberVN(counts.pending)} chờ duyệt
+              </span>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Đóng quản lý từ điển"
-            className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
+
+        <span className="hidden md:block text-[11px] text-slate-500 shrink-0">
+          Sửa trực tiếp trên dòng, nhấn Enter hoặc nút Duyệt / Cập nhật để lưu.
+        </span>
+      </div>
 
         {/* Filter & Search Toolbar */}
         <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
@@ -373,6 +419,73 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           </div>
         </div>
 
+        {/* Compact Quick-Add Manual Entry Bar */}
+        <div className="px-4 py-2 border-b border-slate-200 bg-white shrink-0">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200">
+            <input
+              type="text"
+              value={newReasonVi}
+              disabled={isAddingManual}
+              onChange={(e) => setNewReasonVi(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isAddingManual) {
+                  e.preventDefault();
+                  void handleAddManualEntry();
+                }
+              }}
+              placeholder="Thêm lý do Tiếng Việt mới..."
+              aria-label="Thêm lý do Tiếng Việt mới"
+              className="flex-1 min-w-[180px] h-8 px-2.5 text-xs text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+            />
+
+            <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
+              <input
+                type="text"
+                value={newReasonKr}
+                disabled={isAddingManual}
+                onChange={(e) => setNewReasonKr(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isAddingManual) {
+                    e.preventDefault();
+                    void handleAddManualEntry();
+                  }
+                }}
+                placeholder="Bản dịch Tiếng Hàn..."
+                aria-label="Bản dịch Tiếng Hàn mới"
+                className="flex-1 min-w-0 h-8 px-2.5 text-xs text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+              />
+              <button
+                type="button"
+                disabled={isTranslatingNew || isAddingManual}
+                onClick={() => void handleSuggestNewKorean()}
+                title="Dịch gợi ý tiếng Hàn bằng AI"
+                aria-label="Dịch gợi ý tiếng Hàn"
+                className="h-8 w-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                {isTranslatingNew ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
+                ) : (
+                  <Languages className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              disabled={isAddingManual}
+              onClick={() => void handleAddManualEntry()}
+              className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+            >
+              {isAddingManual ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              ) : (
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>Thêm</span>
+            </button>
+          </div>
+        </div>
+
         {/* High-Density Scrollable Table */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           {isLoading && entries.length === 0 ? (
@@ -417,7 +530,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                   <th className="px-2 py-2 w-20 text-center border-r border-slate-200/70 whitespace-nowrap">
                     Trạng thái
                   </th>
-                  <th className="px-2 py-2 w-32 text-center whitespace-nowrap">
+                  <th className="px-2 py-2 w-24 text-center whitespace-nowrap">
                     Hành động
                   </th>
                 </tr>
@@ -477,53 +590,29 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                       </td>
 
                       <td className="px-2 py-1 border-r border-slate-100">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={draftKrValue}
-                            disabled={isDeleting}
-                            onChange={(e) =>
-                              setDraftKrById((prev) => ({
-                                ...prev,
-                                [entry.id]: e.target.value,
-                              }))
+                        <input
+                          type="text"
+                          value={draftKrValue}
+                          disabled={isDeleting}
+                          onChange={(e) =>
+                            setDraftKrById((prev) => ({
+                              ...prev,
+                              [entry.id]: e.target.value,
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && canSave && !isBusy) {
+                              e.preventDefault();
+                              void handleSaveEntry(entry);
                             }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && canSave && !isBusy) {
-                                e.preventDefault();
-                                void handleSaveEntry(entry);
-                              }
-                            }}
-                            aria-label={`Bản dịch tiếng Hàn cho ${entry.reasonVi}`}
-                            className={`flex-1 min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 focus:outline-none transition-colors ${
-                              isKrDirty
-                                ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
-                                : 'border-slate-200 focus:border-[#14539E]'
-                            }`}
-                          />
-                          <button
-                            type="button"
-                            disabled={!canSave || isBusy}
-                            onClick={() => void handleSaveEntry(entry)}
-                            title={
-                              canSave
-                                ? 'Lưu thay đổi (Việt & Hàn)'
-                                : 'Chưa có thay đổi hợp lệ để lưu'
-                            }
-                            aria-label={`Lưu thay đổi cho ${entry.reasonVi}`}
-                            className={`h-7 w-7 rounded border inline-flex items-center justify-center shrink-0 transition-colors ${
-                              canSave && !isBusy
-                                ? 'bg-[#14539E] border-[#14539E] text-white hover:bg-[#0F3E77] cursor-pointer'
-                                : 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed'
-                            }`}
-                          >
-                            {isSaving ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Check className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
+                          }}
+                          aria-label={`Bản dịch tiếng Hàn cho ${entry.reasonVi}`}
+                          className={`w-full min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 focus:outline-none transition-colors ${
+                            isKrDirty
+                              ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
+                              : 'border-slate-200 focus:border-[#14539E]'
+                          }`}
+                        />
                       </td>
 
                       <td className="px-2 py-1 text-center font-mono text-[11px] text-slate-600 tabular-nums border-r border-slate-100 whitespace-nowrap">
@@ -553,7 +642,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                       </td>
 
                       <td className="px-2 py-1 text-center whitespace-nowrap">
-                        <div className="inline-flex items-center justify-center gap-1">
+                        <div className="inline-flex items-center justify-center gap-1.5">
                           {isVerified ? (
                             <button
                               type="button"
@@ -563,15 +652,15 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                                 !draftKrValue.trim()
                               }
                               onClick={() => void handleSaveEntry(entry, true)}
+                              title="Cập nhật thay đổi"
                               aria-label={`Cập nhật thuật ngữ ${entry.reasonVi}`}
-                              className="h-7 px-2.5 rounded-md text-[11px] font-semibold inline-flex items-center justify-center gap-1 bg-[#14539E] hover:bg-[#0F3E77] text-white shadow-2xs transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors bg-[#14539E] hover:bg-[#0F3E77] text-white shadow-2xs cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
                             >
                               {isSaving ? (
-                                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                               ) : (
-                                <Save className="w-3 h-3 shrink-0" />
+                                <Save className="w-3.5 h-3.5" />
                               )}
-                              <span>Cập nhật</span>
                             </button>
                           ) : (
                             <button
@@ -582,13 +671,15 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                                 !draftKrValue.trim()
                               }
                               onClick={() => void handleApprove(entry)}
+                              title="Duyệt bản dịch"
                               aria-label={`Duyệt thuật ngữ ${entry.reasonVi}`}
-                              className="h-7 px-2.5 rounded-md text-[11px] font-semibold inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
                             >
                               {isApproving ? (
-                                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                              ) : null}
-                              <span>Duyệt</span>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Check className="w-3.5 h-3.5" />
+                              )}
                             </button>
                           )}
 
@@ -598,7 +689,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                             onClick={() => void handleDelete(entry)}
                             title="Xóa từ vựng"
                             aria-label={`Xóa thuật ngữ ${entry.reasonVi}`}
-                            className="h-7 w-7 rounded-md text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
+                            className="w-7 h-7 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
                           >
                             {isDeleting ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -615,21 +706,6 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
             </table>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3 text-[11px] text-slate-500 shrink-0">
-          <span>
-            Sửa trực tiếp ở ô Tiếng Việt hoặc Tiếng Hàn rồi nhấn icon Check (hoặc Enter) để lưu.
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-7 px-3 rounded-md border border-slate-300 bg-white text-slate-700 hover:border-[#14539E] hover:text-[#14539E] font-semibold transition-colors cursor-pointer"
-          >
-            Đóng
-          </button>
-        </div>
-      </div>
     </div>
   );
 };

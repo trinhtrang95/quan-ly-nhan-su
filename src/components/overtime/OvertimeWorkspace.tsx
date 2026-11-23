@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  BookOpen,
   Calendar,
   ClipboardList,
   FilePlus2,
@@ -38,7 +39,7 @@ import {
 import { GlossaryManagerModal } from './GlossaryManagerModal';
 import { OvertimeLog } from './OvertimeLog';
 
-export type OvertimeTabId = 'create' | 'log';
+export type OvertimeTabId = 'create' | 'log' | 'glossary';
 
 export interface OvertimeWorkspaceProps {
   employees: Employee[];
@@ -66,11 +67,17 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     getLocalTodayIsoDate()
   );
   const [isQuickCreating, setIsQuickCreating] = useState<boolean>(false);
-  const [isGlossaryModalOpen, setIsGlossaryModalOpen] = useState<boolean>(false);
   const [glossaryRevision, setGlossaryRevision] = useState<number>(0);
   const [supabaseLeaveRecords, setSupabaseLeaveRecords] = useState<
     OvertimeLeaveCheckEntry[] | null
   >(null);
+
+  const handleSelectTab = (nextTab: OvertimeTabId) => {
+    setActiveTab(nextTab);
+    if (nextTab === 'create') {
+      setGlossaryRevision((prev) => prev + 1);
+    }
+  };
 
   const knownSubGroups = useMemo(() => {
     const names = new Set<string>();
@@ -150,7 +157,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     }
 
     setEditingForm(res.form);
-    setActiveTab('create');
+    handleSelectTab('create');
   };
 
   const handleStartEditForm = async (form: OvertimeFormWithItems) => {
@@ -175,7 +182,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         return;
       }
       setEditingForm(freshForm);
-      setActiveTab('create');
+      handleSelectTab('create');
     } catch {
       if (isOvertimeFormLocked(form)) {
         onShowToast?.(
@@ -186,7 +193,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         return;
       }
       setEditingForm(form);
-      setActiveTab('create');
+      handleSelectTab('create');
     }
   };
 
@@ -281,71 +288,75 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   };
 
   const activeFormsCount = forms.filter((f) => !f.deleted_at).length;
+  const tabBaseClass =
+    'h-9 px-4 rounded-xl text-xs font-bold inline-flex items-center gap-2 border transition-all cursor-pointer whitespace-nowrap shrink-0';
+  const tabActiveClass = 'bg-[#14539E] text-white border-[#14539E] shadow-xs';
+  const tabInactiveClass =
+    'bg-white text-slate-700 border-slate-300 hover:border-[#14539E] hover:text-[#14539E]';
 
   return (
     <div className="flex flex-col w-full h-full flex-1 min-h-0 overflow-hidden bg-slate-50">
-      {/* 2-Tab Navigation Header */}
+      {/* 3-Tab Navigation Header */}
       <div className="bg-white border-b border-slate-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2.5 shrink-0 no-print">
-        <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <div
-            role="tablist"
-            aria-label="Phân hệ Tăng ca"
-            className="inline-flex flex-wrap items-center gap-1 min-w-0"
+        <div
+          role="tablist"
+          aria-label="Phân hệ Tăng ca"
+          className="inline-flex flex-wrap items-center gap-2 min-w-0"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'log'}
+            onClick={() => handleSelectTab('log')}
+            className={`${tabBaseClass} ${
+              activeTab === 'log' ? tabActiveClass : tabInactiveClass
+            }`}
           >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'log'}
-              onClick={() => setActiveTab('log')}
-              className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                activeTab === 'log'
-                  ? 'bg-[#14539E] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+            <span>Nhật ký phiếu tăng ca</span>
+            <span
+              className={`font-mono text-[11px] tabular-nums ${
+                activeTab === 'log' ? 'text-blue-100' : 'text-slate-400'
               }`}
             >
-              <ClipboardList className="w-3.5 h-3.5 shrink-0" />
-              <span>Nhật ký phiếu tăng ca</span>
-              <span
-                className={`font-mono text-[11px] tabular-nums ${
-                  activeTab === 'log' ? 'text-blue-100' : 'text-slate-400'
-                }`}
-              >
-                ({formatNumberVN(activeFormsCount)})
-              </span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'create'}
-              onClick={() => setActiveTab('create')}
-              className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                activeTab === 'create'
-                  ? 'bg-[#14539E] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              {editingForm ? (
-                <Pencil className="w-3.5 h-3.5 shrink-0" />
-              ) : (
-                <FilePlus2 className="w-3.5 h-3.5 shrink-0" />
-              )}
-              <span>
-                {editingForm
-                  ? `Biên tập: ${formatOvertimeFormCodeDisplay(
-                      editingForm.form_code
-                    )} (${formatDateToFormStyle(editingForm.overtime_date)})`
-                  : 'Biên tập chi tiết phiếu'}
-              </span>
-            </button>
-          </div>
+              ({formatNumberVN(activeFormsCount)})
+            </span>
+          </button>
 
           <button
             type="button"
-            onClick={() => setIsGlossaryModalOpen(true)}
-            className="h-9 px-3 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            role="tab"
+            aria-selected={activeTab === 'create'}
+            onClick={() => handleSelectTab('create')}
+            className={`${tabBaseClass} ${
+              activeTab === 'create' ? tabActiveClass : tabInactiveClass
+            }`}
           >
-            <span>📚 Quản lý từ điển (Việt - Hàn)</span>
+            {editingForm ? (
+              <Pencil className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <FilePlus2 className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span>
+              {editingForm
+                ? `Biên tập: ${formatOvertimeFormCodeDisplay(
+                    editingForm.form_code
+                  )} (${formatDateToFormStyle(editingForm.overtime_date)})`
+                : 'Biên tập chi tiết phiếu'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'glossary'}
+            onClick={() => handleSelectTab('glossary')}
+            className={`${tabBaseClass} ${
+              activeTab === 'glossary' ? tabActiveClass : tabInactiveClass
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 shrink-0" />
+            <span>Quản lý từ điển (Việt - Hàn)</span>
           </button>
         </div>
 
@@ -357,8 +368,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Active Tab Content */}
-      {activeTab === 'log' ? (
+      {/* Tab 1: Nhật ký phiếu tăng ca */}
+      {activeTab === 'log' && (
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
           <OvertimeLog
             forms={forms}
@@ -375,8 +386,17 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             onShowToast={onShowToast}
           />
         </div>
-      ) : editingForm ? (
-        <div className="flex-1 min-h-0 flex flex-col overflow-y-auto lg:overflow-hidden">
+      )}
+
+      {/* Tab 2: Biên tập chi tiết phiếu (giữ mount để không mất dữ liệu đang biên tập khi chuyển sang Quản lý từ điển) */}
+      {editingForm ? (
+        <div
+          className={
+            activeTab === 'create'
+              ? 'flex-1 min-h-0 flex flex-col overflow-y-auto lg:overflow-hidden'
+              : 'hidden'
+          }
+        >
           <CreateOvertimeForm
             key={editingForm.id}
             employees={employees}
@@ -392,79 +412,85 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
           />
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex items-center justify-center p-6">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 max-w-md w-full text-center space-y-4">
-            <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 text-[#14539E] flex items-center justify-center mx-auto">
-              <FilePlus2 className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-slate-900">
-                Chưa chọn vỏ phiếu tăng ca để biên tập
-              </h3>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Chọn <strong>Ngày phiếu</strong> để tạo vỏ phiếu mới (hoặc mở
-                phiếu đã có của ngày đó) với mã chuẩn{' '}
-                <strong className="font-mono text-[#14539E]">
-                  {generateOvertimeFormCode(quickShellDate)}
-                </strong>
-                .
-              </p>
-            </div>
-
-            <div className="flex items-center justify-center gap-2">
-              <div className="relative flex-1 max-w-[180px]">
-                <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="date"
-                  value={quickShellDate}
-                  onChange={(e) => setQuickShellDate(e.target.value)}
-                  aria-label="Chọn ngày phiếu để tạo hoặc mở"
-                  className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
-                />
+        activeTab === 'create' && (
+          <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 max-w-md w-full text-center space-y-4">
+              <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 text-[#14539E] flex items-center justify-center mx-auto">
+                <FilePlus2 className="w-5 h-5" />
               </div>
-              <button
-                type="button"
-                disabled={isQuickCreating}
-                onClick={async () => {
-                  setIsQuickCreating(true);
-                  try {
-                    await handleCreateOrOpenShell(quickShellDate);
-                  } catch (err) {
-                    onShowToast?.(getFriendlyErrorMessage(err));
-                  } finally {
-                    setIsQuickCreating(false);
-                  }
-                }}
-                className="h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
-              >
-                {isQuickCreating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Plus className="w-3.5 h-3.5" />
-                )}
-                <span>Tạo / Mở phiếu</span>
-              </button>
-            </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Chưa chọn vỏ phiếu tăng ca để biên tập
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Chọn <strong>Ngày phiếu</strong> để tạo vỏ phiếu mới (hoặc mở
+                  phiếu đã có của ngày đó) với mã chuẩn{' '}
+                  <strong className="font-mono text-[#14539E]">
+                    {generateOvertimeFormCode(quickShellDate)}
+                  </strong>
+                  .
+                </p>
+              </div>
 
-            <div className="pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setActiveTab('log')}
-                className="text-xs font-semibold text-[#14539E] hover:underline cursor-pointer"
-              >
-                Quay lại Nhật ký phiếu tăng ca
-              </button>
+              <div className="flex items-center justify-center gap-2">
+                <div className="relative flex-1 max-w-[180px]">
+                  <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="date"
+                    value={quickShellDate}
+                    onChange={(e) => setQuickShellDate(e.target.value)}
+                    aria-label="Chọn ngày phiếu để tạo hoặc mở"
+                    className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={isQuickCreating}
+                  onClick={async () => {
+                    setIsQuickCreating(true);
+                    try {
+                      await handleCreateOrOpenShell(quickShellDate);
+                    } catch (err) {
+                      onShowToast?.(getFriendlyErrorMessage(err));
+                    } finally {
+                      setIsQuickCreating(false);
+                    }
+                  }}
+                  className="h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                >
+                  {isQuickCreating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="w-3.5 h-3.5" />
+                  )}
+                  <span>Tạo / Mở phiếu</span>
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => handleSelectTab('log')}
+                  className="text-xs font-semibold text-[#14539E] hover:underline cursor-pointer"
+                >
+                  Quay lại Nhật ký phiếu tăng ca
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
 
-      <GlossaryManagerModal
-        isOpen={isGlossaryModalOpen}
-        onClose={() => setIsGlossaryModalOpen(false)}
-        onShowToast={onShowToast}
-        onGlossaryUpdated={() => setGlossaryRevision((prev) => prev + 1)}
-      />
+      {/* Tab 3: Quản lý từ điển (Việt - Hàn) toàn màn hình */}
+      {activeTab === 'glossary' && (
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4">
+          <GlossaryManagerModal
+            isActive={activeTab === 'glossary'}
+            onShowToast={onShowToast}
+            onGlossaryUpdated={() => setGlossaryRevision((prev) => prev + 1)}
+          />
+        </div>
+      )}
     </div>
   );
 };

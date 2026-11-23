@@ -4,6 +4,7 @@ import {
   approveGlossaryEntryInList,
   cleanFactoryKoreanTranslation,
   composeLocalFactorySuggestion,
+  createManualGlossaryEntryInList,
   DEFAULT_OVERTIME_GLOSSARY,
   deleteGlossaryEntryInList,
   findExactGlossaryMatch,
@@ -145,6 +146,29 @@ describe('overtimeGlossaryService pure logic', () => {
     assert.equal(updatedPending.isUpdate, true);
     assert.equal(updatedPending.entries[0].is_verified, false);
     assert.equal(updatedPending.entries[0].isVerified, false);
+  });
+
+  it('creates manual glossary entries with is_verified=true at the top and rejects empty or duplicate entries', () => {
+    const res = createManualGlossaryEntryInList(
+      DEFAULT_OVERTIME_GLOSSARY,
+      '  Kiểm tra   linh kiện mới ',
+      '  신규 부품 점검 ',
+      '2026-11-23T09:00:00.000Z'
+    );
+    assert.equal(res.entries.length, DEFAULT_OVERTIME_GLOSSARY.length + 1);
+    assert.equal(res.entries[0].id, res.createdEntry.id);
+    assert.equal(res.createdEntry.reasonVi, 'Kiểm tra linh kiện mới');
+    assert.equal(res.createdEntry.reasonKr, '신규 부품 점검');
+    assert.equal(res.createdEntry.is_verified, true);
+    assert.equal(res.createdEntry.isVerified, true);
+    assert.equal(res.createdEntry.created_at, '2026-11-23T09:00:00.000Z');
+
+    assert.throws(() =>
+      createManualGlossaryEntryInList(res.entries, '  ', '테스트')
+    );
+    assert.throws(() =>
+      createManualGlossaryEntryInList(res.entries, 'kiểm tra linh kiện mới', '테스트')
+    );
   });
 
   it('updates both Vietnamese and Korean text without altering verification flag, approves, and deletes entries', () => {
