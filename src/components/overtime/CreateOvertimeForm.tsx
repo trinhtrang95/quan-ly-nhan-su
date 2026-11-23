@@ -90,7 +90,7 @@ export interface CreateOvertimeFormProps {
   editingForm?: OvertimeFormWithItems | null;
   onOpenExistingForm?: (form: OvertimeFormWithItems) => void;
   onCancelEdit?: () => void;
-  onSaveOnly?: (payload: CreateOvertimeFormPayload) => Promise<void> | void;
+  onSaveOnly?: (payload: CreateOvertimeFormPayload, isAutoSave?: boolean) => Promise<void> | void;
 }
 
 class OvertimeFormService {
@@ -241,9 +241,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
+  
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState<string>('');
   const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState<boolean>(false);
   const employeePickerRef = useRef<HTMLDivElement | null>(null);
+  
   const [currentReasonVi, setCurrentReasonVi] = useState<string>(() =>
     editingForm && editingForm.items.length > 0 ? '' : 'Trực sản xuất'
   );
@@ -258,10 +260,38 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const isInitialReasonMountRef = useRef<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isCommittingBlock, setIsCommittingBlock] = useState<boolean>(false);
-  const [liveLeaveRecords, setLiveLeaveRecords] = useState<
-    OvertimeLeaveCheckEntry[] | null
-  >(null);
+  
+  const [liveLeaveRecords, setLiveLeaveRecords] = useState<OvertimeLeaveCheckEntry[] | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // MỚI: State cho Combobox Lý do
+  const [isReasonDropdownOpen, setIsReasonDropdownOpen] = useState<boolean>(false);
+  const reasonDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // MỚI: Đóng Combobox Lý do khi click ra ngoài
+  useEffect(() => {
+    if (!isReasonDropdownOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        reasonDropdownRef.current &&
+        !reasonDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsReasonDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isReasonDropdownOpen]);
+
+  // MỚI: Lọc danh sách lý do dựa theo chữ đang gõ
+  const filteredGlossary = useMemo(() => {
+    const q = currentReasonVi.trim().toLowerCase();
+    if (!q) return glossaryEntries;
+    return glossaryEntries.filter((item) => item.reasonVi.toLowerCase().includes(q));
+  }, [currentReasonVi, glossaryEntries]);
+
 
   useEffect(() => {
     let active = true;
@@ -776,7 +806,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             department: formDepartment,
             overtimeDate: shellOvertimeDate,
             blocks: updatedBlocks,
-          });
+          }, true); // Truyền cờ true cho Tự động lưu
           showToast(`Đã ghi nhận và tự động lưu Phiếu Tăng Ca thành công!`);
         } catch (error) {
           showToast(`Lỗi khi lưu tự động: ${getFriendlyErrorMessage(error)}`);
@@ -843,7 +873,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         department: formDepartment,
         overtimeDate: shellOvertimeDate,
         blocks: previewData,
-      });
+      }, false); // Cờ false cho Lưu bằng tay (để chuyển trang)
       setEditingBlockId(null);
       if (!onSaveOnly) {
         showToast('Đã lưu cập nhật phiếu tăng ca thành công!');
@@ -954,6 +984,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   return (
     <div className="flex flex-col lg:flex-row w-full lg:h-full flex-1 min-h-0 lg:overflow-hidden p-3 sm:p-4 gap-4 bg-slate-50 text-slate-800">
+      
       {/* CỘT TRÁI (1/3) */}
       <div className="w-full lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:h-full min-h-0 overflow-hidden">
         <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0 bg-slate-50/50">
@@ -981,6 +1012,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           )}
         </div>
 
+        {/* VÙNG CUỘN CHÍNH CỦA CỘT TRÁI */}
         <div className="p-3 sm:p-3.5 space-y-2.5 overflow-y-auto flex-1 min-h-0">
           {isLockedForm && (
             <div
@@ -996,7 +1028,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             </div>
           )}
 
-          {/* HÀNG 1: LỌC NHÓM & NGÀY LÀM THÊM CỦA LƯỢT GHI NHẬN */}
+          {/* HÀNG 1: LỌC NHÓM & NGÀY LÀM THÊM */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label
@@ -1038,32 +1070,23 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               </div>
             </div>
           </div>
-          {blockOvertimeDate &&
-            shellOvertimeDate &&
-            blockOvertimeDate !== shellOvertimeDate && (
-              <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded-lg px-2.5 py-1 flex items-center justify-between gap-2">
-                <span>
-                  Đang ghi nhận phát sinh ngày{' '}
-                  <strong className="font-mono">
-                    {formatDateToFormStyle(blockOvertimeDate)}
-                  </strong>{' '}
-                  (Mã phiếu <strong className="font-mono">{shellFormCode}</strong> và Ngày phiếu{' '}
-                  <strong className="font-mono">
-                    {formatDateToFormStyle(shellOvertimeDate)}
-                  </strong>{' '}
-                  giữ nguyên).
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setBlockOvertimeDate(shellOvertimeDate)}
-                  className="text-[10px] font-semibold text-[#14539E] hover:underline shrink-0 cursor-pointer"
-                >
-                  Về ngày phiếu
-                </button>
-              </div>
-            )}
+          
+          {blockOvertimeDate && shellOvertimeDate && blockOvertimeDate !== shellOvertimeDate && (
+            <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded-lg px-2.5 py-1 flex items-center justify-between gap-2">
+              <span>
+                Đang ghi nhận phát sinh ngày <strong className="font-mono">{formatDateToFormStyle(blockOvertimeDate)}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setBlockOvertimeDate(shellOvertimeDate)}
+                className="text-[10px] font-semibold text-[#14539E] hover:underline shrink-0 cursor-pointer"
+              >
+                Về ngày phiếu
+              </button>
+            </div>
+          )}
 
-          {/* HÀNG 2 MỚI: CHỌN NHÂN SỰ (ĐƯỢC ĐƯA LÊN TRÊN) */}
+          {/* HÀNG 2: CHỌN NHÂN SỰ */}
           <div className="space-y-2 mt-3" ref={employeePickerRef}>
             <div className="flex items-center justify-between gap-2">
               <label
@@ -1277,16 +1300,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                       <span className="font-medium truncate max-w-[135px]" title={`${emp.fullName} (${emp.employeeCode})`}>
                         {emp.fullName}
                       </span>
-                      <span className="text-[10px] font-mono text-slate-500 shrink-0">
-                        ({emp.employeeCode})
-                      </span>
 
                       {isEditingThis ? (
                         <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
                           <input
                             type="text"
                             maxLength={5}
-                            aria-label={`Giờ bắt đầu của ${emp.fullName}`}
                             value={empStartTime}
                             onChange={(e) =>
                               setCustomTimes((prev) => ({
@@ -1313,7 +1332,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                           <input
                             type="text"
                             maxLength={5}
-                            aria-label={`Giờ kết thúc của ${emp.fullName}`}
                             value={empEndTime}
                             onChange={(e) =>
                               setCustomTimes((prev) => ({
@@ -1340,27 +1358,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                             type="button"
                             onClick={() => setEditingTimeEmpId(null)}
                             className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
-                            title="Xong"
                           >
                             <Check className="w-2.5 h-2.5 stroke-[2.5]" />
                           </button>
-                          {isCustomized && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCustomTimes((prev) => {
-                                  const next = { ...prev };
-                                  delete next[emp.id];
-                                  return next;
-                                });
-                                setEditingTimeEmpId(null);
-                              }}
-                              className="p-0.5 text-slate-400 hover:text-red-500 rounded cursor-pointer"
-                              title="Khôi phục giờ chung"
-                            >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                          )}
                         </div>
                       ) : (
                         <button
@@ -1371,7 +1371,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                               ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
                               : 'bg-white/80 text-slate-500 border-slate-200 hover:border-[#14539E] hover:text-[#14539E]'
                           }`}
-                          title="Bấm để sửa giờ tăng ca riêng"
                         >
                           <Clock className="w-2.5 h-2.5" />
                           <span>{empStartTime}-{empEndTime}</span>
@@ -1401,7 +1400,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             )}
           </div>
 
-          {/* HÀNG 3 MỚI: GIỜ BẮT ĐẦU / KẾT THÚC */}
+          {/* HÀNG 3: GIỜ BẮT ĐẦU / KẾT THÚC */}
           <div className="grid grid-cols-2 gap-2 mt-3">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">Giờ bắt đầu (chung)</label>
@@ -1447,9 +1446,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             </div>
           </div>
 
-          {/* HÀNG 4 MỚI: LÝ DO TĂNG CA (VIỆT - HÀN) */}
+          {/* HÀNG 4: LÝ DO TĂNG CA (VIỆT - HÀN) DẠNG COMBOBOX */}
           <div className="space-y-2 mt-3">
-            <div>
+            <div ref={reasonDropdownRef} className="relative">
               <div className="flex items-center justify-between gap-2 mb-1">
                 <label
                   htmlFor="overtime-reason-vi"
@@ -1464,14 +1463,74 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   </span>
                 )}
               </div>
-              <textarea
-                id="overtime-reason-vi"
-                rows={3}
-                value={currentReasonVi}
-                onChange={(e) => setCurrentReasonVi(e.target.value)}
-                placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp hoặc mô tả chi tiết công việc tăng ca..."
-                className="whitespace-pre-wrap w-full min-h-[66px] px-2.5 py-2 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
-              />
+              
+              <div className="relative">
+                <textarea
+                  id="overtime-reason-vi"
+                  rows={2}
+                  value={currentReasonVi}
+                  onFocus={() => setIsReasonDropdownOpen(true)}
+                  onChange={(e) => {
+                    setCurrentReasonVi(e.target.value);
+                    if (!isReasonDropdownOpen) setIsReasonDropdownOpen(true);
+                  }}
+                  placeholder="Bấm để chọn mẫu hoặc tự nhập mới..."
+                  className="whitespace-pre-wrap w-full min-h-[44px] pl-2.5 pr-8 py-1.5 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsReasonDropdownOpen((prev) => !prev)}
+                  className="absolute right-1.5 top-1.5 p-1 text-slate-400 hover:text-[#14539E] rounded cursor-pointer transition-transform"
+                >
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform duration-150 ${
+                      isReasonDropdownOpen ? 'rotate-180 text-[#14539E]' : ''
+                    }`}
+                  />
+                </button>
+                
+                {isReasonDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-lg border border-slate-200 bg-white shadow-xl max-h-48 overflow-y-auto">
+                    {filteredGlossary.length === 0 ? (
+                      <div className="p-2.5 text-center text-[11px] text-slate-500">
+                        Chưa có mẫu nào khớp. Hệ thống sẽ tự lưu mẫu mới khi bạn bấm Ghi nhận.
+                      </div>
+                    ) : (
+                      <div className="p-1.5 space-y-0.5">
+                        {filteredGlossary.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setCurrentReasonVi(item.reasonVi);
+                              setCurrentReasonKr(item.reasonKr);
+                              setIsReasonKrManuallyEdited(false);
+                              setIsReasonDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-md text-[11px] hover:bg-blue-50 transition-colors cursor-pointer flex items-start justify-between gap-2 group"
+                          >
+                            <span className="break-words line-clamp-2 text-slate-700 group-hover:text-[#14539E] font-medium">
+                              {item.reasonVi}
+                            </span>
+                            
+                            {/* Hiển thị cờ kiểm duyệt */}
+                            {item.isVerified ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" title="Đã được duyệt" />
+                            ) : (
+                              <span 
+                                className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[8px] font-bold text-amber-700 tracking-wide mt-0.5"
+                                title="Bản dịch AI - Đang chờ duyệt"
+                              >
+                                AI
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>
@@ -1483,100 +1542,97 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               </label>
               <textarea
                 id="overtime-reason-kr"
-                rows={3}
+                rows={2}
                 value={currentReasonKr}
                 onChange={(e) => {
                   setCurrentReasonKr(e.target.value);
                   setIsReasonKrManuallyEdited(true);
                 }}
-                placeholder="생산 당직 (Tự động gợi ý theo từ điển hoặc nhập/chỉnh sửa trực tiếp)..."
-                className="whitespace-pre-wrap w-full min-h-[62px] px-2.5 py-2 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
+                placeholder="생산 당직 (Tự động dịch/gợi ý hoặc nhập trực tiếp)..."
+                className="whitespace-pre-wrap w-full min-h-[44px] px-2.5 py-1.5 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
               />
             </div>
           </div>
 
-        </div>
-
-        {/* ĐÁY CỘT TRÁI CỐ ĐỊNH: NÚT GHI NHẬN & DANH SÁCH NHÓM ĐÃ GHI NHẬN */}
-        <div className="shrink-0 border-t border-slate-200 bg-slate-50/60 p-3 space-y-2">
-          {/* HÀNG 5 */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={isLockedForm || isCommittingBlock}
-              onClick={handleCommitBlock}
-              className="flex-1 h-9 rounded-xl bg-[#14539E] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-[0.99] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isCommittingBlock ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : editingBlockId ? (
-                <Check className="w-4 h-4 stroke-[2.5]" />
-              ) : (
-                <Plus className="w-4 h-4 stroke-[2.5]" />
-              )}
-              <span>{editingBlockId ? 'Cập nhật nhóm' : 'Ghi nhận'}</span>
-            </button>
-            {editingBlockId && (
+          {/* HÀNG 5: NÚT GHI NHẬN & DANH SÁCH ĐÃ GHI NHẬN (Đã dời vào trong) */}
+          <div className="mt-4 pt-3 border-t border-slate-200 space-y-2 pb-2">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleCancelBlockEdit}
-                className="h-9 px-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                disabled={isLockedForm || isCommittingBlock}
+                onClick={handleCommitBlock}
+                className="flex-1 h-9 rounded-xl bg-[#14539E] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-[0.99] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Hủy
+                {isCommittingBlock ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : editingBlockId ? (
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                ) : (
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                )}
+                <span>{editingBlockId ? 'Cập nhật nhóm' : 'Ghi nhận'}</span>
               </button>
+              {editingBlockId && (
+                <button
+                  type="button"
+                  onClick={handleCancelBlockEdit}
+                  className="h-9 px-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  Hủy
+                </button>
+              )}
+            </div>
+
+            {previewData.length > 0 && (
+              <div className="pt-2 border-t border-slate-200 space-y-1.5">
+                <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between gap-2">
+                  <span className="truncate">Các nhóm đã ghi nhận ({previewData.length}):</span>
+                  <span className="text-[10px] font-normal text-slate-500 shrink-0 whitespace-nowrap tabular-nums">{summaryStats.datesCount} ngày • {summaryStats.totalParticipants} lượt</span>
+                </div>
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                  {previewData.map((b, idx) => (
+                    <div
+                      key={b.id}
+                      className={`flex items-center justify-between gap-2 p-2 rounded-lg border text-xs shadow-2xs transition-colors ${
+                        editingBlockId === b.id
+                          ? 'bg-blue-50/80 border-[#14539E]'
+                          : 'bg-white border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start gap-1.5">
+                          <span className="font-bold text-[#14539E] shrink-0">#{idx + 1}</span>
+                          <span className="font-bold text-slate-800 font-mono text-[11px] shrink-0">[{formatDateToFormStyle(b.overtimeDate)}]</span>
+                          <span className="text-slate-800 font-medium line-clamp-2 break-words leading-snug">{b.reasonVi || 'Không có lý do'}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                          {b.selectedEmployeeIds.length} nhân sự
+                          {(() => {
+                            const groupNames = Array.from(
+                              new Set(
+                                b.selectedEmployeeIds
+                                  .map((id) => employeeMap.get(id)?.department?.trim())
+                                  .filter((name): name is string => Boolean(name))
+                              )
+                            );
+                            return groupNames.length > 0 ? ` • ${groupNames.join(', ')}` : '';
+                          })()}
+                          {' • '}
+                          {b.startTime}-{b.endTime}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button type="button" disabled={isLockedForm} onClick={() => handleEditPreviewBlock(idx)} className="p-1 rounded text-[#14539E] hover:bg-blue-50 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed" title="Sửa nhóm"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button type="button" disabled={isLockedForm || idx === 0} onClick={() => handleMoveBlock(idx, 'up')} className="p-1 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed" title="Lên"><ChevronUp className="w-4 h-4" /></button>
+                        <button type="button" disabled={isLockedForm || idx === previewData.length - 1} onClick={() => handleMoveBlock(idx, 'down')} className="p-1 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed" title="Xuống"><ChevronDown className="w-4 h-4" /></button>
+                        <button type="button" disabled={isLockedForm} onClick={() => handleRemovePreviewBlock(idx)} className="p-1 rounded text-red-500 hover:bg-red-50 cursor-pointer ml-0.5 disabled:opacity-35 disabled:cursor-not-allowed" title="Xóa"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-
-          {/* HÀNG 6 */}
-          {previewData.length > 0 && (
-            <div className="pt-2 border-t border-slate-200 space-y-1.5">
-              <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between gap-2">
-                <span className="truncate">Các nhóm đã ghi nhận ({previewData.length}):</span>
-                <span className="text-[10px] font-normal text-slate-500 shrink-0 whitespace-nowrap tabular-nums">{summaryStats.datesCount} ngày • {summaryStats.totalParticipants} lượt</span>
-              </div>
-              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                {previewData.map((b, idx) => (
-                  <div
-                    key={b.id}
-                    className={`flex items-center justify-between gap-2 p-2 rounded-lg border text-xs shadow-2xs transition-colors ${
-                      editingBlockId === b.id
-                        ? 'bg-blue-50/80 border-[#14539E]'
-                        : 'bg-white border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start gap-1.5">
-                        <span className="font-bold text-[#14539E] shrink-0">#{idx + 1}</span>
-                        <span className="font-bold text-slate-800 font-mono text-[11px] shrink-0">[{formatDateToFormStyle(b.overtimeDate)}]</span>
-                        <span className="text-slate-800 font-medium line-clamp-2 break-words leading-snug">{b.reasonVi || 'Không có lý do'}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
-                        {b.selectedEmployeeIds.length} nhân sự
-                        {(() => {
-                          const groupNames = Array.from(
-                            new Set(
-                              b.selectedEmployeeIds
-                                .map((id) => employeeMap.get(id)?.department?.trim())
-                                .filter((name): name is string => Boolean(name))
-                            )
-                          );
-                          return groupNames.length > 0 ? ` • ${groupNames.join(', ')}` : '';
-                        })()}
-                        {' • '}
-                        {b.startTime}-{b.endTime}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button type="button" disabled={isLockedForm} onClick={() => handleEditPreviewBlock(idx)} className="p-1 rounded text-[#14539E] hover:bg-blue-50 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed" title="Sửa nhóm"><Pencil className="w-3.5 h-3.5" /></button>
-                      <button type="button" disabled={isLockedForm || idx === 0} onClick={() => handleMoveBlock(idx, 'up')} className="p-1 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed" title="Lên"><ChevronUp className="w-4 h-4" /></button>
-                      <button type="button" disabled={isLockedForm || idx === previewData.length - 1} onClick={() => handleMoveBlock(idx, 'down')} className="p-1 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed" title="Xuống"><ChevronDown className="w-4 h-4" /></button>
-                      <button type="button" disabled={isLockedForm} onClick={() => handleRemovePreviewBlock(idx)} className="p-1 rounded text-red-500 hover:bg-red-50 cursor-pointer ml-0.5 disabled:opacity-35 disabled:cursor-not-allowed" title="Xóa"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

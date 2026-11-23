@@ -187,7 +187,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     }
   };
 
-  const handleSaveForm = async (payload: CreateOvertimeFormPayload) => {
+  const handleSaveForm = async (payload: CreateOvertimeFormPayload, isAutoSave?: boolean) => {
     if (!editingForm) {
       throw new Error(
         'Vui lòng tạo hoặc chọn một vỏ phiếu từ Nhật ký trước khi lưu chi tiết.'
@@ -214,7 +214,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     });
 
     await loadForms({ silent: true });
-    setEditingForm(null);
+    
+    // Vẫn hiển thị thông báo cập nhật thành công với số giờ mới nhất
     onShowToast?.(
       `Đã cập nhật phiếu ${formatOvertimeFormCodeDisplay(
         updated.form_code
@@ -222,7 +223,12 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         updated.total_hours
       )} giờ).`
     );
-    setActiveTab('log');
+
+    // ĐIỂM CHỐT LÀ Ở ĐÂY: Chỉ chuyển trang khi KHÔNG phải là tự động lưu
+    if (!isAutoSave) {
+      setEditingForm(null);
+      setActiveTab('log');
+    }
   };
 
   const handleCancelEdit = () => {
