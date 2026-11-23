@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyRealtimeGlossaryPayload,
   approveGlossaryEntryInList,
   areTargetGroupsEqual,
   cleanFactoryKoreanTranslation,
@@ -14,6 +15,7 @@ import {
   isGlossaryEntryVerified,
   mapSupabaseGlossaryRowToEntry,
   normalizeGlossaryKey,
+  normalizeGlossaryRow,
   normalizeTargetGroups,
   serializeTargetGroupsForSupabase,
   updateGlossaryEntryInList,
@@ -403,5 +405,88 @@ describe('overtimeGlossaryService pure logic', () => {
       empDetected.map((e) => e.id),
       ['baotri-only', 'shared-1']
     );
+  });
+
+  it('normalizes raw Supabase rows via normalizeGlossaryRow and applies Realtime INSERT/UPDATE/DELETE payloads cleanly', () => {
+    const normalized = normalizeGlossaryRow({
+      id: 'rt-1',
+      reason_vi: '  Kiểm tra   cảm biến IOT ',
+      reason_kr: '  IOT   센서 점검 ',
+      target_groups: '["IOT", "ST"]',
+      is_verified: false,
+      created_at: '2026-11-23T08:00:00.000Z',
+      updated_at: '2026-11-23T08:05:00.000Z',
+      deleted_at: null,
+    });
+    assert.equal(normalized.id, 'rt-1');
+    assert.equal(normalized.reasonVi, 'Kiểm tra   cảm biến IOT');
+    assert.equal(normalized.reasonKr, 'IOT   센서 점검');
+    assert.deepEqual(normalized.target_groups, ['IOT', 'ST']);
+    assert.equal(normalized.is_verified, false);
+    assert.equal(normalized.isVerified, false);
+    assert.equal(normalized.created_at, '2026-11-23T08:00:00.000Z');
+    assert.equal(normalized.deletedAt, null);
+
+    // 1) INSERT event with JSON-stringified target_groups
+    let state: OvertimeGlossaryEntry[] = [];
+    state = applyRealtimeGlossaryPayload(state, {
+      eventType: 'INSERT',
+      newRow: {
+        id: 'rt-1',
+        reason_vi: 'Cân chỉnh JIG mới',
+        reason_kr: '신규 지그 조정',
+        target_groups: '["JIG/AUTO 2"]',
+        is_verified: false,
+        created_at: '2026-11-23T09:00:00.000Z',
+        updated_at: '2026-11-23T09:00:00.000Z',
+        deleted_at: null,
+      },
+      oldRow: null,
+    });
+    assert.equal(state.length, 1);
+    assert.deepEqual(state[0].target_groups, ['JIG/AUTO 2']);
+    assert.equal(state[0].is_verified, false);
+
+    // 2) UPDATE event approving and adding another group
+    state = applyRealtimeGlossaryPayload(state, {
+      eventType: 'UPDATE',
+      newRow: {
+        id: 'rt-1',
+        reason_vi: 'Cân chỉnh JIG mới',
+        reason_kr: '신규 지그 교정',
+        target_groups: '["JIG/AUTO 2", "AUTO 1"]',
+        is_verified: true,
+        created_at: '2026-11-23T09:00:00.000Z',
+        updated_at: '2026-11-23T09:10:00.000Z',
+        deleted_at: null,
+      },
+      oldRow: null,
+    });
+    assert.equal(state.length, 1);
+    assert.equal(state[0].reasonKr, '신규 지그 교정');
+    assert.equal(state[0].is_verified, true);
+    assert.deepEqual(state[0].target_groups, ['JIG/AUTO 2', 'AUTO 1']);
+
+    // 3) UPDATE soft-delete removes the entry from active state
+    const afterSoftDelete = applyRealtimeGlossaryPayload(state, {
+      eventType: 'UPDATE',
+      newRow: {
+        id: 'rt-1',
+        reason_vi: 'Cân chỉnh JIG mới',
+        reason_kr: '신규 지그 교정',
+        deleted_at: '2026-11-23T09:20:00.000Z',
+        updated_at: '2026-11-23T09:20:00.000Z',
+      },
+      oldRow: null,
+    });
+    assert.equal(afterSoftDelete.length, 0);
+
+    // 4) DELETE event removes the entry by oldRow.id
+    const afterHardDelete = applyRealtimeGlossaryPayload(state, {
+      eventType: 'DELETE',
+      newRow: null,
+      oldRow: { id: 'rt-1' },
+    });
+    assert.equal(afterHardDelete.length, 0);
   });
 });

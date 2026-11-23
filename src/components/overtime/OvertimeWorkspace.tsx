@@ -33,6 +33,12 @@ import {
   updateOvertimeFormInHistory,
 } from '../../utils/overtimeFormsService';
 import {
+  applyRealtimeGlossaryPayload,
+  fetchOvertimeGlossary,
+  OvertimeGlossaryEntry,
+  subscribeToOvertimeGlossaryRealtime,
+} from '../../utils/overtimeGlossaryService';
+import {
   CreateOvertimeForm,
   CreateOvertimeFormPayload,
 } from './CreateOvertimeForm';
@@ -67,15 +73,36 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     getLocalTodayIsoDate()
   );
   const [isQuickCreating, setIsQuickCreating] = useState<boolean>(false);
-  const [glossaryRevision, setGlossaryRevision] = useState<number>(0);
+  const [glossaryEntries, setGlossaryEntries] = useState<OvertimeGlossaryEntry[]>([]);
+  const [isLoadingGlossary, setIsLoadingGlossary] = useState<boolean>(true);
   const [supabaseLeaveRecords, setSupabaseLeaveRecords] = useState<
     OvertimeLeaveCheckEntry[] | null
   >(null);
 
+  const loadGlossary = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+      setIsLoadingGlossary(true);
+    }
+    try {
+      const loaded = await fetchOvertimeGlossary();
+      setGlossaryEntries(loaded);
+    } finally {
+      if (!silent) {
+        setIsLoadingGlossary(false);
+      }
+    }
+  }, []);
+
+  const handleRefreshGlossary = useCallback(
+    () => loadGlossary({ silent: true }),
+    [loadGlossary]
+  );
+
   const handleSelectTab = (nextTab: OvertimeTabId) => {
     setActiveTab(nextTab);
-    if (nextTab === 'create') {
-      setGlossaryRevision((prev) => prev + 1);
+    if (nextTab === 'create' || nextTab === 'glossary') {
+      void loadGlossary({ silent: glossaryEntries.length > 0 });
     }
   };
 
@@ -123,7 +150,29 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   useEffect(() => {
     void loadForms();
     void loadLeaveRecords();
-  }, []);
+    void loadGlossary();
+
+    let refreshTimer: number | null = null;
+    const unsubscribeGlossaryRealtime = subscribeToOvertimeGlossaryRealtime(
+      (event) => {
+        setGlossaryEntries((prev) => applyRealtimeGlossaryPayload(prev, event));
+        if (refreshTimer !== null) {
+          window.clearTimeout(refreshTimer);
+        }
+        refreshTimer = window.setTimeout(() => {
+          refreshTimer = null;
+          void loadGlossary({ silent: true });
+        }, 250);
+      }
+    );
+
+    return () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      unsubscribeGlossaryRealtime();
+    };
+  }, [loadForms, loadLeaveRecords, loadGlossary]);
 
   const handleCreateOrOpenShell = async (overtimeDate: string) => {
     const res = await createOrOpenOvertimeShell(overtimeDate, {
@@ -405,7 +454,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             existingForms={forms}
             isCheckingExistingForms={isLoadingForms}
             editingForm={editingForm}
-            glossaryRefreshKey={glossaryRevision}
+            glossaryEntries={glossaryEntries}
+            onGlossaryEntriesUpdated={setGlossaryEntries}
             onOpenExistingForm={(form) => void handleStartEditForm(form)}
             onCancelEdit={handleCancelEdit}
             onSaveOnly={handleSaveForm}
@@ -487,8 +537,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
           <GlossaryManagerModal
             isActive={activeTab === 'glossary'}
             groups={groups}
+            entries={glossaryEntries}
+            isLoading={isLoadingGlossary}
+            onEntriesUpdated={setGlossaryEntries}
+            onRefreshGlossary={handleRefreshGlossary}
             onShowToast={onShowToast}
-            onGlossaryUpdated={() => setGlossaryRevision((prev) => prev + 1)}
           />
         </div>
       )}

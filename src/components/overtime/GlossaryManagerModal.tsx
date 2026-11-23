@@ -20,12 +20,11 @@ import {
   areTargetGroupsEqual,
   createManualGlossaryEntry,
   deleteGlossaryEntry,
+  fetchOvertimeGlossary,
   formatGlossaryDateDDMMYYYY,
-  loadOvertimeGlossary,
   normalizeGlossaryKey,
   normalizeTargetGroups,
   OvertimeGlossaryEntry,
-  readLocalOvertimeGlossary,
   suggestFactoryKoreanTranslation,
   updateGlossaryEntry,
 } from '../../utils/overtimeGlossaryService';
@@ -33,6 +32,10 @@ import {
 export interface GlossaryManagerModalProps {
   isActive?: boolean;
   groups?: DepartmentGroup[];
+  entries?: OvertimeGlossaryEntry[];
+  isLoading?: boolean;
+  onEntriesUpdated?: (entries: OvertimeGlossaryEntry[]) => void;
+  onRefreshGlossary?: () => Promise<void> | void;
   onShowToast?: (message: string) => void;
   onGlossaryUpdated?: () => void;
 }
@@ -49,13 +52,18 @@ interface RowPopoverState {
 export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   isActive = true,
   groups = [],
+  entries: propEntries,
+  isLoading: propIsLoading,
+  onEntriesUpdated,
+  onRefreshGlossary,
   onShowToast,
   onGlossaryUpdated,
 }) => {
-  const [entries, setEntries] = useState<OvertimeGlossaryEntry[]>(() =>
-    readLocalOvertimeGlossary()
-  );
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const isControlled = propEntries !== undefined;
+  const [internalEntries, setInternalEntries] = useState<OvertimeGlossaryEntry[]>([]);
+  const [internalIsLoading, setInternalIsLoading] = useState<boolean>(false);
+  const entries = isControlled ? propEntries : internalEntries;
+  const isLoading = propIsLoading !== undefined ? propIsLoading : internalIsLoading;
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<GlossaryStatusFilter>('all');
   const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
@@ -79,6 +87,17 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
 
   const newGroupPopoverRef = useRef<HTMLDivElement | null>(null);
   const rowPopoverRef = useRef<HTMLDivElement | null>(null);
+  const prevEntriesRef = useRef<OvertimeGlossaryEntry[]>([]);
+
+  const applyEntriesUpdate = useCallback(
+    (nextEntries: OvertimeGlossaryEntry[]) => {
+      if (!isControlled) {
+        setInternalEntries(nextEntries);
+      }
+      onEntriesUpdated?.(nextEntries);
+    },
+    [isControlled, onEntriesUpdated]
+  );
 
   const groupOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -112,76 +131,89 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     [groupColorMap]
   );
 
-  const syncDraftsFromEntries = useCallback((list: OvertimeGlossaryEntry[]) => {
-    setDraftViById((prev) => {
-      const next: Record<string, string> = {};
-      for (const item of list) {
-        next[item.id] = prev[item.id] !== undefined ? prev[item.id] : item.reasonVi;
-      }
-      return next;
-    });
-    setDraftKrById((prev) => {
-      const next: Record<string, string> = {};
-      for (const item of list) {
-        next[item.id] = prev[item.id] !== undefined ? prev[item.id] : item.reasonKr;
-      }
-      return next;
-    });
-    setDraftGroupsById((prev) => {
-      const next: Record<string, string[]> = {};
-      for (const item of list) {
-        next[item.id] =
-          prev[item.id] !== undefined
-            ? prev[item.id]
+  const syncDraftsFromEntries = useCallback(
+    (list: OvertimeGlossaryEntry[], prevList: OvertimeGlossaryEntry[] = []) => {
+      const prevById = new Map(prevList.map((item) => [item.id, item]));
+      setDraftViById((prev) => {
+        const next: Record<string, string> = {};
+        for (const item of list) {
+          const prevItem = prevById.get(item.id);
+          const prevDraft = prev[item.id];
+          const hasUnsavedEdit =
+            prevDraft !== undefined &&
+            prevItem !== undefined &&
+            prevDraft.trim() !== prevItem.reasonVi.trim();
+          next[item.id] = hasUnsavedEdit ? prevDraft : item.reasonVi;
+        }
+        return next;
+      });
+      setDraftKrById((prev) => {
+        const next: Record<string, string> = {};
+        for (const item of list) {
+          const prevItem = prevById.get(item.id);
+          const prevDraft = prev[item.id];
+          const hasUnsavedEdit =
+            prevDraft !== undefined &&
+            prevItem !== undefined &&
+            prevDraft.trim() !== prevItem.reasonKr.trim();
+          next[item.id] = hasUnsavedEdit ? prevDraft : item.reasonKr;
+        }
+        return next;
+      });
+      setDraftGroupsById((prev) => {
+        const next: Record<string, string[]> = {};
+        for (const item of list) {
+          const prevItem = prevById.get(item.id);
+          const prevDraft = prev[item.id];
+          const hasUnsavedEdit =
+            prevDraft !== undefined &&
+            prevItem !== undefined &&
+            !areTargetGroupsEqual(prevDraft, prevItem.target_groups);
+          next[item.id] = hasUnsavedEdit
+            ? prevDraft
             : normalizeTargetGroups(item.target_groups);
-      }
-      return next;
-    });
-  }, []);
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   useEffect(() => {
-    if (!isActive) return;
+    syncDraftsFromEntries(entries, prevEntriesRef.current);
+    prevEntriesRef.current = entries;
+  }, [entries, syncDraftsFromEntries]);
+
+  useEffect(() => {
+    if (!isActive || isControlled) return;
     let active = true;
-    const localInitial = readLocalOvertimeGlossary();
-    setEntries(localInitial);
+    setInternalIsLoading(true);
 
-    const initialViDrafts: Record<string, string> = {};
-    const initialKrDrafts: Record<string, string> = {};
-    const initialGroupDrafts: Record<string, string[]> = {};
-    for (const item of localInitial) {
-      initialViDrafts[item.id] = item.reasonVi;
-      initialKrDrafts[item.id] = item.reasonKr;
-      initialGroupDrafts[item.id] = normalizeTargetGroups(item.target_groups);
-    }
-    setDraftViById(initialViDrafts);
-    setDraftKrById(initialKrDrafts);
-    setDraftGroupsById(initialGroupDrafts);
-    setIsLoading(true);
-
-    void loadOvertimeGlossary()
+    void fetchOvertimeGlossary()
       .then((loaded) => {
         if (!active) return;
-        setEntries(loaded);
-        const refreshedViDrafts: Record<string, string> = {};
-        const refreshedKrDrafts: Record<string, string> = {};
-        const refreshedGroupDrafts: Record<string, string[]> = {};
-        for (const item of loaded) {
-          refreshedViDrafts[item.id] = item.reasonVi;
-          refreshedKrDrafts[item.id] = item.reasonKr;
-          refreshedGroupDrafts[item.id] = normalizeTargetGroups(item.target_groups);
-        }
-        setDraftViById(refreshedViDrafts);
-        setDraftKrById(refreshedKrDrafts);
-        setDraftGroupsById(refreshedGroupDrafts);
+        setInternalEntries(loaded);
       })
       .finally(() => {
-        if (active) setIsLoading(false);
+        if (active) setInternalIsLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [isActive]);
+  }, [isActive, isControlled]);
+
+  const prevIsActiveRef = useRef<boolean>(isActive);
+  const onRefreshGlossaryRef = useRef(onRefreshGlossary);
+  onRefreshGlossaryRef.current = onRefreshGlossary;
+
+  useEffect(() => {
+    const wasActive = prevIsActiveRef.current;
+    prevIsActiveRef.current = isActive;
+    if (!wasActive && isActive && isControlled && onRefreshGlossaryRef.current) {
+      void onRefreshGlossaryRef.current();
+    }
+  }, [isActive, isControlled]);
 
   useEffect(() => {
     if (!isNewGroupPopoverOpen) return;
@@ -323,7 +355,6 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     setSavingId(entry.id);
     try {
       const res = await updateGlossaryEntry(entry.id, draftVi, draftKr, draftGroups);
-      setEntries(res.entries);
       if (res.updatedEntry) {
         const updated = res.updatedEntry;
         setDraftViById((prev) => {
@@ -344,9 +375,8 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           next[updated.id] = normalizeTargetGroups(updated.target_groups);
           return next;
         });
-      } else {
-        syncDraftsFromEntries(res.entries);
       }
+      applyEntriesUpdate(res.entries);
       setRowPopover((prev) => (prev?.entryId === entry.id ? null : prev));
       onGlossaryUpdated?.();
       onShowToast?.(`Đã cập nhật từ vựng "${draftVi}".`);
@@ -380,7 +410,6 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
       const targetId = editRes.updatedEntry?.id || entry.id;
 
       const res = await approveGlossaryEntry(targetId);
-      setEntries(res.entries);
       if (res.updatedEntry) {
         const updated = res.updatedEntry;
         setDraftViById((prev) => {
@@ -402,6 +431,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           return next;
         });
       }
+      applyEntriesUpdate(res.entries);
       setRowPopover((prev) => (prev?.entryId === entry.id ? null : prev));
       onGlossaryUpdated?.();
       onShowToast?.(`Đã duyệt thuật ngữ "${draftVi}".`);
@@ -424,7 +454,6 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     setDeletingId(entry.id);
     try {
       const res = await deleteGlossaryEntry(entry.id);
-      setEntries(res.entries);
       setDraftViById((prev) => {
         const next = { ...prev };
         delete next[entry.id];
@@ -440,6 +469,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         delete next[entry.id];
         return next;
       });
+      applyEntriesUpdate(res.entries);
       setRowPopover((prev) => (prev?.entryId === entry.id ? null : prev));
       onGlossaryUpdated?.();
       onShowToast?.(`Đã xóa từ vựng "${entry.reasonVi}" khỏi từ điển.`);
@@ -490,7 +520,6 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         cleanKr,
         newTargetGroups
       );
-      setEntries(res.entries);
       setDraftViById((prev) => ({
         ...prev,
         [res.createdEntry.id]: res.createdEntry.reasonVi,
@@ -505,6 +534,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           res.createdEntry.target_groups
         ),
       }));
+      applyEntriesUpdate(res.entries);
       setNewReasonVi('');
       setNewReasonKr('');
       setNewTargetGroups([]);

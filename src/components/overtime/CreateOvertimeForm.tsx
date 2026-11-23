@@ -40,12 +40,11 @@ import {
   resolveOvertimeMainDepartment,
 } from '../../utils/overtimeFormsService';
 import {
+  fetchOvertimeGlossary,
   filterAndSortGlossaryForCombobox,
   findExactGlossaryMatch,
-  loadOvertimeGlossary,
   normalizeTargetGroups,
   OvertimeGlossaryEntry,
-  readLocalOvertimeGlossary,
   suggestFactoryKoreanTranslation,
   upsertOvertimeGlossaryEntry,
 } from '../../utils/overtimeGlossaryService';
@@ -91,6 +90,8 @@ export interface CreateOvertimeFormProps {
   initialDate?: string;
   editingForm?: OvertimeFormWithItems | null;
   glossaryRefreshKey?: number;
+  glossaryEntries?: OvertimeGlossaryEntry[];
+  onGlossaryEntriesUpdated?: (entries: OvertimeGlossaryEntry[]) => void;
   onOpenExistingForm?: (form: OvertimeFormWithItems) => void;
   onCancelEdit?: () => void;
   onSaveOnly?: (payload: CreateOvertimeFormPayload, isAutoSave?: boolean) => Promise<void> | void;
@@ -204,6 +205,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   initialDate = getLocalTodayIsoDate(),
   editingForm = null,
   glossaryRefreshKey = 0,
+  glossaryEntries: propGlossaryEntries,
+  onGlossaryEntriesUpdated,
   onOpenExistingForm,
   onCancelEdit,
   onSaveOnly,
@@ -257,9 +260,17 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     editingForm && editingForm.items.length > 0 ? '' : '생산 당직'
   );
   const [isReasonKrManuallyEdited, setIsReasonKrManuallyEdited] = useState<boolean>(false);
-  const [glossaryEntries, setGlossaryEntries] = useState<OvertimeGlossaryEntry[]>(() =>
-    readLocalOvertimeGlossary()
-  );
+  const isGlossaryControlled = propGlossaryEntries !== undefined;
+  const [internalGlossaryEntries, setInternalGlossaryEntries] = useState<OvertimeGlossaryEntry[]>([]);
+  const glossaryEntries = isGlossaryControlled
+    ? propGlossaryEntries
+    : internalGlossaryEntries;
+  const updateGlossaryState = (nextEntries: OvertimeGlossaryEntry[]) => {
+    if (!isGlossaryControlled) {
+      setInternalGlossaryEntries(nextEntries);
+    }
+    onGlossaryEntriesUpdated?.(nextEntries);
+  };
   const [isAutoTranslating, setIsAutoTranslating] = useState<boolean>(false);
   const isInitialReasonMountRef = useRef<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -317,15 +328,15 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
 
   useEffect(() => {
+    if (isGlossaryControlled) return;
     let active = true;
-    setGlossaryEntries(readLocalOvertimeGlossary());
-    void loadOvertimeGlossary().then((loaded) => {
-      if (active) setGlossaryEntries(loaded);
+    void fetchOvertimeGlossary().then((loaded) => {
+      if (active) setInternalGlossaryEntries(loaded);
     });
     return () => {
       active = false;
     };
-  }, [glossaryRefreshKey]);
+  }, [isGlossaryControlled, glossaryRefreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -595,7 +606,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       return;
     }
     const { entries, isUpdate } = await upsertOvertimeGlossaryEntry(cleanVi, cleanKr);
-    setGlossaryEntries(entries);
+    updateGlossaryState(entries);
     showToast(
       isUpdate
         ? `Đã cập nhật mẫu "${cleanVi}" trong từ điển.`
@@ -800,12 +811,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim(), {
             isVerified: false,
             targetGroups: blockDepartments,
-          }).then(({ entries }) => setGlossaryEntries(entries));
+          }).then(({ entries }) => updateGlossaryState(entries));
         } else if (finalReasonKr.trim() !== existingGlossaryMatch.reasonKr.trim()) {
           void upsertOvertimeGlossaryEntry(
             cleanReasonVi,
             finalReasonKr.trim()
-          ).then(({ entries }) => setGlossaryEntries(entries));
+          ).then(({ entries }) => updateGlossaryState(entries));
         }
       }
 

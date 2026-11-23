@@ -1,4 +1,7 @@
-import { overtimeSupabase } from './overtimeFormsService';
+import {
+  getOvertimeSupabaseClient,
+  overtimeSupabase,
+} from './overtimeFormsService';
 
 export interface OvertimeGlossaryEntry {
   id: string;
@@ -336,22 +339,41 @@ export function formatGlossaryDateDDMMYYYY(
   return `${dd}/${mm}/${yyyy}`;
 }
 
-export function mapSupabaseGlossaryRowToEntry(
-  row: SupabaseGlossaryRow
+export function normalizeGlossaryRow(
+  row: Partial<SupabaseGlossaryRow> & Record<string, unknown>
 ): OvertimeGlossaryEntry {
   const rawVerified =
     typeof row.is_verified === 'boolean' ? row.is_verified : undefined;
+  const createdAt =
+    typeof row.created_at === 'string' && row.created_at.trim()
+      ? row.created_at
+      : typeof row.updated_at === 'string' && row.updated_at.trim()
+      ? row.updated_at
+      : undefined;
+  const updatedAt =
+    typeof row.updated_at === 'string' && row.updated_at.trim()
+      ? row.updated_at
+      : createdAt || new Date().toISOString();
+
   return {
-    id: row.id,
-    reasonVi: (row.reason_vi || '').trim(),
-    reasonKr: (row.reason_kr || '').trim(),
-    target_groups: normalizeTargetGroups(row.target_groups),
-    created_at: row.created_at || row.updated_at || undefined,
-    updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
-    deletedAt: row.deleted_at ?? null,
+    id: typeof row.id === 'string' ? row.id : String(row.id || ''),
+    reasonVi: typeof row.reason_vi === 'string' ? row.reason_vi.trim() : '',
+    reasonKr: typeof row.reason_kr === 'string' ? row.reason_kr.trim() : '',
+    target_groups: normalizeTargetGroups(
+      row.target_groups as string[] | string | null | undefined
+    ),
+    created_at: createdAt,
+    updatedAt,
+    deletedAt: typeof row.deleted_at === 'string' ? row.deleted_at : null,
     is_verified: rawVerified,
     isVerified: rawVerified !== false,
   };
+}
+
+export function mapSupabaseGlossaryRowToEntry(
+  row: SupabaseGlossaryRow
+): OvertimeGlossaryEntry {
+  return normalizeGlossaryRow(row as unknown as Record<string, unknown>);
 }
 
 /**
@@ -688,67 +710,141 @@ function writeLocalOvertimeGlossary(entries: OvertimeGlossaryEntry[]): void {
 // Tracks whether the optional Supabase `overtime_glossary` table is available in this session
 let remoteGlossaryAvailable: boolean | null = null;
 
-/**
- * Loads glossary entries from localStorage and performs lightweight sync with Supabase
- * `overtime_glossary` (supporting soft-delete via `deleted_at`).
- * Silently falls back to localStorage if the table does not exist or network fails.
- */
-export async function loadOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
-  const localEntries = readLocalOvertimeGlossary();
+export interface OvertimeGlossaryRealtimeEvent {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  newRow: Record<string, unknown> | null;
+  oldRow: Record<string, unknown> | null;
+}
 
-  if (remoteGlossaryAvailable === false) {
-    return localEntries;
+/**
+ * Pure helper: applies a Supabase Realtime `postgres_changes` event (`INSERT`, `UPDATE`, `DELETE`)
+ * to the current glossary list using `normalizeGlossaryRow(payload.new)`.
+ */
+export function applyRealtimeGlossaryPayload(
+  currentEntries: OvertimeGlossaryEntry[],
+  event: OvertimeGlossaryRealtimeEvent
+): OvertimeGlossaryEntry[] {
+  if (event.eventType === 'DELETE') {
+    const oldId =
+      event.oldRow && typeof event.oldRow.id === 'string'
+        ? event.oldRow.id
+        : '';
+    if (!oldId) return currentEntries;
+    return currentEntries.filter((item) => item.id !== oldId);
   }
 
+  if (!event.newRow) return currentEntries;
+  const normalized = normalizeGlossaryRow(event.newRow);
+  if (!normalized.id) return currentEntries;
+
+  if (normalized.deletedAt || !normalized.reasonVi || !normalized.reasonKr) {
+    return currentEntries.filter((item) => item.id !== normalized.id);
+  }
+
+  const next = [
+    normalized,
+    ...currentEntries.filter((item) => item.id !== normalized.id),
+  ];
+  return next.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+}
+
+/**
+ * Subscribes to Supabase Realtime `postgres_changes` on `overtime_glossary`
+ * so updates across any account/tab/device propagate immediately without page reload.
+ */
+export function subscribeToOvertimeGlossaryRealtime(
+  onChange: (event: OvertimeGlossaryRealtimeEvent) => void,
+  onStatusChange?: (status: string) => void
+): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const client = getOvertimeSupabaseClient();
+  const channelName = `overtime-glossary-realtime-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+
+  const channel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'overtime_glossary' },
+      (payload) =>
+        onChange({
+          eventType: 'INSERT',
+          newRow: (payload.new as Record<string, unknown>) || null,
+          oldRow: (payload.old as Record<string, unknown>) || null,
+        })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'overtime_glossary' },
+      (payload) =>
+        onChange({
+          eventType: 'UPDATE',
+          newRow: (payload.new as Record<string, unknown>) || null,
+          oldRow: (payload.old as Record<string, unknown>) || null,
+        })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'overtime_glossary' },
+      (payload) =>
+        onChange({
+          eventType: 'DELETE',
+          newRow: (payload.new as Record<string, unknown>) || null,
+          oldRow: (payload.old as Record<string, unknown>) || null,
+        })
+    )
+    .subscribe((status) => {
+      onStatusChange?.(status);
+    });
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}
+
+/**
+ * Fetches all active glossary entries (`deleted_at IS NULL`) directly from Supabase `overtime_glossary`.
+ * Never reads or merges stale `localStorage` entries when online; only falls back to `localStorage` if offline/error.
+ */
+export async function fetchOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
   try {
     const rows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
       'overtime_glossary?select=*&deleted_at=is.null&order=updated_at.desc'
     );
     remoteGlossaryAvailable = true;
 
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return localEntries;
-    }
+    const remoteEntries = Array.isArray(rows)
+      ? rows
+          .filter((row) => !row.deleted_at && row.reason_vi && row.reason_kr)
+          .map((row) =>
+            normalizeGlossaryRow({
+              ...(row as unknown as Record<string, unknown>),
+              deleted_at: null,
+            })
+          )
+      : [];
 
-    const mergedByKey = new Map<string, OvertimeGlossaryEntry>();
-    for (const entry of localEntries) {
-      mergedByKey.set(normalizeGlossaryKey(entry.reasonVi), entry);
-    }
-
-    for (const row of rows) {
-      if (!row.reason_vi || !row.reason_kr || row.deleted_at) continue;
-      const key = normalizeGlossaryKey(row.reason_vi);
-      const remoteEntry = mapSupabaseGlossaryRowToEntry({
-        ...row,
-        deleted_at: null,
-      });
-      const existing = mergedByKey.get(key);
-      if (
-        !existing ||
-        new Date(remoteEntry.updatedAt).getTime() >=
-          new Date(existing.updatedAt).getTime()
-      ) {
-        mergedByKey.set(key, remoteEntry);
-      }
-    }
-
-    const merged = Array.from(mergedByKey.values()).sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
-    writeLocalOvertimeGlossary(merged);
-    return merged;
+    writeLocalOvertimeGlossary(remoteEntries);
+    return remoteEntries;
   } catch {
     remoteGlossaryAvailable = false;
-    return localEntries;
+    return readLocalOvertimeGlossary();
   }
 }
 
+export async function loadOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
+  return fetchOvertimeGlossary();
+}
+
 /**
- * Saves or updates a (reasonVi, reasonKr) glossary pair to localStorage immediately
- * and syncs lightly to Supabase `overtime_glossary` when available.
- * New remote inserts explicitly include `is_verified: false`; existing rows preserve
- * their current `is_verified` status on update.
+ * Saves or updates a (reasonVi, reasonKr) glossary pair directly on Supabase `overtime_glossary`
+ * (and returns the latest authoritative list from Supabase).
  */
 export async function upsertOvertimeGlossaryEntry(
   reasonVi: string,
@@ -759,167 +855,26 @@ export async function upsertOvertimeGlossaryEntry(
   savedEntry: OvertimeGlossaryEntry | null;
   isUpdate: boolean;
 }> {
-  const cleanVi = (reasonVi || '').trim();
-  const cleanKr = (reasonKr || '').trim();
+  const cleanVi = (reasonVi || '').trim().replace(/\s+/g, ' ');
+  const cleanKr = (reasonKr || '').trim().replace(/\s+/g, ' ');
   if (!cleanVi || !cleanKr) {
+    const entries = await fetchOvertimeGlossary();
     return {
-      entries: readLocalOvertimeGlossary(),
+      entries,
       savedEntry: null,
       isUpdate: false,
     };
   }
 
+  const nowIso = new Date().toISOString();
   const defaultVerifiedOnInsert = options?.isVerified === true;
   const targetGroupsOnInsert = normalizeTargetGroups(options?.targetGroups);
-  const current = readLocalOvertimeGlossary();
-  const result = upsertGlossaryEntryInList(
-    current,
-    cleanVi,
-    cleanKr,
-    new Date().toISOString(),
-    {
-      isVerified: defaultVerifiedOnInsert,
-      targetGroups: targetGroupsOnInsert,
-    }
-  );
-  writeLocalOvertimeGlossary(result.entries);
-
-  if (remoteGlossaryAvailable === true) {
-    try {
-      const normalizedVi = normalizeGlossaryKey(result.savedEntry.reasonVi);
-      const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-        `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
-          normalizedVi
-        )}&select=*&limit=1`
-      );
-      const existingRemote = Array.isArray(existingRows)
-        ? existingRows[0]
-        : null;
-
-      let persisted: SupabaseGlossaryRow | null = null;
-      let resolvedIsUpdate = result.isUpdate;
-
-      if (existingRemote?.id) {
-        resolvedIsUpdate = !existingRemote.deleted_at;
-        const patchBody: Record<string, unknown> = {
-          reason_vi: result.savedEntry.reasonVi,
-          reason_kr: result.savedEntry.reasonKr,
-          updated_at: result.savedEntry.updatedAt,
-          deleted_at: null,
-        };
-        if (existingRemote.deleted_at && targetGroupsOnInsert.length > 0) {
-          patchBody.target_groups = serializeTargetGroupsForSupabase(
-            targetGroupsOnInsert
-          );
-          patchBody.is_verified = defaultVerifiedOnInsert;
-        }
-        const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-          `overtime_glossary?id=eq.${encodeURIComponent(
-            existingRemote.id
-          )}&select=*`,
-          {
-            method: 'PATCH',
-            headers: {
-              Prefer: 'return=representation',
-            },
-            body: JSON.stringify(patchBody),
-          }
-        );
-        persisted = Array.isArray(patchedRows) ? patchedRows[0] : existingRemote;
-      } else {
-        const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-          'overtime_glossary?select=*',
-          {
-            method: 'POST',
-            headers: {
-              Prefer: 'return=representation',
-            },
-            body: JSON.stringify({
-              reason_vi: result.savedEntry.reasonVi,
-              reason_vi_normalized: normalizedVi,
-              reason_kr: result.savedEntry.reasonKr,
-              target_groups: serializeTargetGroupsForSupabase(
-                targetGroupsOnInsert
-              ),
-              updated_at: result.savedEntry.updatedAt,
-              deleted_at: null,
-              is_verified: defaultVerifiedOnInsert,
-            }),
-          }
-        );
-        persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
-      }
-
-      if (persisted?.id) {
-        const persistedVerified =
-          typeof persisted.is_verified === 'boolean'
-            ? persisted.is_verified
-            : undefined;
-        const syncedEntry: OvertimeGlossaryEntry = {
-          ...result.savedEntry,
-          id: persisted.id,
-          target_groups: normalizeTargetGroups(
-            persisted.target_groups ?? result.savedEntry.target_groups
-          ),
-          created_at:
-            persisted.created_at ||
-            result.savedEntry.created_at ||
-            result.savedEntry.updatedAt,
-          updatedAt: persisted.updated_at || result.savedEntry.updatedAt,
-          is_verified: persistedVerified,
-          isVerified: persistedVerified !== false,
-        };
-        const syncedEntries = result.entries.map((item) =>
-          item.id === result.savedEntry.id ? syncedEntry : item
-        );
-        writeLocalOvertimeGlossary(syncedEntries);
-        return {
-          entries: syncedEntries,
-          savedEntry: syncedEntry,
-          isUpdate: resolvedIsUpdate,
-        };
-      }
-    } catch {
-      // Never interrupt UI on optional cloud glossary sync failure
-    }
-  }
-
-  return result;
-}
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-async function syncGlossaryPatchToSupabase(
-  entry: OvertimeGlossaryEntry,
-  patchBody: Record<string, unknown>,
-  lookupReasonVi?: string
-): Promise<SupabaseGlossaryRow | null> {
-  if (remoteGlossaryAvailable === false) return null;
+  const normalizedVi = normalizeGlossaryKey(cleanVi);
 
   try {
-    if (UUID_REGEX.test(entry.id)) {
-      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-        `overtime_glossary?id=eq.${encodeURIComponent(entry.id)}&select=*`,
-        {
-          method: 'PATCH',
-          headers: {
-            Prefer: 'return=representation',
-          },
-          body: JSON.stringify(patchBody),
-        }
-      );
-      remoteGlossaryAvailable = true;
-      if (Array.isArray(patchedRows) && patchedRows[0]) {
-        return patchedRows[0];
-      }
-    }
-
-    const lookupNormalizedVi = normalizeGlossaryKey(lookupReasonVi || entry.reasonVi);
-    const newNormalizedVi = normalizeGlossaryKey(entry.reasonVi);
     const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
       `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
-        lookupNormalizedVi
+        normalizedVi
       )}&select=*&limit=1`
     );
     remoteGlossaryAvailable = true;
@@ -927,7 +882,22 @@ async function syncGlossaryPatchToSupabase(
       ? existingRows[0]
       : null;
 
+    let persisted: SupabaseGlossaryRow | null = null;
+    let resolvedIsUpdate = false;
+
     if (existingRemote?.id) {
+      resolvedIsUpdate = !existingRemote.deleted_at;
+      const patchBody: Record<string, unknown> = {
+        reason_vi: cleanVi,
+        reason_kr: cleanKr,
+        updated_at: nowIso,
+        deleted_at: null,
+      };
+      if (existingRemote.deleted_at) {
+        patchBody.target_groups =
+          serializeTargetGroupsForSupabase(targetGroupsOnInsert);
+        patchBody.is_verified = defaultVerifiedOnInsert;
+      }
       const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
         `overtime_glossary?id=eq.${encodeURIComponent(
           existingRemote.id
@@ -937,47 +907,71 @@ async function syncGlossaryPatchToSupabase(
           headers: {
             Prefer: 'return=representation',
           },
+          body: JSON.stringify(patchBody),
+        }
+      );
+      persisted = Array.isArray(patchedRows) ? patchedRows[0] : existingRemote;
+    } else {
+      const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        'overtime_glossary?select=*',
+        {
+          method: 'POST',
+          headers: {
+            Prefer: 'return=representation',
+          },
           body: JSON.stringify({
-            ...patchBody,
+            reason_vi: cleanVi,
+            reason_vi_normalized: normalizedVi,
+            reason_kr: cleanKr,
+            target_groups: serializeTargetGroupsForSupabase(targetGroupsOnInsert),
+            updated_at: nowIso,
             deleted_at: null,
+            is_verified: defaultVerifiedOnInsert,
           }),
         }
       );
-      return Array.isArray(patchedRows) && patchedRows[0]
-        ? patchedRows[0]
-        : existingRemote;
+      persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
     }
 
-    const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-      'overtime_glossary?select=*',
-      {
-        method: 'POST',
-        headers: {
-          Prefer: 'return=representation',
-        },
-        body: JSON.stringify({
-          reason_vi: entry.reasonVi,
-          reason_vi_normalized: newNormalizedVi,
-          reason_kr: entry.reasonKr,
-          target_groups: serializeTargetGroupsForSupabase(entry.target_groups),
-          updated_at: entry.updatedAt,
+    const syncedEntries = await fetchOvertimeGlossary();
+    const savedEntry = persisted?.id
+      ? normalizeGlossaryRow({
+          ...(persisted as unknown as Record<string, unknown>),
           deleted_at: null,
-          is_verified: entry.is_verified !== false,
-          ...patchBody,
-        }),
+        })
+      : syncedEntries.find(
+          (item) => normalizeGlossaryKey(item.reasonVi) === normalizedVi
+        ) || null;
+
+    return {
+      entries: syncedEntries,
+      savedEntry,
+      isUpdate: resolvedIsUpdate,
+    };
+  } catch {
+    // Offline fallback only when Supabase fails
+    const current = readLocalOvertimeGlossary();
+    const fallback = upsertGlossaryEntryInList(
+      current,
+      cleanVi,
+      cleanKr,
+      nowIso,
+      {
+        isVerified: defaultVerifiedOnInsert,
+        targetGroups: targetGroupsOnInsert,
       }
     );
-    return Array.isArray(insertedRows) && insertedRows[0]
-      ? insertedRows[0]
-      : null;
-  } catch {
-    return null;
+    writeLocalOvertimeGlossary(fallback.entries);
+    return fallback;
   }
 }
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Updates Vietnamese reason (`reason_vi`), Korean translation (`reason_kr`), and optionally `target_groups`
- * of an existing glossary entry in localStorage and Supabase `overtime_glossary`.
+ * directly on Supabase `overtime_glossary`, returning the fresh server list.
  */
 export async function updateGlossaryEntry(
   id: string,
@@ -997,72 +991,146 @@ export async function updateGlossaryEntry(
   }
 
   const nowIso = new Date().toISOString();
-  const current = readLocalOvertimeGlossary();
-  const previousEntry = current.find((e) => e.id === id);
-  if (!previousEntry) {
-    return { entries: current, updatedEntry: null };
-  }
-
   const newNormalizedVi = normalizeGlossaryKey(cleanVi);
-  const duplicate = current.find(
-    (e) =>
-      e.id !== id &&
-      !e.deletedAt &&
-      normalizeGlossaryKey(e.reasonVi) === newNormalizedVi
-  );
-  if (duplicate) {
-    throw new Error(`Lý do "${cleanVi}" đã tồn tại trong từ điển.`);
-  }
 
-  const result = updateGlossaryEntryInList(
-    current,
-    id,
-    cleanVi,
-    cleanKr,
-    nowIso,
-    newTargetGroups
-  );
-  if (!result.updatedEntry) {
-    return result;
-  }
+  try {
+    if (UUID_REGEX.test(id)) {
+      const duplicateRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
+          newNormalizedVi
+        )}&deleted_at=is.null&id=neq.${encodeURIComponent(id)}&select=id&limit=1`
+      );
+      remoteGlossaryAvailable = true;
+      if (Array.isArray(duplicateRows) && duplicateRows.length > 0) {
+        throw new Error(`Lý do "${cleanVi}" đã tồn tại trong từ điển.`);
+      }
 
-  writeLocalOvertimeGlossary(result.entries);
+      const patchBody: Record<string, unknown> = {
+        reason_vi: cleanVi,
+        reason_vi_normalized: newNormalizedVi,
+        reason_kr: cleanKr,
+        updated_at: nowIso,
+      };
+      if (newTargetGroups !== undefined) {
+        patchBody.target_groups =
+          serializeTargetGroupsForSupabase(newTargetGroups);
+      }
 
-  const persisted = await syncGlossaryPatchToSupabase(
-    result.updatedEntry,
-    {
-      reason_vi: result.updatedEntry.reasonVi,
-      reason_vi_normalized: newNormalizedVi,
-      reason_kr: result.updatedEntry.reasonKr,
-      target_groups: serializeTargetGroupsForSupabase(
-        result.updatedEntry.target_groups
-      ),
-      updated_at: nowIso,
-    },
-    previousEntry.reasonVi
-  );
+      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(id)}&select=*`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify(patchBody),
+        }
+      );
+      const persisted = Array.isArray(patchedRows) ? patchedRows[0] : null;
+      const syncedEntries = await fetchOvertimeGlossary();
+      const updatedEntry = persisted?.id
+        ? normalizeGlossaryRow({
+            ...(persisted as unknown as Record<string, unknown>),
+            deleted_at: null,
+          })
+        : syncedEntries.find((item) => item.id === id) || null;
 
-  if (persisted?.id) {
-    const syncedEntry = mapSupabaseGlossaryRowToEntry({
-      ...persisted,
-      deleted_at: null,
-    });
-    const syncedEntries = result.entries.map((item) =>
-      item.id === id ? syncedEntry : item
+      return {
+        entries: syncedEntries,
+        updatedEntry,
+      };
+    }
+
+    // Legacy non-UUID entry: match by normalized text or insert
+    const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+      `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
+        newNormalizedVi
+      )}&select=*&limit=1`
     );
-    writeLocalOvertimeGlossary(syncedEntries);
+    remoteGlossaryAvailable = true;
+    const existingRemote = Array.isArray(existingRows) ? existingRows[0] : null;
+    const patchBody: Record<string, unknown> = {
+      reason_vi: cleanVi,
+      reason_vi_normalized: newNormalizedVi,
+      reason_kr: cleanKr,
+      updated_at: nowIso,
+      deleted_at: null,
+    };
+    if (newTargetGroups !== undefined) {
+      patchBody.target_groups = serializeTargetGroupsForSupabase(newTargetGroups);
+    }
+
+    let persisted: SupabaseGlossaryRow | null = null;
+    if (existingRemote?.id) {
+      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(
+          existingRemote.id
+        )}&select=*`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(patchBody),
+        }
+      );
+      persisted = Array.isArray(patchedRows) ? patchedRows[0] : existingRemote;
+    } else {
+      const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        'overtime_glossary?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({
+            ...patchBody,
+            is_verified: true,
+          }),
+        }
+      );
+      persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
+    }
+
+    const syncedEntries = await fetchOvertimeGlossary();
+    const updatedEntry = persisted?.id
+      ? normalizeGlossaryRow({
+          ...(persisted as unknown as Record<string, unknown>),
+          deleted_at: null,
+        })
+      : null;
+
     return {
       entries: syncedEntries,
-      updatedEntry: syncedEntry,
+      updatedEntry,
     };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('đã tồn tại trong từ điển')) {
+      throw err;
+    }
+    const current = readLocalOvertimeGlossary();
+    const duplicate = current.find(
+      (e) =>
+        e.id !== id &&
+        !e.deletedAt &&
+        normalizeGlossaryKey(e.reasonVi) === newNormalizedVi
+    );
+    if (duplicate) {
+      throw new Error(`Lý do "${cleanVi}" đã tồn tại trong từ điển.`);
+    }
+    const result = updateGlossaryEntryInList(
+      current,
+      id,
+      cleanVi,
+      cleanKr,
+      nowIso,
+      newTargetGroups
+    );
+    if (result.updatedEntry) {
+      writeLocalOvertimeGlossary(result.entries);
+    }
+    return result;
   }
-
-  return result;
 }
 
 /**
- * Updates the Korean translation (`reason_kr`) of an existing glossary entry in localStorage
- * and syncs to Supabase `overtime_glossary` without altering its verification flag.
+ * Updates the Korean translation (`reason_kr`) of an existing glossary entry.
  */
 export async function updateGlossaryEntryKr(
   id: string,
@@ -1075,7 +1143,7 @@ export async function updateGlossaryEntryKr(
   if (!cleanKr) {
     throw new Error('Bản dịch tiếng Hàn không được để trống.');
   }
-  const current = readLocalOvertimeGlossary();
+  const current = await fetchOvertimeGlossary();
   const target = current.find((e) => e.id === id);
   if (!target) {
     return { entries: current, updatedEntry: null };
@@ -1084,48 +1152,64 @@ export async function updateGlossaryEntryKr(
 }
 
 /**
- * Approves a glossary entry by setting `is_verified = true` locally and on Supabase.
+ * Approves a glossary entry by setting `is_verified = true` directly on Supabase and refreshing from server.
  */
 export async function approveGlossaryEntry(id: string): Promise<{
   entries: OvertimeGlossaryEntry[];
   updatedEntry: OvertimeGlossaryEntry | null;
 }> {
   const nowIso = new Date().toISOString();
-  const current = readLocalOvertimeGlossary();
-  const result = approveGlossaryEntryInList(current, id, nowIso);
-  if (!result.updatedEntry) {
-    return result;
-  }
 
-  writeLocalOvertimeGlossary(result.entries);
+  try {
+    if (UUID_REGEX.test(id)) {
+      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(id)}&select=*`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({
+            is_verified: true,
+            updated_at: nowIso,
+          }),
+        }
+      );
+      remoteGlossaryAvailable = true;
+      const persisted = Array.isArray(patchedRows) ? patchedRows[0] : null;
+      const syncedEntries = await fetchOvertimeGlossary();
+      const updatedEntry = persisted?.id
+        ? normalizeGlossaryRow({
+            ...(persisted as unknown as Record<string, unknown>),
+            is_verified: true,
+            deleted_at: null,
+          })
+        : syncedEntries.find((item) => item.id === id) || null;
 
-  const persisted = await syncGlossaryPatchToSupabase(result.updatedEntry, {
-    is_verified: true,
-    updated_at: nowIso,
-  });
+      return {
+        entries: syncedEntries,
+        updatedEntry,
+      };
+    }
 
-  if (persisted?.id) {
-    const syncedEntry = mapSupabaseGlossaryRowToEntry({
-      ...persisted,
-      is_verified: true,
-      deleted_at: null,
-    });
-    const syncedEntries = result.entries.map((item) =>
-      item.id === id ? syncedEntry : item
-    );
-    writeLocalOvertimeGlossary(syncedEntries);
+    const syncedEntries = await fetchOvertimeGlossary();
     return {
       entries: syncedEntries,
-      updatedEntry: syncedEntry,
+      updatedEntry: syncedEntries.find((item) => item.id === id) || null,
     };
+  } catch {
+    const current = readLocalOvertimeGlossary();
+    const result = approveGlossaryEntryInList(current, id, nowIso);
+    if (result.updatedEntry) {
+      writeLocalOvertimeGlossary(result.entries);
+    }
+    return result;
   }
-
-  return result;
 }
 
 /**
- * Manually creates a new glossary entry (`is_verified: true`) in localStorage and Supabase `overtime_glossary`.
- * Returns full created entry metadata (`id`, `reasonVi`, `reasonKr`, `isVerified`, `created_at`).
+ * Manually creates a new glossary entry (`is_verified: true`) directly on Supabase `overtime_glossary`
+ * and reloads the authoritative list from Supabase.
  */
 export async function createManualGlossaryEntry(
   reasonVi: string,
@@ -1135,153 +1219,157 @@ export async function createManualGlossaryEntry(
   entries: OvertimeGlossaryEntry[];
   createdEntry: OvertimeGlossaryEntry;
 }> {
-  const nowIso = new Date().toISOString();
-  const normalizedGroups = normalizeTargetGroups(targetGroups);
-  const current = readLocalOvertimeGlossary();
-  const result = createManualGlossaryEntryInList(
-    current,
-    reasonVi,
-    reasonKr,
-    nowIso,
-    normalizedGroups
-  );
-  writeLocalOvertimeGlossary(result.entries);
-
-  if (remoteGlossaryAvailable !== false) {
-    try {
-      const normalizedVi = normalizeGlossaryKey(result.createdEntry.reasonVi);
-      const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-        `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
-          normalizedVi
-        )}&select=*&limit=1`
-      );
-      remoteGlossaryAvailable = true;
-      const existingRemote = Array.isArray(existingRows)
-        ? existingRows[0]
-        : null;
-
-      let persisted: SupabaseGlossaryRow | null = null;
-      if (existingRemote?.id) {
-        const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-          `overtime_glossary?id=eq.${encodeURIComponent(
-            existingRemote.id
-          )}&select=*`,
-          {
-            method: 'PATCH',
-            headers: {
-              Prefer: 'return=representation',
-            },
-            body: JSON.stringify({
-              reason_vi: result.createdEntry.reasonVi,
-              reason_kr: result.createdEntry.reasonKr,
-              target_groups: serializeTargetGroupsForSupabase(normalizedGroups),
-              updated_at: nowIso,
-              deleted_at: null,
-              is_verified: true,
-            }),
-          }
-        );
-        persisted = Array.isArray(patchedRows)
-          ? patchedRows[0]
-          : existingRemote;
-      } else {
-        const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-          'overtime_glossary?select=*',
-          {
-            method: 'POST',
-            headers: {
-              Prefer: 'return=representation',
-            },
-            body: JSON.stringify({
-              reason_vi: result.createdEntry.reasonVi,
-              reason_vi_normalized: normalizedVi,
-              reason_kr: result.createdEntry.reasonKr,
-              target_groups: serializeTargetGroupsForSupabase(normalizedGroups),
-              updated_at: nowIso,
-              deleted_at: null,
-              is_verified: true,
-            }),
-          }
-        );
-        persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
-      }
-
-      if (persisted?.id) {
-        const syncedEntry = mapSupabaseGlossaryRowToEntry({
-          ...persisted,
-          is_verified: true,
-          deleted_at: null,
-        });
-        const syncedEntries = result.entries.map((item) =>
-          item.id === result.createdEntry.id ? syncedEntry : item
-        );
-        writeLocalOvertimeGlossary(syncedEntries);
-        return {
-          entries: syncedEntries,
-          createdEntry: syncedEntry,
-        };
-      }
-    } catch {
-      // Keep local manual creation resilient if cloud sync is offline
-    }
+  const cleanVi = (reasonVi || '').trim().replace(/\s+/g, ' ');
+  const cleanKr = (reasonKr || '').trim().replace(/\s+/g, ' ');
+  if (!cleanVi || !cleanKr) {
+    throw new Error(
+      'Vui lòng nhập đầy đủ cả Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn).'
+    );
   }
 
-  return result;
+  const nowIso = new Date().toISOString();
+  const normalizedGroups = normalizeTargetGroups(targetGroups);
+  const normalizedVi = normalizeGlossaryKey(cleanVi);
+
+  try {
+    const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+      `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
+        normalizedVi
+      )}&select=*&limit=1`
+    );
+    remoteGlossaryAvailable = true;
+    const existingRemote = Array.isArray(existingRows) ? existingRows[0] : null;
+
+    if (existingRemote?.id && !existingRemote.deleted_at) {
+      throw new Error(`Lý do "${cleanVi}" đã tồn tại trong từ điển.`);
+    }
+
+    let persisted: SupabaseGlossaryRow | null = null;
+    if (existingRemote?.id) {
+      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(
+          existingRemote.id
+        )}&select=*`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({
+            reason_vi: cleanVi,
+            reason_kr: cleanKr,
+            target_groups: serializeTargetGroupsForSupabase(normalizedGroups),
+            updated_at: nowIso,
+            deleted_at: null,
+            is_verified: true,
+          }),
+        }
+      );
+      persisted = Array.isArray(patchedRows) ? patchedRows[0] : existingRemote;
+    } else {
+      const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        'overtime_glossary?select=*',
+        {
+          method: 'POST',
+          headers: {
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({
+            reason_vi: cleanVi,
+            reason_vi_normalized: normalizedVi,
+            reason_kr: cleanKr,
+            target_groups: serializeTargetGroupsForSupabase(normalizedGroups),
+            updated_at: nowIso,
+            deleted_at: null,
+            is_verified: true,
+          }),
+        }
+      );
+      persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
+    }
+
+    const syncedEntries = await fetchOvertimeGlossary();
+    const createdEntry = persisted?.id
+      ? normalizeGlossaryRow({
+          ...(persisted as unknown as Record<string, unknown>),
+          is_verified: true,
+          deleted_at: null,
+        })
+      : syncedEntries.find(
+          (item) => normalizeGlossaryKey(item.reasonVi) === normalizedVi
+        ) || {
+          id: `glossary-${Date.now()}`,
+          reasonVi: cleanVi,
+          reasonKr: cleanKr,
+          target_groups: normalizedGroups,
+          created_at: nowIso,
+          updatedAt: nowIso,
+          deletedAt: null,
+          is_verified: true,
+          isVerified: true,
+        };
+
+    return {
+      entries: syncedEntries,
+      createdEntry,
+    };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('đã tồn tại trong từ điển')) {
+      throw err;
+    }
+    const current = readLocalOvertimeGlossary();
+    const fallback = createManualGlossaryEntryInList(
+      current,
+      cleanVi,
+      cleanKr,
+      nowIso,
+      normalizedGroups
+    );
+    writeLocalOvertimeGlossary(fallback.entries);
+    return fallback;
+  }
 }
 
 /**
- * Hard-deletes a glossary entry from Supabase `overtime_glossary` and removes it from localStorage.
+ * Hard-deletes a glossary entry directly on Supabase `overtime_glossary` and refreshes from server.
  */
 export async function deleteGlossaryEntry(id: string): Promise<{
   entries: OvertimeGlossaryEntry[];
   deletedEntry: OvertimeGlossaryEntry | null;
 }> {
-  const current = readLocalOvertimeGlossary();
-  const result = deleteGlossaryEntryInList(current, id);
-  if (!result.deletedEntry) {
+  try {
+    let deletedEntry: OvertimeGlossaryEntry | null = null;
+    if (UUID_REGEX.test(id)) {
+      const deletedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(id)}&select=*`,
+        {
+          method: 'DELETE',
+          headers: {
+            Prefer: 'return=representation',
+          },
+        }
+      );
+      remoteGlossaryAvailable = true;
+      if (Array.isArray(deletedRows) && deletedRows[0]) {
+        deletedEntry = normalizeGlossaryRow(
+          deletedRows[0] as unknown as Record<string, unknown>
+        );
+      }
+    }
+
+    const syncedEntries = await fetchOvertimeGlossary();
+    return {
+      entries: syncedEntries,
+      deletedEntry,
+    };
+  } catch {
+    const current = readLocalOvertimeGlossary();
+    const result = deleteGlossaryEntryInList(current, id);
+    if (result.deletedEntry) {
+      writeLocalOvertimeGlossary(result.entries);
+    }
     return result;
   }
-
-  writeLocalOvertimeGlossary(result.entries);
-
-  if (remoteGlossaryAvailable !== false) {
-    try {
-      if (UUID_REGEX.test(id)) {
-        await overtimeSupabase.request<void>(
-          `overtime_glossary?id=eq.${encodeURIComponent(id)}`,
-          {
-            method: 'DELETE',
-          }
-        );
-        remoteGlossaryAvailable = true;
-      } else {
-        const normalizedVi = normalizeGlossaryKey(result.deletedEntry.reasonVi);
-        const existingRows = await overtimeSupabase.request<
-          SupabaseGlossaryRow[]
-        >(
-          `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
-            normalizedVi
-          )}&select=id&limit=1`
-        );
-        remoteGlossaryAvailable = true;
-        const remoteId = Array.isArray(existingRows)
-          ? existingRows[0]?.id
-          : null;
-        if (remoteId) {
-          await overtimeSupabase.request<void>(
-            `overtime_glossary?id=eq.${encodeURIComponent(remoteId)}`,
-            {
-              method: 'DELETE',
-            }
-          );
-        }
-      }
-    } catch {
-      // Keep local deletion resilient if remote delete fails or row doesn't exist remotely
-    }
-  }
-
-  return result;
 }
 
 /**
