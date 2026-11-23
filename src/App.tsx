@@ -1755,39 +1755,40 @@ export default function App() {
                     
                     const updatedEmployees: typeof employees = [];
 
-                    // 1. Cập nhật giao diện (Local State) trước để phản hồi nhanh
-                    setEmployees((prev) =>
-                      prev.map((emp) => {
-                        const matched = rowByCode.get(
-                          emp.employeeCode.trim().toUpperCase()
-                        );
-                        if (!matched) return emp;
-                        
-                        const newEmp = {
-                          ...emp,
-                          carriedOverLeave: matched.carried_over,
-                          openingUsedLeave: matched.used_leave,
-                        };
-                        updatedEmployees.push(newEmp);
-                        return newEmp;
-                      })
-                    );
+                    // 1. TÍNH TOÁN DỮ LIỆU BÊN NGOÀI SETSTATE
+                    const newEmployeesList = employees.map((emp) => {
+                      const matched = rowByCode.get(emp.employeeCode.trim().toUpperCase());
+                      if (!matched) return emp; // Bỏ qua nếu không có trong file Excel
+                      
+                      const newEmp = {
+                        ...emp,
+                        carriedOverLeave: matched.carried_over,
+                        openingUsedLeave: matched.used_leave,
+                      };
+                      updatedEmployees.push(newEmp);
+                      return newEmp;
+                    });
 
-                    // 2. Đồng bộ ngầm lên Supabase Cloud
-                    if (updatedEmployees.length > 0) {
-                      showToast(`Đang đồng bộ số dư phép của ${updatedEmployees.length} nhân sự lên Cloud...`);
-                      try {
-                        await Promise.all(
-                          updatedEmployees.map((emp) => updateEmployeeInSupabase(emp.id, emp))
-                        );
-                        showToast(
-                          `Đã chốt và ĐỒNG BỘ THÀNH CÔNG số dư phép cho ${updatedEmployees.length} nhân sự lên Cloud.`
-                        );
-                      } catch (error) {
-                        showToast(`Lưu cục bộ thành công nhưng lỗi đồng bộ Cloud. Vui lòng kiểm tra lại mạng.`);
-                      }
-                    } else {
+                    if (updatedEmployees.length === 0) {
                       showToast(`Không tìm thấy mã nhân viên nào khớp để import.`);
+                      return;
+                    }
+
+                    // 2. CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC
+                    setEmployees(newEmployeesList);
+                    showToast(`Đang đồng bộ số dư phép của ${updatedEmployees.length} nhân sự lên Cloud...`);
+
+                    // 3. ĐỒNG BỘ LÊN SUPABASE
+                    try {
+                      await Promise.all(
+                        updatedEmployees.map((emp) => updateEmployeeInSupabase(emp.id, emp))
+                      );
+                      showToast(
+                        `Đã chốt và ĐỒNG BỘ THÀNH CÔNG số dư phép cho ${updatedEmployees.length} nhân sự lên Cloud.`
+                      );
+                    } catch (error) {
+                      console.error("Lỗi đồng bộ import quỹ phép:", error);
+                      showToast(`Lưu cục bộ thành công nhưng lỗi đồng bộ Cloud. Vui lòng kiểm tra lại mạng.`);
                     }
                   }}
                   onExportMatrixExcel={(rows, year, viewMode) => {
