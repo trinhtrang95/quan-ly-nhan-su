@@ -88,6 +88,7 @@ export interface CreateOvertimeFormProps {
   initialDepartment?: string;
   initialDate?: string;
   editingForm?: OvertimeFormWithItems | null;
+  glossaryRefreshKey?: number;
   onOpenExistingForm?: (form: OvertimeFormWithItems) => void;
   onCancelEdit?: () => void;
   onSaveOnly?: (payload: CreateOvertimeFormPayload, isAutoSave?: boolean) => Promise<void> | void;
@@ -200,6 +201,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   initialDepartment = DEFAULT_OVERTIME_DEPARTMENT,
   initialDate = getLocalTodayIsoDate(),
   editingForm = null,
+  glossaryRefreshKey = 0,
   onOpenExistingForm,
   onCancelEdit,
   onSaveOnly,
@@ -295,13 +297,14 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   useEffect(() => {
     let active = true;
+    setGlossaryEntries(readLocalOvertimeGlossary());
     void loadOvertimeGlossary().then((loaded) => {
       if (active) setGlossaryEntries(loaded);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [glossaryRefreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -1515,7 +1518,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                             
                             {/* Hiển thị cờ kiểm duyệt */}
                             {item.isVerified ? (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" title="Đã được duyệt" />
+                              <span
+                                title="Đã được duyệt"
+                                className="shrink-0 mt-0.5 inline-flex"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                              </span>
                             ) : (
                               <span 
                                 className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[8px] font-bold text-amber-700 tracking-wide mt-0.5"

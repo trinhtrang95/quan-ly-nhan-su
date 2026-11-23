@@ -6,15 +6,18 @@ export interface OvertimeGlossaryEntry {
   reasonKr: string;
   updatedAt: string;
   deletedAt?: string | null;
+  is_verified?: boolean;
+  isVerified?: boolean;
 }
 
-interface SupabaseGlossaryRow {
+export interface SupabaseGlossaryRow {
   id: string;
   reason_vi: string;
   reason_kr: string;
   updated_at?: string | null;
   created_at?: string | null;
   deleted_at?: string | null;
+  is_verified?: boolean | null;
 }
 
 export const OVERTIME_GLOSSARY_STORAGE_KEY = 'hr_pro_overtime_glossary_v1';
@@ -26,6 +29,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '생산 당직',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-2',
@@ -33,6 +38,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '긴급 생산 지원',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-3',
@@ -40,6 +47,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '설비 점검 및 수리',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-4',
@@ -47,6 +56,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '품질 검사',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-5',
@@ -54,6 +65,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '설비 수리',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-6',
@@ -61,6 +74,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '모델 교체',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-7',
@@ -68,6 +83,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '긴급 포장 작업',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-8',
@@ -75,6 +92,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '공장 청소',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-9',
@@ -82,6 +101,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '생산 회의',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
   {
     id: 'default-glossary-10',
@@ -89,6 +110,8 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     reasonKr: '재고 실사',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
+    is_verified: true,
+    isVerified: true,
   },
 ];
 
@@ -145,9 +168,35 @@ export function findExactGlossaryMatch(
   return null;
 }
 
+export function isGlossaryEntryVerified(
+  entry: Pick<OvertimeGlossaryEntry, 'is_verified' | 'isVerified'>
+): boolean {
+  if (entry.is_verified === false || entry.isVerified === false) {
+    return false;
+  }
+  return true;
+}
+
+export function mapSupabaseGlossaryRowToEntry(
+  row: SupabaseGlossaryRow
+): OvertimeGlossaryEntry {
+  const rawVerified =
+    typeof row.is_verified === 'boolean' ? row.is_verified : undefined;
+  return {
+    id: row.id,
+    reasonVi: (row.reason_vi || '').trim(),
+    reasonKr: (row.reason_kr || '').trim(),
+    updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
+    deletedAt: row.deleted_at ?? null,
+    is_verified: rawVerified,
+    isVerified: rawVerified !== false,
+  };
+}
+
 /**
  * Pure helper: inserts or updates a (reasonVi, reasonKr) pair in an entries array,
  * deduplicating by normalized Vietnamese text and placing the latest entry at the top.
+ * New entries default to `is_verified: false`; updates preserve the existing verification status.
  */
 export function upsertGlossaryEntryInList(
   entries: OvertimeGlossaryEntry[],
@@ -168,12 +217,20 @@ export function upsertGlossaryEntryInList(
   );
 
   if (existing) {
+    const preservedFlag =
+      typeof existing.is_verified === 'boolean'
+        ? existing.is_verified
+        : typeof existing.isVerified === 'boolean'
+        ? existing.isVerified
+        : undefined;
     const updated: OvertimeGlossaryEntry = {
       ...existing,
       reasonVi: cleanVi,
       reasonKr: cleanKr,
       updatedAt: nowIso,
       deletedAt: null,
+      is_verified: preservedFlag,
+      isVerified: preservedFlag !== false,
     };
     const nextEntries = [
       updated,
@@ -191,12 +248,69 @@ export function upsertGlossaryEntryInList(
     reasonKr: cleanKr,
     updatedAt: nowIso,
     deletedAt: null,
+    is_verified: false,
+    isVerified: false,
   };
 
   return {
     entries: [created, ...entries],
     savedEntry: created,
     isUpdate: false,
+  };
+}
+
+/**
+ * Pure helper: updates the Korean translation of an entry by id in memory.
+ */
+export function updateGlossaryEntryKrInList(
+  entries: OvertimeGlossaryEntry[],
+  id: string,
+  newReasonKr: string,
+  nowIso: string = new Date().toISOString()
+): {
+  entries: OvertimeGlossaryEntry[];
+  updatedEntry: OvertimeGlossaryEntry | null;
+} {
+  const cleanKr = (newReasonKr || '').trim().replace(/\s+/g, ' ');
+  const target = entries.find((e) => e.id === id);
+  if (!target || !cleanKr) {
+    return { entries, updatedEntry: null };
+  }
+  const updatedEntry: OvertimeGlossaryEntry = {
+    ...target,
+    reasonKr: cleanKr,
+    updatedAt: nowIso,
+  };
+  return {
+    entries: entries.map((e) => (e.id === id ? updatedEntry : e)),
+    updatedEntry,
+  };
+}
+
+/**
+ * Pure helper: marks an entry as verified (`is_verified: true`) by id in memory.
+ */
+export function approveGlossaryEntryInList(
+  entries: OvertimeGlossaryEntry[],
+  id: string,
+  nowIso: string = new Date().toISOString()
+): {
+  entries: OvertimeGlossaryEntry[];
+  updatedEntry: OvertimeGlossaryEntry | null;
+} {
+  const target = entries.find((e) => e.id === id);
+  if (!target) {
+    return { entries, updatedEntry: null };
+  }
+  const updatedEntry: OvertimeGlossaryEntry = {
+    ...target,
+    is_verified: true,
+    isVerified: true,
+    updatedAt: nowIso,
+  };
+  return {
+    entries: entries.map((e) => (e.id === id ? updatedEntry : e)),
+    updatedEntry,
   };
 }
 
@@ -245,6 +359,25 @@ export function composeLocalFactorySuggestion(
   return (reasonVi || '').trim();
 }
 
+function normalizeLocalGlossaryEntry(
+  entry: OvertimeGlossaryEntry
+): OvertimeGlossaryEntry {
+  const resolvedFlag =
+    typeof entry.is_verified === 'boolean'
+      ? entry.is_verified
+      : typeof entry.isVerified === 'boolean'
+      ? entry.isVerified
+      : entry.id?.startsWith('default-glossary-')
+      ? true
+      : undefined;
+
+  return {
+    ...entry,
+    is_verified: resolvedFlag,
+    isVerified: resolvedFlag !== false,
+  };
+}
+
 /**
  * Reads glossary synchronously from localStorage (seeding defaults if empty).
  */
@@ -263,7 +396,9 @@ export function readLocalOvertimeGlossary(): OvertimeGlossaryEntry[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return (parsed as OvertimeGlossaryEntry[]).filter((e) => !e.deletedAt);
+      return (parsed as OvertimeGlossaryEntry[])
+        .filter((e) => !e.deletedAt)
+        .map(normalizeLocalGlossaryEntry);
     }
   } catch {
     // Fallback cleanly to defaults
@@ -316,14 +451,10 @@ export async function loadOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
     for (const row of rows) {
       if (!row.reason_vi || !row.reason_kr || row.deleted_at) continue;
       const key = normalizeGlossaryKey(row.reason_vi);
-      const remoteEntry: OvertimeGlossaryEntry = {
-        id: row.id,
-        reasonVi: row.reason_vi.trim(),
-        reasonKr: row.reason_kr.trim(),
-        updatedAt:
-          row.updated_at || row.created_at || new Date().toISOString(),
-        deletedAt: null,
-      };
+      const remoteEntry = mapSupabaseGlossaryRowToEntry({
+        ...row,
+        deleted_at: null,
+      });
       const existing = mergedByKey.get(key);
       if (
         !existing ||
@@ -349,6 +480,8 @@ export async function loadOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
 /**
  * Saves or updates a (reasonVi, reasonKr) glossary pair to localStorage immediately
  * and syncs lightly to Supabase `overtime_glossary` when available.
+ * New remote inserts explicitly include `is_verified: false`; existing rows preserve
+ * their current `is_verified` status on update.
  */
 export async function upsertOvertimeGlossaryEntry(
   reasonVi: string,
@@ -375,28 +508,70 @@ export async function upsertOvertimeGlossaryEntry(
   if (remoteGlossaryAvailable === true) {
     try {
       const normalizedVi = normalizeGlossaryKey(result.savedEntry.reasonVi);
-      const remoteRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
-        'overtime_glossary?on_conflict=reason_vi_normalized&select=*',
-        {
-          method: 'POST',
-          headers: {
-            Prefer: 'return=representation,resolution=merge-duplicates',
-          },
-          body: JSON.stringify({
-            reason_vi: result.savedEntry.reasonVi,
-            reason_vi_normalized: normalizedVi,
-            reason_kr: result.savedEntry.reasonKr,
-            updated_at: result.savedEntry.updatedAt,
-            deleted_at: null,
-          }),
-        }
+      const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
+          normalizedVi
+        )}&select=*&limit=1`
       );
-      const persisted = Array.isArray(remoteRows) ? remoteRows[0] : null;
-      if (persisted?.id && persisted.id !== result.savedEntry.id) {
+      const existingRemote = Array.isArray(existingRows)
+        ? existingRows[0]
+        : null;
+
+      let persisted: SupabaseGlossaryRow | null = null;
+      let resolvedIsUpdate = result.isUpdate;
+
+      if (existingRemote?.id) {
+        resolvedIsUpdate = !existingRemote.deleted_at;
+        const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+          `overtime_glossary?id=eq.${encodeURIComponent(
+            existingRemote.id
+          )}&select=*`,
+          {
+            method: 'PATCH',
+            headers: {
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify({
+              reason_vi: result.savedEntry.reasonVi,
+              reason_kr: result.savedEntry.reasonKr,
+              updated_at: result.savedEntry.updatedAt,
+              deleted_at: null,
+            }),
+          }
+        );
+        persisted = Array.isArray(patchedRows) ? patchedRows[0] : existingRemote;
+      } else {
+        const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+          'overtime_glossary?select=*',
+          {
+            method: 'POST',
+            headers: {
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify({
+              reason_vi: result.savedEntry.reasonVi,
+              reason_vi_normalized: normalizedVi,
+              reason_kr: result.savedEntry.reasonKr,
+              updated_at: result.savedEntry.updatedAt,
+              deleted_at: null,
+              is_verified: false,
+            }),
+          }
+        );
+        persisted = Array.isArray(insertedRows) ? insertedRows[0] : null;
+      }
+
+      if (persisted?.id) {
+        const persistedVerified =
+          typeof persisted.is_verified === 'boolean'
+            ? persisted.is_verified
+            : undefined;
         const syncedEntry: OvertimeGlossaryEntry = {
           ...result.savedEntry,
           id: persisted.id,
           updatedAt: persisted.updated_at || result.savedEntry.updatedAt,
+          is_verified: persistedVerified,
+          isVerified: persistedVerified !== false,
         };
         const syncedEntries = result.entries.map((item) =>
           item.id === result.savedEntry.id ? syncedEntry : item
@@ -405,12 +580,185 @@ export async function upsertOvertimeGlossaryEntry(
         return {
           entries: syncedEntries,
           savedEntry: syncedEntry,
-          isUpdate: result.isUpdate,
+          isUpdate: resolvedIsUpdate,
         };
       }
     } catch {
       // Never interrupt UI on optional cloud glossary sync failure
     }
+  }
+
+  return result;
+}
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function syncGlossaryPatchToSupabase(
+  entry: OvertimeGlossaryEntry,
+  patchBody: Record<string, unknown>
+): Promise<SupabaseGlossaryRow | null> {
+  if (remoteGlossaryAvailable === false) return null;
+
+  try {
+    if (UUID_REGEX.test(entry.id)) {
+      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(entry.id)}&select=*`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify(patchBody),
+        }
+      );
+      remoteGlossaryAvailable = true;
+      if (Array.isArray(patchedRows) && patchedRows[0]) {
+        return patchedRows[0];
+      }
+    }
+
+    const normalizedVi = normalizeGlossaryKey(entry.reasonVi);
+    const existingRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+      `overtime_glossary?reason_vi_normalized=eq.${encodeURIComponent(
+        normalizedVi
+      )}&select=*&limit=1`
+    );
+    remoteGlossaryAvailable = true;
+    const existingRemote = Array.isArray(existingRows)
+      ? existingRows[0]
+      : null;
+
+    if (existingRemote?.id) {
+      const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+        `overtime_glossary?id=eq.${encodeURIComponent(
+          existingRemote.id
+        )}&select=*`,
+        {
+          method: 'PATCH',
+          headers: {
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({
+            ...patchBody,
+            deleted_at: null,
+          }),
+        }
+      );
+      return Array.isArray(patchedRows) && patchedRows[0]
+        ? patchedRows[0]
+        : existingRemote;
+    }
+
+    const insertedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
+      'overtime_glossary?select=*',
+      {
+        method: 'POST',
+        headers: {
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify({
+          reason_vi: entry.reasonVi,
+          reason_vi_normalized: normalizedVi,
+          reason_kr: entry.reasonKr,
+          updated_at: entry.updatedAt,
+          deleted_at: null,
+          is_verified: entry.is_verified !== false,
+          ...patchBody,
+        }),
+      }
+    );
+    return Array.isArray(insertedRows) && insertedRows[0]
+      ? insertedRows[0]
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Updates the Korean translation (`reason_kr`) of an existing glossary entry in localStorage
+ * and syncs to Supabase `overtime_glossary` without altering its verification flag.
+ */
+export async function updateGlossaryEntryKr(
+  id: string,
+  newReasonKr: string
+): Promise<{
+  entries: OvertimeGlossaryEntry[];
+  updatedEntry: OvertimeGlossaryEntry | null;
+}> {
+  const cleanKr = (newReasonKr || '').trim().replace(/\s+/g, ' ');
+  if (!cleanKr) {
+    throw new Error('Bản dịch tiếng Hàn không được để trống.');
+  }
+
+  const nowIso = new Date().toISOString();
+  const current = readLocalOvertimeGlossary();
+  const result = updateGlossaryEntryKrInList(current, id, cleanKr, nowIso);
+  if (!result.updatedEntry) {
+    return result;
+  }
+
+  writeLocalOvertimeGlossary(result.entries);
+
+  const persisted = await syncGlossaryPatchToSupabase(result.updatedEntry, {
+    reason_kr: result.updatedEntry.reasonKr,
+    updated_at: nowIso,
+  });
+
+  if (persisted?.id) {
+    const syncedEntry = mapSupabaseGlossaryRowToEntry({
+      ...persisted,
+      deleted_at: null,
+    });
+    const syncedEntries = result.entries.map((item) =>
+      item.id === id ? syncedEntry : item
+    );
+    writeLocalOvertimeGlossary(syncedEntries);
+    return {
+      entries: syncedEntries,
+      updatedEntry: syncedEntry,
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Approves a glossary entry by setting `is_verified = true` locally and on Supabase.
+ */
+export async function approveGlossaryEntry(id: string): Promise<{
+  entries: OvertimeGlossaryEntry[];
+  updatedEntry: OvertimeGlossaryEntry | null;
+}> {
+  const nowIso = new Date().toISOString();
+  const current = readLocalOvertimeGlossary();
+  const result = approveGlossaryEntryInList(current, id, nowIso);
+  if (!result.updatedEntry) {
+    return result;
+  }
+
+  writeLocalOvertimeGlossary(result.entries);
+
+  const persisted = await syncGlossaryPatchToSupabase(result.updatedEntry, {
+    is_verified: true,
+    updated_at: nowIso,
+  });
+
+  if (persisted?.id) {
+    const syncedEntry = mapSupabaseGlossaryRowToEntry({
+      ...persisted,
+      is_verified: true,
+      deleted_at: null,
+    });
+    const syncedEntries = result.entries.map((item) =>
+      item.id === id ? syncedEntry : item
+    );
+    writeLocalOvertimeGlossary(syncedEntries);
+    return {
+      entries: syncedEntries,
+      updatedEntry: syncedEntry,
+    };
   }
 
   return result;

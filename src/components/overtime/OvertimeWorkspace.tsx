@@ -35,6 +35,7 @@ import {
   CreateOvertimeForm,
   CreateOvertimeFormPayload,
 } from './CreateOvertimeForm';
+import { GlossaryManagerModal } from './GlossaryManagerModal';
 import { OvertimeLog } from './OvertimeLog';
 
 export type OvertimeTabId = 'create' | 'log';
@@ -65,6 +66,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     getLocalTodayIsoDate()
   );
   const [isQuickCreating, setIsQuickCreating] = useState<boolean>(false);
+  const [isGlossaryModalOpen, setIsGlossaryModalOpen] = useState<boolean>(false);
+  const [glossaryRevision, setGlossaryRevision] = useState<number>(0);
   const [supabaseLeaveRecords, setSupabaseLeaveRecords] = useState<
     OvertimeLeaveCheckEntry[] | null
   >(null);
@@ -283,56 +286,66 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     <div className="flex flex-col w-full h-full flex-1 min-h-0 overflow-hidden bg-slate-50">
       {/* 2-Tab Navigation Header */}
       <div className="bg-white border-b border-slate-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2.5 shrink-0 no-print">
-        <div
-          role="tablist"
-          aria-label="Phân hệ Tăng ca"
-          className="inline-flex flex-wrap items-center gap-1 min-w-0"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'log'}
-            onClick={() => setActiveTab('log')}
-            className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              activeTab === 'log'
-                ? 'bg-[#14539E] text-white shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <div
+            role="tablist"
+            aria-label="Phân hệ Tăng ca"
+            className="inline-flex flex-wrap items-center gap-1 min-w-0"
           >
-            <ClipboardList className="w-3.5 h-3.5 shrink-0" />
-            <span>Nhật ký phiếu tăng ca</span>
-            <span
-              className={`font-mono text-[11px] tabular-nums ${
-                activeTab === 'log' ? 'text-blue-100' : 'text-slate-400'
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'log'}
+              onClick={() => setActiveTab('log')}
+              className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                activeTab === 'log'
+                  ? 'bg-[#14539E] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              ({formatNumberVN(activeFormsCount)})
-            </span>
-          </button>
+              <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+              <span>Nhật ký phiếu tăng ca</span>
+              <span
+                className={`font-mono text-[11px] tabular-nums ${
+                  activeTab === 'log' ? 'text-blue-100' : 'text-slate-400'
+                }`}
+              >
+                ({formatNumberVN(activeFormsCount)})
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'create'}
+              onClick={() => setActiveTab('create')}
+              className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                activeTab === 'create'
+                  ? 'bg-[#14539E] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              {editingForm ? (
+                <Pencil className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <FilePlus2 className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>
+                {editingForm
+                  ? `Biên tập: ${formatOvertimeFormCodeDisplay(
+                      editingForm.form_code
+                    )} (${formatDateToFormStyle(editingForm.overtime_date)})`
+                  : 'Biên tập chi tiết phiếu'}
+              </span>
+            </button>
+          </div>
 
           <button
             type="button"
-            role="tab"
-            aria-selected={activeTab === 'create'}
-            onClick={() => setActiveTab('create')}
-            className={`h-9 px-3.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              activeTab === 'create'
-                ? 'bg-[#14539E] text-white shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
+            onClick={() => setIsGlossaryModalOpen(true)}
+            className="h-9 px-3 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
-            {editingForm ? (
-              <Pencil className="w-3.5 h-3.5 shrink-0" />
-            ) : (
-              <FilePlus2 className="w-3.5 h-3.5 shrink-0" />
-            )}
-            <span>
-              {editingForm
-                ? `Biên tập: ${formatOvertimeFormCodeDisplay(
-                    editingForm.form_code
-                  )} (${formatDateToFormStyle(editingForm.overtime_date)})`
-                : 'Biên tập chi tiết phiếu'}
-            </span>
+            <span>📚 Quản lý từ điển (Việt - Hàn)</span>
           </button>
         </div>
 
@@ -372,6 +385,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             existingForms={forms}
             isCheckingExistingForms={isLoadingForms}
             editingForm={editingForm}
+            glossaryRefreshKey={glossaryRevision}
             onOpenExistingForm={(form) => void handleStartEditForm(form)}
             onCancelEdit={handleCancelEdit}
             onSaveOnly={handleSaveForm}
@@ -444,6 +458,13 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
           </div>
         </div>
       )}
+
+      <GlossaryManagerModal
+        isOpen={isGlossaryModalOpen}
+        onClose={() => setIsGlossaryModalOpen(false)}
+        onShowToast={onShowToast}
+        onGlossaryUpdated={() => setGlossaryRevision((prev) => prev + 1)}
+      />
     </div>
   );
 };
