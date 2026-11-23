@@ -894,35 +894,39 @@ export function calculateLeaveAccrualBreakdown(
   const quota = calculateTotalQuota(rawJoinDate, baseQuota, referenceDateStr);
   const seniorityText = calculateSeniorityText(rawJoinDate, referenceDateStr);
 
-  // 1. Tính Phép tích lũy năm nay theo tháng hiện tại (hoặc Cấp 1 lần đầu năm)
+  // 1. Tính Phép tích lũy năm nay (Theo tháng & Áp dụng Quy tắc 2 tháng thử việc)
   let accruedLeaveDays = quota;
-  if (hasOpeningBalance || policy.accrualMode === 'monthly') {
-    if (hasOpeningBalance) {
-      // Khi chốt số dư đầu kỳ ở tháng hiện tại (VD: tháng 11), tích lũy cơ bản theo tháng + ngày phép thâm niên
-      const baseAccrued = Number(((baseQuota / 12) * clampedMonth).toFixed(2));
-      accruedLeaveDays = Number((baseAccrued + bonusLeave).toFixed(2));
-    } else {
-      let workingMonthsInYear = clampedMonth;
-      if (rawJoinDate && rawJoinDate.trim() && rawJoinDate.trim() !== '-') {
-        const { year: joinYear, month: joinMonth } = getYearMonth(rawJoinDate);
-        if (joinYear > year) {
-          workingMonthsInYear = 0;
-        } else if (joinYear === year) {
-          workingMonthsInYear = Math.max(0, clampedMonth - joinMonth + 1);
-        } else {
-          workingMonthsInYear = clampedMonth;
+  if (policy.accrualMode === 'monthly') {
+    let workingMonthsInYear = clampedMonth;
+    let isProbation = false;
+
+    // Tính toán số tháng làm việc dựa trên ngày vào công ty
+    if (rawJoinDate && rawJoinDate.trim() && rawJoinDate.trim() !== '-') {
+      const { year: joinYear, month: joinMonth } = getYearMonth(rawJoinDate);
+      if (joinYear > year) {
+        workingMonthsInYear = 0;
+      } else if (joinYear === year) {
+        workingMonthsInYear = Math.max(0, clampedMonth - joinMonth + 1);
+        
+        // QUY TẮC THỬ VIỆC: Mới vào trong năm nay và làm <= 2 tháng
+        if (workingMonthsInYear <= 2) {
+          isProbation = true;
         }
+      } else {
+        workingMonthsInYear = clampedMonth;
       }
-      const baseAccrued = Number(
-        ((baseQuota / 12) * workingMonthsInYear).toFixed(2)
-      );
-      accruedLeaveDays =
-        workingMonthsInYear > 0
-          ? Number((baseAccrued + bonusLeave).toFixed(2))
-          : 0;
+    }
+
+    if (isProbation) {
+      // Trong thời gian thử việc: Tích lũy = 0
+      accruedLeaveDays = 0;
+    } else {
+      // Đã qua thử việc (hoặc làm từ các năm trước): 
+      // Tính bình thường theo số tháng (Tự động cộng dồn hồi tố cả 2 tháng thử việc)
+      const baseAccrued = Number(((baseQuota / 12) * workingMonthsInYear).toFixed(2));
+      accruedLeaveDays = workingMonthsInYear > 0 ? Number((baseAccrued + bonusLeave).toFixed(2)) : 0;
     }
   }
-
   // 2. Tính Phép năm cũ dồn sang (Tồn năm trước - carried_over)
   let carriedOverLeaveDays = 0;
   if (balanceRec) {
