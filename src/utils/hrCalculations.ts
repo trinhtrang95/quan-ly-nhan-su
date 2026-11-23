@@ -52,7 +52,7 @@ export const LEAVE_TYPE_META: Record<
 };
 
 /**
- * Formats YYYY-MM-DD or DD/MM/YYYY to DD/MM/YYYY for Vietnamese display
+- Formats YYYY-MM-DD or DD/MM/YYYY to DD/MM/YYYY for Vietnamese display
  */
 export function formatDateVN(dateStr?: string | null): string {
   if (!dateStr) return '';
@@ -70,8 +70,8 @@ export function formatDateVN(dateStr?: string | null): string {
 }
 
 /**
- * Parses a date string (YYYY-MM-DD or DD/MM/YYYY) into a UTC timestamp for accurate sorting.
- * Returns null if the string is empty or invalid so empty dates can be pushed to the bottom.
+- Parses a date string (YYYY-MM-DD or DD/MM/YYYY) into a UTC timestamp for accurate sorting.
+- Returns null if the string is empty or invalid so empty dates can be pushed to the bottom.
  */
 export function parseComparableDate(raw?: string | null): number | null {
   if (!raw) return null;
@@ -323,9 +323,9 @@ export function compareEmployeesByDefaultPriority(
 }
 
 /**
- * Sorts employees by the specified column and direction.
- * When field or direction is null, sorts by the 2-tier default priority (Department > Position > EmployeeCode).
- * Empty values ("", null, undefined, "-") are ALWAYS pushed to the bottom of the list when sorting a specific column.
+- Sorts employees by the specified column and direction.
+- When field or direction is null, sorts by the 2-tier default priority (Department > Position > EmployeeCode).
+- Empty values ("", null, undefined, "-") are ALWAYS pushed to the bottom of the list when sorting a specific column.
  */
 export function sortEmployees(
   employees: Employee[],
@@ -417,7 +417,7 @@ export function sortEmployees(
 }
 
 /**
- * Parses year and month (1..12) from YYYY-MM-DD or DD/MM/YYYY
+- Parses year and month (1..12) from YYYY-MM-DD or DD/MM/YYYY
  */
 export function getYearMonth(dateStr: string): { year: number; month: number } {
   const s = (dateStr || '').trim();
@@ -434,7 +434,7 @@ export function getYearMonth(dateStr: string): { year: number; month: number } {
 }
 
 /**
- * Checks if a date YYYY-MM-DD falls within [startDate, endDate] inclusive
+- Checks if a date YYYY-MM-DD falls within [startDate, endDate] inclusive
  */
 export function isDateInRange(targetDate: string, startDate: string, endDate: string): boolean {
   return targetDate >= startDate && targetDate <= endDate;
@@ -628,9 +628,9 @@ function isAfterCutoff(startDateStr?: string | null, cutoffDateStr?: string | nu
 }
 
 /**
- * Quét và đồng bộ hồi tố (Retroactive Data Sync):
- * Tính TỔNG số ngày nghỉ phép năm (annual_leave) đã tồn tại từ cơ sở dữ liệu
- * cộng với số chốt đầu kỳ (đến 31/10) để cho ra số [Đã nghỉ] chính xác tuyệt đối.
+- Quét và đồng bộ hồi tố (Retroactive Data Sync):
+- Tính TỔNG số ngày nghỉ phép năm (annual_leave) đã tồn tại từ cơ sở dữ liệu
+- cộng với số chốt đầu kỳ (đến 31/10) để cho ra số [Đã nghỉ] chính xác tuyệt đối.
  */
 export function performRetroactiveLeaveScanAndSync(
   employees: Employee[],
@@ -756,7 +756,7 @@ function parseDatePartsYMD(
 }
 
 /**
- * Tính số năm và số tháng thâm niên làm việc trọn vẹn tính từ `join_date` đến `referenceDate` (mặc định 16/11/2026).
+- Tính số năm và số tháng thâm niên làm việc trọn vẹn tính từ `join_date` đến `referenceDate` (mặc định 16/11/2026).
  */
 export function calculateSeniorityBreakdown(
   join_date?: string | Date | null,
@@ -795,9 +795,9 @@ export function calculateSeniorityBreakdown(
 }
 
 /**
- * Hàm 1: Tính Thâm niên hiển thị (`calculateSeniorityText`)
- * - Dưới 1 năm trả về số tháng (VD: `5 tháng`)
- * - Từ 1 năm trở lên trả về số năm và tháng (VD: `5 năm 2 tháng`)
+- Hàm 1: Tính Thâm niên hiển thị (`calculateSeniorityText`)
+- - Dưới 1 năm trả về số tháng (VD: `5 tháng`)
+- - Từ 1 năm trở lên trả về số năm và tháng (VD: `5 năm 2 tháng`)
  */
 export function calculateSeniorityText(
   join_date?: string | Date | null,
@@ -821,9 +821,9 @@ export function calculateSeniorityText(
 }
 
 /**
- * Hàm 2: Tính Phép định mức theo thâm niên (`calculateTotalQuota`)
- * - Luật Lao động: Cứ đủ 5 năm làm việc cộng thêm 1 ngày phép (`bonus_leave = Math.floor(years / 5)`)
- * - Output: `base_quota + bonus_leave`
+- Hàm 2: Tính Phép định mức theo thâm niên (`calculateTotalQuota`)
+- - Luật Lao động: Cứ đủ 5 năm làm việc cộng thêm 1 ngày phép (`bonus_leave = Math.floor(years / 5)`)
+- - Output: `base_quota + bonus_leave`
  */
 export function calculateTotalQuota(
   join_date?: string | Date | null,
@@ -839,9 +839,9 @@ export function calculateTotalQuota(
 }
 
 /**
- * Calculates Leave Accrual & Carryover breakdown for an employee:
- * Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]
- * Còn lại = [Tổng quỹ phép] - [Đã nghỉ (Chốt đầu kỳ đến 31/10 + phát sinh mới từ 01/11 trở đi)]
+- Calculates Leave Accrual & Carryover breakdown for an employee:
+- Tổng quỹ phép = [Tích lũy năm nay] + [Tồn năm trước]
+- Còn lại = [Tổng quỹ phép] - [Đã nghỉ (Chốt đầu kỳ đến 31/10 + phát sinh mới từ 01/11 trở đi)]
  */
 export function calculateLeaveAccrualBreakdown(
   employee: Employee,
@@ -962,7 +962,7 @@ export function calculateLeaveAccrualBreakdown(
   );
 
   // 4. Tính Số đã nghỉ (used_leave) theo cơ chế Dynamic Aggregation:
-  // - Nếu đã Chốt số dư đầu kỳ (đến 31/10): lấy số dư `used_leave` chốt đến 31/10 + TẤT CẢ các đơn nghỉ phép năm từ 01/11 trở đi (không loại trừ đơn tháng 11 đã nhập trước đó!)
+  // - Nếu đã Chốt số dư đầu kỳ (đến 31/10): lấy số dư `used_leave` chốt đến 31/10 + TẤT CẢ các đơn nghỉ phép năm từ 01/11 trở đi
   // - Nếu chưa Chốt số dư đầu kỳ: cộng toàn bộ đơn nghỉ phép năm từ bảng `records` trong năm `year`
   let usedAnnualLeaveDays = 0;
   if (balanceRec || typeof employee.openingUsedLeave === 'number') {
@@ -975,7 +975,7 @@ export function calculateLeaveAccrualBreakdown(
       .filter((r) => {
         if (
           !matchesEmployee(r.employeeId, employee, balanceRec) ||
-          r.type !== 'annual_leave'
+          r.type !== 'annual_leave' // <-- LỌC CHỈ TÍNH PHÉP NĂM
         ) {
           return false;
         }
@@ -991,7 +991,7 @@ export function calculateLeaveAccrualBreakdown(
   } else {
     usedAnnualLeaveDays = records
       .filter((r) => {
-        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') {
+        if (!matchesEmployee(r.employeeId, employee) || r.type !== 'annual_leave') { // <-- LỌC CHỈ TÍNH PHÉP NĂM
           return false;
         }
         const { year: rYear, month: rMonth } = getYearMonth(r.startDate);
@@ -1001,9 +1001,9 @@ export function calculateLeaveAccrualBreakdown(
   }
 
   // 5. Còn lại = [Tổng quỹ phép] - [Đã nghỉ]
-  const remainingAnnualLeave = Number(
-    (totalLeaveFund - usedAnnualLeaveDays).toFixed(2)
-  );
+  // Thêm Math.max(0, ...) để ngăn không cho âm
+  const calculatedRemaining = totalLeaveFund - usedAnnualLeaveDays;
+  const remainingAnnualLeave = Math.max(0, Number(calculatedRemaining.toFixed(2)));
 
   return {
     baseQuota,
@@ -1020,7 +1020,7 @@ export function calculateLeaveAccrualBreakdown(
 }
 
 /**
- * Builds the 12-month Annual Matrix Report rows for a given year and optional department filter
+- Builds the 12-month Annual Matrix Report rows for a given year and optional department filter
  */
 export function calculateAnnualMatrixReport(
   employees: Employee[],
@@ -1166,7 +1166,7 @@ export interface MonthlyAttendanceSummaryReport {
 }
 
 /**
- * Formats late hours into a compact badge code (e.g. 0.5 -> '30p', 0.25 -> '15p', 1 -> '1h', 1.5 -> '1.5h')
+- Formats late hours into a compact badge code (e.g. 0.5 -> '30p', 0.25 -> '15p', 1 -> '1h', 1.5 -> '1.5h')
  */
 export function formatLateDurationBadge(hours: number): string {
   if (hours <= 0) return '0p';
@@ -1177,7 +1177,7 @@ export function formatLateDurationBadge(hours: number): string {
 }
 
 /**
- * Returns a short group/department code (e.g. PE, ST, ME, IOT, DOC, JIG 2, AUTO 1, QLC)
+- Returns a short group/department code (e.g. PE, ST, ME, IOT, DOC, JIG 2, AUTO 1, QLC)
  */
 export function getShortGroupCode(
   department?: string | null,
@@ -1215,8 +1215,8 @@ export function getShortGroupCode(
 }
 
 /**
- * Builds the Monthly Attendance & Leave Matrix Report for a given year, month (1..12),
- * department filter, and search query.
+- Builds the Monthly Attendance & Leave Matrix Report for a given year, month (1..12),
+- department filter, and search query.
  */
 export function calculateMonthlyAttendanceMatrix(
   employees: Employee[],
@@ -1436,8 +1436,8 @@ export function calculateMonthlyAttendanceMatrix(
 }
 
 /**
- * Calculates the 5 KPI stat cards on the Dashboard
- * Low leave threshold: remaining annual leave <= 2 days
+- Calculates the 5 KPI stat cards on the Dashboard
+- Low leave threshold: remaining annual leave <= 2 days
  */
 export function calculateDashboardKPIs(
   employees: Employee[],
@@ -1497,7 +1497,7 @@ export function calculateDashboardKPIs(
 }
 
 /**
- * Calculates horizontal bar distribution of employees by Department/Group
+- Calculates horizontal bar distribution of employees by Department/Group
  */
 export function calculateDepartmentDistribution(
   employees: Employee[],
@@ -1542,7 +1542,7 @@ export function calculateDepartmentDistribution(
 }
 
 /**
- * Calculates horizontal bar distribution of leave & late types in a given month/year (or full year if month === 0)
+- Calculates horizontal bar distribution of leave & late types in a given month/year (or full year if month === 0)
  */
 export function calculateMonthlyLeaveTypeDistribution(
   records: LeaveRecord[],
@@ -1580,7 +1580,7 @@ export function calculateMonthlyLeaveTypeDistribution(
 }
 
 /**
- * Filters employees by search query, department, and gender/status
+- Filters employees by search query, department, and gender/status
  */
 export function filterEmployees(
   employees: Employee[],
@@ -1620,7 +1620,7 @@ export function filterEmployees(
 }
 
 /**
- * Filters leave/late records by month, year, type, department, and search query
+- Filters leave/late records by month, year, type, department, and search query
  */
 export function filterLeaveRecords(
   records: LeaveRecord[],
