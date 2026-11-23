@@ -1753,14 +1753,16 @@ export default function App() {
                       ])
                     );
                     
-                    const updatedEmployees: Employee[] = [];
+                    const updatedEmployees: typeof employees = [];
 
+                    // 1. Cập nhật giao diện (Local State) trước để phản hồi nhanh
                     setEmployees((prev) =>
                       prev.map((emp) => {
                         const matched = rowByCode.get(
                           emp.employeeCode.trim().toUpperCase()
                         );
                         if (!matched) return emp;
+                        
                         const newEmp = {
                           ...emp,
                           carriedOverLeave: matched.carried_over,
@@ -1771,18 +1773,18 @@ export default function App() {
                       })
                     );
 
+                    // 2. Đồng bộ ngầm lên Supabase Cloud
                     if (updatedEmployees.length > 0) {
                       showToast(`Đang đồng bộ số dư phép của ${updatedEmployees.length} nhân sự lên Cloud...`);
                       try {
-                        // Đẩy đồng loạt các hồ sơ vừa được chốt phép lên Supabase
                         await Promise.all(
                           updatedEmployees.map((emp) => updateEmployeeInSupabase(emp.id, emp))
                         );
                         showToast(
-                          `Đã chốt và ĐỒNG BỘ THÀNH CÔNG số dư phép đầu kỳ cho ${updatedEmployees.length} nhân sự lên hệ thống Cloud.`
+                          `Đã chốt và ĐỒNG BỘ THÀNH CÔNG số dư phép cho ${updatedEmployees.length} nhân sự lên Cloud.`
                         );
                       } catch (error) {
-                        showToast(`Lưu cục bộ thành công nhưng lỗi đồng bộ Cloud. Vui lòng kiểm tra lại mạng lưới.`);
+                        showToast(`Lưu cục bộ thành công nhưng lỗi đồng bộ Cloud. Vui lòng kiểm tra lại mạng.`);
                       }
                     } else {
                       showToast(`Không tìm thấy mã nhân viên nào khớp để import.`);
