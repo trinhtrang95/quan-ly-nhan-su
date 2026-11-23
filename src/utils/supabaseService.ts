@@ -156,6 +156,8 @@ export interface SupabaseEmployeeRow {
   join_date?: string | null;
   avatar_url: string | null;
   annual_leave_quota: number | null;
+  carried_over_leave?: number | null;
+  opening_used_leave?: number | null;
   status: string | null;
   company_id?: string | null;
   created_at?: string;
@@ -376,37 +378,108 @@ export function mapSupabaseRowToAppUser(row: SupabaseAppUserRow): UserAccount {
 
 const FAMILY_META_PREFIX = ' <!--FAMILY:';
 const FAMILY_META_SUFFIX = '-->';
+const OPENING_LEAVE_META_PREFIX = ' <!--LEAVE_OPENING:';
+const OPENING_LEAVE_META_SUFFIX = '-->';
+
+export interface EmployeeOpeningLeaveMeta {
+  carriedOverLeave?: number;
+  openingUsedLeave?: number;
+}
 
 export function packPhoneWithFamilyInfo(
   phone?: string | null,
-  familyInfo?: string | null
+  familyInfo?: string | null,
+  openingBalances?: EmployeeOpeningLeaveMeta
 ): string | null {
   const cleanPhone = (phone || '').trim();
   const cleanFamily = (familyInfo || '').trim();
-  if (!cleanPhone && !cleanFamily) return null;
-  if (!cleanFamily) return cleanPhone;
-  return `${cleanPhone}${FAMILY_META_PREFIX}${cleanFamily}${FAMILY_META_SUFFIX}`;
+
+  const openingPayload: { c?: number; u?: number } = {};
+  if (
+    typeof openingBalances?.carriedOverLeave === 'number' &&
+    Number.isFinite(openingBalances.carriedOverLeave)
+  ) {
+    openingPayload.c = Number(openingBalances.carriedOverLeave.toFixed(2));
+  }
+  if (
+    typeof openingBalances?.openingUsedLeave === 'number' &&
+    Number.isFinite(openingBalances.openingUsedLeave)
+  ) {
+    openingPayload.u = Number(openingBalances.openingUsedLeave.toFixed(2));
+  }
+  const hasOpeningMeta = Object.keys(openingPayload).length > 0;
+
+  if (!cleanPhone && !cleanFamily && !hasOpeningMeta) return null;
+
+  let packed = cleanPhone;
+  if (cleanFamily) {
+    packed += `${FAMILY_META_PREFIX}${cleanFamily}${FAMILY_META_SUFFIX}`;
+  }
+  if (hasOpeningMeta) {
+    packed += `${OPENING_LEAVE_META_PREFIX}${JSON.stringify(
+      openingPayload
+    )}${OPENING_LEAVE_META_SUFFIX}`;
+  }
+  return packed;
 }
 
 export function unpackPhoneWithFamilyInfo(rawPhone?: string | null): {
   phone: string;
   familyInfo: string;
+  carriedOverLeave?: number;
+  openingUsedLeave?: number;
 } {
   if (!rawPhone) return { phone: '', familyInfo: '' };
-  const idx = rawPhone.indexOf(FAMILY_META_PREFIX);
-  if (idx === -1) {
-    return { phone: rawPhone.trim(), familyInfo: '' };
+
+  let working = rawPhone;
+  let carriedOverLeave: number | undefined;
+  let openingUsedLeave: number | undefined;
+
+  const openingMatch = working.match(
+    /\s*<!--LEAVE_OPENING:([\s\S]*?)-->/
+  );
+  if (openingMatch) {
+    try {
+      const parsed = JSON.parse(openingMatch[1]) as {
+        c?: unknown;
+        u?: unknown;
+      };
+      if (typeof parsed?.c === 'number' && Number.isFinite(parsed.c)) {
+        carriedOverLeave = parsed.c;
+      }
+      if (typeof parsed?.u === 'number' && Number.isFinite(parsed.u)) {
+        openingUsedLeave = parsed.u;
+      }
+    } catch {
+      // Ignore malformed metadata
+    }
+    working = working.replace(openingMatch[0], '');
   }
-  const phone = rawPhone.slice(0, idx).trim();
-  const familyInfo = rawPhone
+
+  const idx = working.indexOf(FAMILY_META_PREFIX);
+  if (idx === -1) {
+    return {
+      phone: working.trim(),
+      familyInfo: '',
+      ...(carriedOverLeave !== undefined ? { carriedOverLeave } : {}),
+      ...(openingUsedLeave !== undefined ? { openingUsedLeave } : {}),
+    };
+  }
+  const phone = working.slice(0, idx).trim();
+  const familyInfo = working
     .slice(
       idx + FAMILY_META_PREFIX.length,
-      rawPhone.endsWith(FAMILY_META_SUFFIX)
-        ? rawPhone.length - FAMILY_META_SUFFIX.length
+      working.endsWith(FAMILY_META_SUFFIX)
+        ? working.length - FAMILY_META_SUFFIX.length
         : undefined
     )
     .trim();
-  return { phone, familyInfo };
+  return {
+    phone,
+    familyInfo,
+    ...(carriedOverLeave !== undefined ? { carriedOverLeave } : {}),
+    ...(openingUsedLeave !== undefined ? { openingUsedLeave } : {}),
+  };
 }
 
 /**
@@ -420,7 +493,21 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
       ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
       : fullName.slice(0, 2).toUpperCase();
 
-  const { phone, familyInfo } = unpackPhoneWithFamilyInfo(row.phone);
+  const {
+    phone,
+    familyInfo,
+    carriedOverLeave: unpackedCarriedOver,
+    openingUsedLeave: unpackedOpeningUsed,
+  } = unpackPhoneWithFamilyInfo(row.phone);
+
+  const carriedOverLeave =
+    row.carried_over_leave !== null && row.carried_over_leave !== undefined
+      ? Number(row.carried_over_leave)
+      : unpackedCarriedOver;
+  const openingUsedLeave =
+    row.opening_used_leave !== null && row.opening_used_leave !== undefined
+      ? Number(row.opening_used_leave)
+      : unpackedOpeningUsed;
 
   return {
     id: String(row.id),
@@ -442,6 +529,8 @@ export function mapSupabaseRowToEmployee(row: SupabaseEmployeeRow): Employee {
       row.annual_leave_quota !== null && row.annual_leave_quota !== undefined
         ? Number(row.annual_leave_quota)
         : 12,
+    ...(carriedOverLeave !== undefined ? { carriedOverLeave } : {}),
+    ...(openingUsedLeave !== undefined ? { openingUsedLeave } : {}),
     status: (row.status as WorkStatus) || 'Đang làm việc',
     avatarUrl:
       row.avatar_url || createAvatarSvgDataUri(initials, '#0F232E', '#0D9488'),
@@ -1493,7 +1582,10 @@ export async function restoreFromBackupInSupabase(
         gender: emp.gender || null,
         cccd: emp.cccd || null,
         cccd_date: emp.cccdDate || null,
-        phone: packPhoneWithFamilyInfo(emp.phone, emp.familyInfo),
+        phone: packPhoneWithFamilyInfo(emp.phone, emp.familyInfo, {
+          carriedOverLeave: emp.carriedOverLeave,
+          openingUsedLeave: emp.openingUsedLeave,
+        }),
         address: emp.address || null,
         department: emp.department || null,
         position: emp.position || null,
@@ -1614,7 +1706,10 @@ export async function createEmployeeInSupabase(
     gender: empData.gender || null,
     cccd: empData.cccd || null,
     cccd_date: empData.cccdDate || null,
-    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo),
+    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo, {
+      carriedOverLeave: empData.carriedOverLeave,
+      openingUsedLeave: empData.openingUsedLeave,
+    }),
     address: empData.address || null,
     department: empData.department || null,
     position: empData.position || null,
@@ -1654,7 +1749,10 @@ export async function bulkCreateEmployeesInSupabase(
     gender: empData.gender || null,
     cccd: empData.cccd || null,
     cccd_date: empData.cccdDate || null,
-    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo),
+    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo, {
+      carriedOverLeave: empData.carriedOverLeave,
+      openingUsedLeave: empData.openingUsedLeave,
+    }),
     address: empData.address || null,
     department: empData.department || null,
     position: empData.position || null,
@@ -1691,7 +1789,10 @@ export async function updateEmployeeInSupabase(
     gender: empData.gender || null,
     cccd: empData.cccd || null,
     cccd_date: empData.cccdDate || null,
-    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo),
+    phone: packPhoneWithFamilyInfo(empData.phone, empData.familyInfo, {
+      carriedOverLeave: empData.carriedOverLeave,
+      openingUsedLeave: empData.openingUsedLeave,
+    }),
     address: empData.address || null,
     department: empData.department || null,
     position: empData.position || null,
