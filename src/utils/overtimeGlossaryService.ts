@@ -4,6 +4,7 @@ export interface OvertimeGlossaryEntry {
   id: string;
   reasonVi: string;
   reasonKr: string;
+  target_groups?: string[];
   created_at?: string;
   updatedAt: string;
   deletedAt?: string | null;
@@ -15,6 +16,7 @@ export interface SupabaseGlossaryRow {
   id: string;
   reason_vi: string;
   reason_kr: string;
+  target_groups?: string[] | string | null;
   updated_at?: string | null;
   created_at?: string | null;
   deleted_at?: string | null;
@@ -28,6 +30,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-1',
     reasonVi: 'Trực sản xuất',
     reasonKr: '생산 당직',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -38,6 +41,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-2',
     reasonVi: 'Hỗ trợ sản xuất gấp',
     reasonKr: '긴급 생산 지원',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -48,6 +52,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-3',
     reasonVi: 'Bảo trì, sửa chữa thiết bị',
     reasonKr: '설비 점검 및 수리',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -58,6 +63,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-4',
     reasonVi: 'Kiểm tra chất lượng hàng',
     reasonKr: '품질 검사',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -68,6 +74,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-5',
     reasonVi: 'Sửa máy',
     reasonKr: '설비 수리',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -78,6 +85,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-6',
     reasonVi: 'Đổi model',
     reasonKr: '모델 교체',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -88,6 +96,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-7',
     reasonVi: 'Đóng gói hàng gấp',
     reasonKr: '긴급 포장 작업',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -98,6 +107,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-8',
     reasonVi: 'Vệ sinh nhà xưởng',
     reasonKr: '공장 청소',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -108,6 +118,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-9',
     reasonVi: 'Họp sản xuất',
     reasonKr: '생산 회의',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -118,6 +129,7 @@ export const DEFAULT_OVERTIME_GLOSSARY: OvertimeGlossaryEntry[] = [
     id: 'default-glossary-10',
     reasonVi: 'Kiểm kê kho',
     reasonKr: '재고 실사',
+    target_groups: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     deletedAt: null,
@@ -179,6 +191,64 @@ export function findExactGlossaryMatch(
   return null;
 }
 
+export function normalizeTargetGroups(
+  raw?: string[] | string | null
+): string[] {
+  let sourceList: unknown[] = [];
+
+  if (Array.isArray(raw)) {
+    sourceList = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return [];
+    }
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        sourceList = parsed;
+      } else if (typeof parsed === 'string') {
+        sourceList = [parsed];
+      } else {
+        return [];
+      }
+    } catch {
+      sourceList = [trimmed];
+    }
+  } else {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const item of sourceList) {
+    const clean = typeof item === 'string' ? item.trim().replace(/\s+/g, ' ') : '';
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(clean);
+  }
+  return normalized;
+}
+
+export function serializeTargetGroupsForSupabase(
+  raw?: string[] | string | null
+): string | null {
+  const normalized = normalizeTargetGroups(raw);
+  return normalized.length > 0 ? JSON.stringify(normalized) : null;
+}
+
+export function areTargetGroupsEqual(
+  a?: string[] | string | null,
+  b?: string[] | string | null
+): boolean {
+  const normA = normalizeTargetGroups(a).map((g) => g.toLowerCase()).sort();
+  const normB = normalizeTargetGroups(b).map((g) => g.toLowerCase()).sort();
+  if (normA.length !== normB.length) return false;
+  return normA.every((val, idx) => val === normB[idx]);
+}
+
 export function isGlossaryEntryVerified(
   entry: Pick<OvertimeGlossaryEntry, 'is_verified' | 'isVerified'>
 ): boolean {
@@ -186,6 +256,59 @@ export function isGlossaryEntryVerified(
     return false;
   }
   return true;
+}
+
+/**
+ * Pure helper for CreateOvertimeForm Combobox:
+ * - Only returns verified (`is_verified !== false`) and non-deleted entries.
+ * - Filters by `selectedGroupFilter` (or `selectedEmployeeDepartments` when filter is 'ALL').
+ * - When specific department(s) are active: prioritizes department-specific entries at the top,
+ *   followed by shared entries (`target_groups` empty), and hides entries exclusive to other departments.
+ * - When no specific department is active ('ALL' with no selected employee departments): shows all verified entries.
+ */
+export function filterAndSortGlossaryForCombobox(params: {
+  entries: OvertimeGlossaryEntry[];
+  selectedGroupFilter?: string;
+  selectedEmployeeDepartments?: string[];
+  searchText?: string;
+}): OvertimeGlossaryEntry[] {
+  const q = (params.searchText || '').trim().toLowerCase();
+  const verifiedEntries = params.entries.filter((entry) => {
+    if (entry.deletedAt) return false;
+    if (!isGlossaryEntryVerified(entry)) return false;
+    if (!q) return true;
+    return entry.reasonVi.toLowerCase().includes(q);
+  });
+
+  const filterGroup = (params.selectedGroupFilter || '').trim();
+  const activeDepartments =
+    filterGroup && filterGroup !== 'ALL'
+      ? [filterGroup]
+      : normalizeTargetGroups(params.selectedEmployeeDepartments);
+
+  if (activeDepartments.length === 0) {
+    return verifiedEntries;
+  }
+
+  const activeKeys = new Set(activeDepartments.map((d) => normalizeGlossaryKey(d)));
+  const departmentSpecific: OvertimeGlossaryEntry[] = [];
+  const shared: OvertimeGlossaryEntry[] = [];
+
+  for (const entry of verifiedEntries) {
+    const groups = normalizeTargetGroups(entry.target_groups);
+    if (groups.length === 0) {
+      shared.push(entry);
+      continue;
+    }
+    const matchesActive = groups.some((g) =>
+      activeKeys.has(normalizeGlossaryKey(g))
+    );
+    if (matchesActive) {
+      departmentSpecific.push(entry);
+    }
+  }
+
+  return [...departmentSpecific, ...shared];
 }
 
 export function formatGlossaryDateDDMMYYYY(
@@ -222,6 +345,7 @@ export function mapSupabaseGlossaryRowToEntry(
     id: row.id,
     reasonVi: (row.reason_vi || '').trim(),
     reasonKr: (row.reason_kr || '').trim(),
+    target_groups: normalizeTargetGroups(row.target_groups),
     created_at: row.created_at || row.updated_at || undefined,
     updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
     deletedAt: row.deleted_at ?? null,
@@ -239,7 +363,8 @@ export function upsertGlossaryEntryInList(
   entries: OvertimeGlossaryEntry[],
   reasonVi: string,
   reasonKr: string,
-  nowIso: string = new Date().toISOString()
+  nowIso: string = new Date().toISOString(),
+  options?: { isVerified?: boolean; targetGroups?: string[] }
 ): {
   entries: OvertimeGlossaryEntry[];
   savedEntry: OvertimeGlossaryEntry;
@@ -264,6 +389,7 @@ export function upsertGlossaryEntryInList(
       ...existing,
       reasonVi: cleanVi,
       reasonKr: cleanKr,
+      target_groups: normalizeTargetGroups(existing.target_groups),
       created_at: existing.created_at || existing.updatedAt || nowIso,
       updatedAt: nowIso,
       deletedAt: null,
@@ -277,6 +403,7 @@ export function upsertGlossaryEntryInList(
     return { entries: nextEntries, savedEntry: updated, isUpdate: true };
   }
 
+  const defaultVerified = options?.isVerified === true;
   const created: OvertimeGlossaryEntry = {
     id:
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -284,11 +411,12 @@ export function upsertGlossaryEntryInList(
         : `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     reasonVi: cleanVi,
     reasonKr: cleanKr,
+    target_groups: normalizeTargetGroups(options?.targetGroups),
     created_at: nowIso,
     updatedAt: nowIso,
     deletedAt: null,
-    is_verified: false,
-    isVerified: false,
+    is_verified: defaultVerified,
+    isVerified: defaultVerified,
   };
 
   return {
@@ -306,7 +434,8 @@ export function createManualGlossaryEntryInList(
   entries: OvertimeGlossaryEntry[],
   reasonVi: string,
   reasonKr: string,
-  nowIso: string = new Date().toISOString()
+  nowIso: string = new Date().toISOString(),
+  targetGroups?: string[]
 ): {
   entries: OvertimeGlossaryEntry[];
   createdEntry: OvertimeGlossaryEntry;
@@ -334,6 +463,7 @@ export function createManualGlossaryEntryInList(
         : `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     reasonVi: cleanVi,
     reasonKr: cleanKr,
+    target_groups: normalizeTargetGroups(targetGroups),
     created_at: nowIso,
     updatedAt: nowIso,
     deletedAt: null,
@@ -348,14 +478,15 @@ export function createManualGlossaryEntryInList(
 }
 
 /**
- * Pure helper: updates both Vietnamese reason and Korean translation of an entry by id in memory.
+ * Pure helper: updates Vietnamese reason, Korean translation, and optionally target_groups of an entry by id in memory.
  */
 export function updateGlossaryEntryInList(
   entries: OvertimeGlossaryEntry[],
   id: string,
   newReasonVi: string,
   newReasonKr: string,
-  nowIso: string = new Date().toISOString()
+  nowIso: string = new Date().toISOString(),
+  newTargetGroups?: string[]
 ): {
   entries: OvertimeGlossaryEntry[];
   updatedEntry: OvertimeGlossaryEntry | null;
@@ -370,6 +501,10 @@ export function updateGlossaryEntryInList(
     ...target,
     reasonVi: cleanVi,
     reasonKr: cleanKr,
+    target_groups:
+      newTargetGroups !== undefined
+        ? normalizeTargetGroups(newTargetGroups)
+        : normalizeTargetGroups(target.target_groups),
     updatedAt: nowIso,
   };
   return {
@@ -503,6 +638,7 @@ function normalizeLocalGlossaryEntry(
 
   return {
     ...entry,
+    target_groups: normalizeTargetGroups(entry.target_groups),
     created_at: entry.created_at || entry.updatedAt,
     is_verified: resolvedFlag,
     isVerified: resolvedFlag !== false,
@@ -617,7 +753,7 @@ export async function loadOvertimeGlossary(): Promise<OvertimeGlossaryEntry[]> {
 export async function upsertOvertimeGlossaryEntry(
   reasonVi: string,
   reasonKr: string,
-  options?: { isVerified?: boolean }
+  options?: { isVerified?: boolean; targetGroups?: string[] }
 ): Promise<{
   entries: OvertimeGlossaryEntry[];
   savedEntry: OvertimeGlossaryEntry | null;
@@ -634,12 +770,18 @@ export async function upsertOvertimeGlossaryEntry(
   }
 
   const defaultVerifiedOnInsert = options?.isVerified === true;
+  const targetGroupsOnInsert = normalizeTargetGroups(options?.targetGroups);
   const current = readLocalOvertimeGlossary();
-  const result = upsertGlossaryEntryInList(current, cleanVi, cleanKr);
-  if (!result.isUpdate && defaultVerifiedOnInsert) {
-    result.savedEntry.is_verified = true;
-    result.savedEntry.isVerified = true;
-  }
+  const result = upsertGlossaryEntryInList(
+    current,
+    cleanVi,
+    cleanKr,
+    new Date().toISOString(),
+    {
+      isVerified: defaultVerifiedOnInsert,
+      targetGroups: targetGroupsOnInsert,
+    }
+  );
   writeLocalOvertimeGlossary(result.entries);
 
   if (remoteGlossaryAvailable === true) {
@@ -659,6 +801,18 @@ export async function upsertOvertimeGlossaryEntry(
 
       if (existingRemote?.id) {
         resolvedIsUpdate = !existingRemote.deleted_at;
+        const patchBody: Record<string, unknown> = {
+          reason_vi: result.savedEntry.reasonVi,
+          reason_kr: result.savedEntry.reasonKr,
+          updated_at: result.savedEntry.updatedAt,
+          deleted_at: null,
+        };
+        if (existingRemote.deleted_at && targetGroupsOnInsert.length > 0) {
+          patchBody.target_groups = serializeTargetGroupsForSupabase(
+            targetGroupsOnInsert
+          );
+          patchBody.is_verified = defaultVerifiedOnInsert;
+        }
         const patchedRows = await overtimeSupabase.request<SupabaseGlossaryRow[]>(
           `overtime_glossary?id=eq.${encodeURIComponent(
             existingRemote.id
@@ -668,12 +822,7 @@ export async function upsertOvertimeGlossaryEntry(
             headers: {
               Prefer: 'return=representation',
             },
-            body: JSON.stringify({
-              reason_vi: result.savedEntry.reasonVi,
-              reason_kr: result.savedEntry.reasonKr,
-              updated_at: result.savedEntry.updatedAt,
-              deleted_at: null,
-            }),
+            body: JSON.stringify(patchBody),
           }
         );
         persisted = Array.isArray(patchedRows) ? patchedRows[0] : existingRemote;
@@ -689,6 +838,9 @@ export async function upsertOvertimeGlossaryEntry(
               reason_vi: result.savedEntry.reasonVi,
               reason_vi_normalized: normalizedVi,
               reason_kr: result.savedEntry.reasonKr,
+              target_groups: serializeTargetGroupsForSupabase(
+                targetGroupsOnInsert
+              ),
               updated_at: result.savedEntry.updatedAt,
               deleted_at: null,
               is_verified: defaultVerifiedOnInsert,
@@ -706,6 +858,9 @@ export async function upsertOvertimeGlossaryEntry(
         const syncedEntry: OvertimeGlossaryEntry = {
           ...result.savedEntry,
           id: persisted.id,
+          target_groups: normalizeTargetGroups(
+            persisted.target_groups ?? result.savedEntry.target_groups
+          ),
           created_at:
             persisted.created_at ||
             result.savedEntry.created_at ||
@@ -804,6 +959,7 @@ async function syncGlossaryPatchToSupabase(
           reason_vi: entry.reasonVi,
           reason_vi_normalized: newNormalizedVi,
           reason_kr: entry.reasonKr,
+          target_groups: serializeTargetGroupsForSupabase(entry.target_groups),
           updated_at: entry.updatedAt,
           deleted_at: null,
           is_verified: entry.is_verified !== false,
@@ -820,13 +976,14 @@ async function syncGlossaryPatchToSupabase(
 }
 
 /**
- * Updates both Vietnamese reason (`reason_vi`) and Korean translation (`reason_kr`)
+ * Updates Vietnamese reason (`reason_vi`), Korean translation (`reason_kr`), and optionally `target_groups`
  * of an existing glossary entry in localStorage and Supabase `overtime_glossary`.
  */
 export async function updateGlossaryEntry(
   id: string,
   newReasonVi: string,
-  newReasonKr: string
+  newReasonKr: string,
+  newTargetGroups?: string[]
 ): Promise<{
   entries: OvertimeGlossaryEntry[];
   updatedEntry: OvertimeGlossaryEntry | null;
@@ -862,7 +1019,8 @@ export async function updateGlossaryEntry(
     id,
     cleanVi,
     cleanKr,
-    nowIso
+    nowIso,
+    newTargetGroups
   );
   if (!result.updatedEntry) {
     return result;
@@ -876,6 +1034,9 @@ export async function updateGlossaryEntry(
       reason_vi: result.updatedEntry.reasonVi,
       reason_vi_normalized: newNormalizedVi,
       reason_kr: result.updatedEntry.reasonKr,
+      target_groups: serializeTargetGroupsForSupabase(
+        result.updatedEntry.target_groups
+      ),
       updated_at: nowIso,
     },
     previousEntry.reasonVi
@@ -968,18 +1129,21 @@ export async function approveGlossaryEntry(id: string): Promise<{
  */
 export async function createManualGlossaryEntry(
   reasonVi: string,
-  reasonKr: string
+  reasonKr: string,
+  targetGroups?: string[]
 ): Promise<{
   entries: OvertimeGlossaryEntry[];
   createdEntry: OvertimeGlossaryEntry;
 }> {
   const nowIso = new Date().toISOString();
+  const normalizedGroups = normalizeTargetGroups(targetGroups);
   const current = readLocalOvertimeGlossary();
   const result = createManualGlossaryEntryInList(
     current,
     reasonVi,
     reasonKr,
-    nowIso
+    nowIso,
+    normalizedGroups
   );
   writeLocalOvertimeGlossary(result.entries);
 
@@ -1010,6 +1174,7 @@ export async function createManualGlossaryEntry(
             body: JSON.stringify({
               reason_vi: result.createdEntry.reasonVi,
               reason_kr: result.createdEntry.reasonKr,
+              target_groups: serializeTargetGroupsForSupabase(normalizedGroups),
               updated_at: nowIso,
               deleted_at: null,
               is_verified: true,
@@ -1031,6 +1196,7 @@ export async function createManualGlossaryEntry(
               reason_vi: result.createdEntry.reasonVi,
               reason_vi_normalized: normalizedVi,
               reason_kr: result.createdEntry.reasonKr,
+              target_groups: serializeTargetGroupsForSupabase(normalizedGroups),
               updated_at: nowIso,
               deleted_at: null,
               is_verified: true,

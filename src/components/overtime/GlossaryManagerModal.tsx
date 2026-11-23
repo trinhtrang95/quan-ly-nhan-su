@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   Check,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Languages,
   Loader2,
@@ -12,13 +13,17 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { DepartmentGroup } from '../../types/hr';
 import { formatNumberVN, getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   approveGlossaryEntry,
+  areTargetGroupsEqual,
   createManualGlossaryEntry,
   deleteGlossaryEntry,
   formatGlossaryDateDDMMYYYY,
   loadOvertimeGlossary,
+  normalizeGlossaryKey,
+  normalizeTargetGroups,
   OvertimeGlossaryEntry,
   readLocalOvertimeGlossary,
   suggestFactoryKoreanTranslation,
@@ -27,14 +32,23 @@ import {
 
 export interface GlossaryManagerModalProps {
   isActive?: boolean;
+  groups?: DepartmentGroup[];
   onShowToast?: (message: string) => void;
   onGlossaryUpdated?: () => void;
 }
 
 type GlossaryStatusFilter = 'all' | 'pending' | 'verified';
 
+interface RowPopoverState {
+  entryId: string;
+  top: number;
+  left: number;
+  openUpward: boolean;
+}
+
 export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   isActive = true,
+  groups = [],
   onShowToast,
   onGlossaryUpdated,
 }) => {
@@ -44,15 +58,59 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<GlossaryStatusFilter>('all');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
+
   const [draftViById, setDraftViById] = useState<Record<string, string>>({});
   const [draftKrById, setDraftKrById] = useState<Record<string, string>>({});
+  const [draftGroupsById, setDraftGroupsById] = useState<Record<string, string[]>>({});
+
   const [savingId, setSavingId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const [newReasonVi, setNewReasonVi] = useState<string>('');
   const [newReasonKr, setNewReasonKr] = useState<string>('');
+  const [newTargetGroups, setNewTargetGroups] = useState<string[]>([]);
+  const [isNewGroupPopoverOpen, setIsNewGroupPopoverOpen] = useState<boolean>(false);
   const [isAddingManual, setIsAddingManual] = useState<boolean>(false);
   const [isTranslatingNew, setIsTranslatingNew] = useState<boolean>(false);
+
+  const [rowPopover, setRowPopover] = useState<RowPopoverState | null>(null);
+
+  const newGroupPopoverRef = useRef<HTMLDivElement | null>(null);
+  const rowPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  const groupOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ name: string; color: string }> = [];
+    for (const g of groups) {
+      const cleanName = (g.name || '').trim();
+      if (!cleanName) continue;
+      const key = cleanName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      list.push({
+        name: cleanName,
+        color: g.color || '#64748b',
+      });
+    }
+    return list;
+  }, [groups]);
+
+  const groupColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const opt of groupOptions) {
+      map.set(opt.name.toLowerCase(), opt.color);
+    }
+    return map;
+  }, [groupOptions]);
+
+  const getGroupColor = useCallback(
+    (groupName: string): string => {
+      return groupColorMap.get((groupName || '').trim().toLowerCase()) || '#64748b';
+    },
+    [groupColorMap]
+  );
 
   const syncDraftsFromEntries = useCallback((list: OvertimeGlossaryEntry[]) => {
     setDraftViById((prev) => {
@@ -69,6 +127,16 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
       }
       return next;
     });
+    setDraftGroupsById((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const item of list) {
+        next[item.id] =
+          prev[item.id] !== undefined
+            ? prev[item.id]
+            : normalizeTargetGroups(item.target_groups);
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -79,12 +147,15 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
 
     const initialViDrafts: Record<string, string> = {};
     const initialKrDrafts: Record<string, string> = {};
+    const initialGroupDrafts: Record<string, string[]> = {};
     for (const item of localInitial) {
       initialViDrafts[item.id] = item.reasonVi;
       initialKrDrafts[item.id] = item.reasonKr;
+      initialGroupDrafts[item.id] = normalizeTargetGroups(item.target_groups);
     }
     setDraftViById(initialViDrafts);
     setDraftKrById(initialKrDrafts);
+    setDraftGroupsById(initialGroupDrafts);
     setIsLoading(true);
 
     void loadOvertimeGlossary()
@@ -93,12 +164,15 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         setEntries(loaded);
         const refreshedViDrafts: Record<string, string> = {};
         const refreshedKrDrafts: Record<string, string> = {};
+        const refreshedGroupDrafts: Record<string, string[]> = {};
         for (const item of loaded) {
           refreshedViDrafts[item.id] = item.reasonVi;
           refreshedKrDrafts[item.id] = item.reasonKr;
+          refreshedGroupDrafts[item.id] = normalizeTargetGroups(item.target_groups);
         }
         setDraftViById(refreshedViDrafts);
         setDraftKrById(refreshedKrDrafts);
+        setDraftGroupsById(refreshedGroupDrafts);
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -108,6 +182,50 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
       active = false;
     };
   }, [isActive]);
+
+  useEffect(() => {
+    if (!isNewGroupPopoverOpen) return;
+    const handleOutside = (event: MouseEvent) => {
+      if (
+        newGroupPopoverRef.current &&
+        !newGroupPopoverRef.current.contains(event.target as Node)
+      ) {
+        setIsNewGroupPopoverOpen(false);
+      }
+    };
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsNewGroupPopoverOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [isNewGroupPopoverOpen]);
+
+  useEffect(() => {
+    if (!rowPopover) return;
+    const handleOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (rowPopoverRef.current && rowPopoverRef.current.contains(target)) {
+        return;
+      }
+      if (target?.closest('[data-glossary-row-group-trigger="true"]')) {
+        return;
+      }
+      setRowPopover(null);
+    };
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setRowPopover(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [rowPopover]);
 
   const counts = useMemo(() => {
     const active = entries.filter((e) => !e.deletedAt);
@@ -122,18 +240,63 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
 
   const filteredEntries = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const deptFilterKey = normalizeGlossaryKey(departmentFilter);
+
     return entries.filter((entry) => {
       if (entry.deletedAt) return false;
       const isPending = entry.is_verified === false;
       if (statusFilter === 'pending' && !isPending) return false;
       if (statusFilter === 'verified' && isPending) return false;
+
+      if (departmentFilter === 'SHARED') {
+        if (normalizeTargetGroups(entry.target_groups).length > 0) return false;
+      } else if (departmentFilter !== 'ALL') {
+        const entryGroups = normalizeTargetGroups(entry.target_groups);
+        const matchesDept = entryGroups.some(
+          (g) => normalizeGlossaryKey(g) === deptFilterKey
+        );
+        if (!matchesDept) return false;
+      }
+
       if (!q) return true;
       return (
         entry.reasonVi.toLowerCase().includes(q) ||
         entry.reasonKr.toLowerCase().includes(q)
       );
     });
-  }, [entries, searchQuery, statusFilter]);
+  }, [entries, searchQuery, statusFilter, departmentFilter]);
+
+  const toggleGroupSelection = (current: string[], groupName: string): string[] => {
+    const targetKey = normalizeGlossaryKey(groupName);
+    const exists = current.some((g) => normalizeGlossaryKey(g) === targetKey);
+    if (exists) {
+      return current.filter((g) => normalizeGlossaryKey(g) !== targetKey);
+    }
+    return normalizeTargetGroups([...current, groupName]);
+  };
+
+  const handleOpenRowGroupPopover = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    entryId: string
+  ) => {
+    if (rowPopover?.entryId === entryId) {
+      setRowPopover(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const popoverWidth = 248;
+    const estimatedHeight = Math.min(280, 72 + Math.max(1, groupOptions.length) * 32);
+    const openUpward =
+      window.innerHeight - rect.bottom < estimatedHeight + 16 &&
+      rect.top > estimatedHeight + 16;
+
+    setRowPopover({
+      entryId,
+      top: openUpward ? rect.top - 4 : rect.bottom + 4,
+      left: Math.min(rect.left, Math.max(12, window.innerWidth - popoverWidth - 12)),
+      openUpward,
+    });
+  };
 
   const handleSaveEntry = async (
     entry: OvertimeGlossaryEntry,
@@ -141,21 +304,25 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   ) => {
     const draftVi = (draftViById[entry.id] ?? entry.reasonVi).trim();
     const draftKr = (draftKrById[entry.id] ?? entry.reasonKr).trim();
+    const draftGroups =
+      draftGroupsById[entry.id] ?? normalizeTargetGroups(entry.target_groups);
+
     if (!draftVi || !draftKr) {
       onShowToast?.('Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn) không được để trống.');
       return;
     }
-    if (
-      !forceSave &&
-      draftVi === entry.reasonVi.trim() &&
-      draftKr === entry.reasonKr.trim()
-    ) {
+
+    const isTextUnchanged =
+      draftVi === entry.reasonVi.trim() && draftKr === entry.reasonKr.trim();
+    const isGroupsUnchanged = areTargetGroupsEqual(draftGroups, entry.target_groups);
+
+    if (!forceSave && isTextUnchanged && isGroupsUnchanged) {
       return;
     }
 
     setSavingId(entry.id);
     try {
-      const res = await updateGlossaryEntry(entry.id, draftVi, draftKr);
+      const res = await updateGlossaryEntry(entry.id, draftVi, draftKr, draftGroups);
       setEntries(res.entries);
       if (res.updatedEntry) {
         const updated = res.updatedEntry;
@@ -171,9 +338,16 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           next[updated.id] = updated.reasonKr;
           return next;
         });
+        setDraftGroupsById((prev) => {
+          const next = { ...prev };
+          delete next[entry.id];
+          next[updated.id] = normalizeTargetGroups(updated.target_groups);
+          return next;
+        });
       } else {
         syncDraftsFromEntries(res.entries);
       }
+      setRowPopover((prev) => (prev?.entryId === entry.id ? null : prev));
       onGlossaryUpdated?.();
       onShowToast?.(`Đã cập nhật từ vựng "${draftVi}".`);
     } catch (err) {
@@ -187,6 +361,9 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     if (entry.is_verified !== false) return;
     const draftVi = (draftViById[entry.id] ?? entry.reasonVi).trim();
     const draftKr = (draftKrById[entry.id] ?? entry.reasonKr).trim();
+    const draftGroups =
+      draftGroupsById[entry.id] ?? normalizeTargetGroups(entry.target_groups);
+
     if (!draftVi || !draftKr) {
       onShowToast?.('Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn) không được để trống.');
       return;
@@ -194,7 +371,12 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
 
     setApprovingId(entry.id);
     try {
-      const editRes = await updateGlossaryEntry(entry.id, draftVi, draftKr);
+      const editRes = await updateGlossaryEntry(
+        entry.id,
+        draftVi,
+        draftKr,
+        draftGroups
+      );
       const targetId = editRes.updatedEntry?.id || entry.id;
 
       const res = await approveGlossaryEntry(targetId);
@@ -213,7 +395,14 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           next[updated.id] = updated.reasonKr;
           return next;
         });
+        setDraftGroupsById((prev) => {
+          const next = { ...prev };
+          delete next[entry.id];
+          next[updated.id] = normalizeTargetGroups(updated.target_groups);
+          return next;
+        });
       }
+      setRowPopover((prev) => (prev?.entryId === entry.id ? null : prev));
       onGlossaryUpdated?.();
       onShowToast?.(`Đã duyệt thuật ngữ "${draftVi}".`);
     } catch (err) {
@@ -246,6 +435,12 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         delete next[entry.id];
         return next;
       });
+      setDraftGroupsById((prev) => {
+        const next = { ...prev };
+        delete next[entry.id];
+        return next;
+      });
+      setRowPopover((prev) => (prev?.entryId === entry.id ? null : prev));
       onGlossaryUpdated?.();
       onShowToast?.(`Đã xóa từ vựng "${entry.reasonVi}" khỏi từ điển.`);
     } catch (err) {
@@ -290,7 +485,11 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
 
     setIsAddingManual(true);
     try {
-      const res = await createManualGlossaryEntry(cleanVi, cleanKr);
+      const res = await createManualGlossaryEntry(
+        cleanVi,
+        cleanKr,
+        newTargetGroups
+      );
       setEntries(res.entries);
       setDraftViById((prev) => ({
         ...prev,
@@ -300,10 +499,33 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         ...prev,
         [res.createdEntry.id]: res.createdEntry.reasonKr,
       }));
+      setDraftGroupsById((prev) => ({
+        ...prev,
+        [res.createdEntry.id]: normalizeTargetGroups(
+          res.createdEntry.target_groups
+        ),
+      }));
       setNewReasonVi('');
       setNewReasonKr('');
+      setNewTargetGroups([]);
+      setIsNewGroupPopoverOpen(false);
       if (statusFilter === 'pending') {
         setStatusFilter('all');
+      }
+      const createdGroups = normalizeTargetGroups(res.createdEntry.target_groups);
+      if (
+        departmentFilter === 'SHARED' &&
+        createdGroups.length > 0
+      ) {
+        setDepartmentFilter('ALL');
+      } else if (
+        departmentFilter !== 'ALL' &&
+        departmentFilter !== 'SHARED' &&
+        !createdGroups.some(
+          (g) => normalizeGlossaryKey(g) === normalizeGlossaryKey(departmentFilter)
+        )
+      ) {
+        setDepartmentFilter('ALL');
       }
       if (
         searchQuery.trim() &&
@@ -326,6 +548,29 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
       setIsAddingManual(false);
     }
   };
+
+  const activeRowPopoverEntry = useMemo(
+    () =>
+      rowPopover
+        ? entries.find((item) => item.id === rowPopover.entryId) || null
+        : null,
+    [rowPopover, entries]
+  );
+
+  const activeRowPopoverDraftGroups = useMemo(() => {
+    if (!activeRowPopoverEntry) return [];
+    return (
+      draftGroupsById[activeRowPopoverEntry.id] ??
+      normalizeTargetGroups(activeRowPopoverEntry.target_groups)
+    );
+  }, [activeRowPopoverEntry, draftGroupsById]);
+
+  const activeRowPopoverExtraGroups = useMemo(() => {
+    const known = new Set(groupOptions.map((g) => g.name.toLowerCase()));
+    return activeRowPopoverDraftGroups.filter(
+      (name) => !known.has(name.toLowerCase())
+    );
+  }, [groupOptions, activeRowPopoverDraftGroups]);
 
   return (
     <div className="w-full h-full flex-1 min-h-0 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
@@ -354,13 +599,14 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         </div>
 
         <span className="hidden md:block text-[11px] text-slate-500 shrink-0">
-          Sửa trực tiếp trên dòng, nhấn Enter hoặc nút Duyệt / Cập nhật để lưu.
+          Sửa trực tiếp trên dòng, chọn nhóm áp dụng và nhấn Duyệt / Cập nhật để lưu.
         </span>
       </div>
 
-        {/* Filter & Search Toolbar */}
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
-          <div className="relative flex-1 min-w-[220px] max-w-md">
+      {/* Filter & Search Toolbar */}
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -382,330 +628,628 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
             )}
           </div>
 
-          <div className="inline-flex items-center gap-1 p-0.5 bg-slate-200/70 rounded-lg shrink-0">
-            <button
-              type="button"
-              onClick={() => setStatusFilter('pending')}
-              className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'pending'
-                  ? 'bg-[#14539E] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Chờ duyệt ({formatNumberVN(counts.pending)})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('verified')}
-              className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'verified'
-                  ? 'bg-[#14539E] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Đã duyệt ({formatNumberVN(counts.verified)})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'all'
-                  ? 'bg-[#14539E] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Tất cả ({formatNumberVN(counts.total)})
-            </button>
-          </div>
+          <select
+            value={departmentFilter}
+            onChange={(e) => setDepartmentFilter(e.target.value)}
+            aria-label="Lọc từ điển theo phòng ban"
+            className="h-8 px-2.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer max-w-[210px]"
+          >
+            <option value="ALL">Phòng ban: Tất cả</option>
+            <option value="SHARED">Dùng chung</option>
+            {groupOptions.map((grp) => (
+              <option key={grp.name} value={grp.name}>
+                {grp.name}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {/* Compact Quick-Add Manual Entry Bar */}
-        <div className="px-4 py-2 border-b border-slate-200 bg-white shrink-0">
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200">
+        <div className="inline-flex items-center gap-1 p-0.5 bg-slate-200/70 rounded-lg shrink-0">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('pending')}
+            className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'pending'
+                ? 'bg-[#14539E] text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Chờ duyệt ({formatNumberVN(counts.pending)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('verified')}
+            className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'verified'
+                ? 'bg-[#14539E] text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Đã duyệt ({formatNumberVN(counts.verified)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('all')}
+            className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'all'
+                ? 'bg-[#14539E] text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Tất cả ({formatNumberVN(counts.total)})
+          </button>
+        </div>
+      </div>
+
+      {/* Compact Quick-Add Manual Entry Bar */}
+      <div className="px-4 py-2 border-b border-slate-200 bg-white shrink-0">
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200">
+          <input
+            type="text"
+            value={newReasonVi}
+            disabled={isAddingManual}
+            onChange={(e) => setNewReasonVi(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !isAddingManual) {
+                e.preventDefault();
+                void handleAddManualEntry();
+              }
+            }}
+            placeholder="Thêm lý do Tiếng Việt mới..."
+            aria-label="Thêm lý do Tiếng Việt mới"
+            className="flex-1 min-w-[180px] h-8 px-2.5 text-xs text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+          />
+
+          <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
             <input
               type="text"
-              value={newReasonVi}
+              value={newReasonKr}
               disabled={isAddingManual}
-              onChange={(e) => setNewReasonVi(e.target.value)}
+              onChange={(e) => setNewReasonKr(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !isAddingManual) {
                   e.preventDefault();
                   void handleAddManualEntry();
                 }
               }}
-              placeholder="Thêm lý do Tiếng Việt mới..."
-              aria-label="Thêm lý do Tiếng Việt mới"
-              className="flex-1 min-w-[180px] h-8 px-2.5 text-xs text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+              placeholder="Bản dịch Tiếng Hàn..."
+              aria-label="Bản dịch Tiếng Hàn mới"
+              className="flex-1 min-w-0 h-8 px-2.5 text-xs text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
             />
+            <button
+              type="button"
+              disabled={isTranslatingNew || isAddingManual}
+              onClick={() => void handleSuggestNewKorean()}
+              title="Dịch gợi ý tiếng Hàn bằng AI"
+              aria-label="Dịch gợi ý tiếng Hàn"
+              className="h-8 w-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+            >
+              {isTranslatingNew ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
+              ) : (
+                <Languages className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
 
-            <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
-              <input
-                type="text"
-                value={newReasonKr}
-                disabled={isAddingManual}
-                onChange={(e) => setNewReasonKr(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isAddingManual) {
-                    e.preventDefault();
-                    void handleAddManualEntry();
-                  }
-                }}
-                placeholder="Bản dịch Tiếng Hàn..."
-                aria-label="Bản dịch Tiếng Hàn mới"
-                className="flex-1 min-w-0 h-8 px-2.5 text-xs text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
-              <button
-                type="button"
-                disabled={isTranslatingNew || isAddingManual}
-                onClick={() => void handleSuggestNewKorean()}
-                title="Dịch gợi ý tiếng Hàn bằng AI"
-                aria-label="Dịch gợi ý tiếng Hàn"
-                className="h-8 w-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
-              >
-                {isTranslatingNew ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
-                ) : (
-                  <Languages className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </div>
-
+          {/* Multi-select Target Department Popover Button */}
+          <div ref={newGroupPopoverRef} className="relative shrink-0">
             <button
               type="button"
               disabled={isAddingManual}
-              onClick={() => void handleAddManualEntry()}
-              className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+              onClick={() => setIsNewGroupPopoverOpen((prev) => !prev)}
+              aria-expanded={isNewGroupPopoverOpen}
+              aria-label="Chọn phòng ban áp dụng cho từ mới"
+              className={`h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-45 ${
+                newTargetGroups.length > 0
+                  ? 'bg-blue-50/70 border-[#14539E]/40 text-[#14539E]'
+                  : 'bg-white border-slate-300 text-slate-700 hover:border-[#14539E]'
+              }`}
             >
-              {isAddingManual ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              {newTargetGroups.length === 0 ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+                  <span>Dùng chung</span>
+                </>
+              ) : newTargetGroups.length === 1 ? (
+                <>
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: getGroupColor(newTargetGroups[0]) }}
+                  />
+                  <span className="max-w-[120px] truncate">{newTargetGroups[0]}</span>
+                </>
               ) : (
-                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <>
+                  <span className="inline-flex items-center -space-x-1">
+                    {newTargetGroups.slice(0, 3).map((grp) => (
+                      <span
+                        key={grp}
+                        className="w-2 h-2 rounded-full ring-1 ring-white"
+                        style={{ backgroundColor: getGroupColor(grp) }}
+                      />
+                    ))}
+                  </span>
+                  <span>{formatNumberVN(newTargetGroups.length)} nhóm</span>
+                </>
               )}
-              <span>Thêm</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
+                  isNewGroupPopoverOpen ? 'rotate-180 text-[#14539E]' : ''
+                }`}
+              />
             </button>
-          </div>
-        </div>
 
-        {/* High-Density Scrollable Table */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {isLoading && entries.length === 0 ? (
-            <div className="p-8 flex items-center justify-center gap-2 text-xs text-slate-500">
-              <Loader2 className="w-4 h-4 animate-spin text-[#14539E]" />
-              <span>Đang tải danh sách từ điển...</span>
-            </div>
-          ) : filteredEntries.length === 0 ? (
-            <div className="p-10 text-center space-y-2">
-              <p className="text-xs font-medium text-slate-600">
-                Không tìm thấy thuật ngữ nào phù hợp với bộ lọc hiện tại.
-              </p>
-              {(searchQuery || statusFilter !== 'all') && (
+            {isNewGroupPopoverOpen && (
+              <div className="absolute right-0 top-full mt-1.5 z-50 w-60 rounded-xl border border-slate-200 bg-white shadow-xl py-1.5">
+                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Phạm vi phòng ban
+                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setStatusFilter('all');
-                  }}
-                  className="text-xs font-semibold text-[#14539E] hover:underline cursor-pointer"
+                  onClick={() => setNewTargetGroups([])}
+                  className="w-full px-3 py-1.5 text-left text-xs hover:bg-slate-50 flex items-center justify-between gap-2 cursor-pointer"
                 >
-                  Xóa bộ lọc
+                  <span className="inline-flex items-center gap-2 text-slate-700 font-medium">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />
+                    <span>Dùng chung (Tất cả)</span>
+                  </span>
+                  {newTargetGroups.length === 0 && (
+                    <Check className="w-3.5 h-3.5 text-[#14539E] shrink-0" />
+                  )}
                 </button>
-              )}
-            </div>
-          ) : (
-            <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
-                <tr>
-                  <th className="px-2 py-2 w-11 text-center border-r border-slate-200/70">
-                    STT
-                  </th>
-                  <th className="px-2.5 py-2 w-[28%] border-r border-slate-200/70">
-                    Lý do (Tiếng Việt)
-                  </th>
-                  <th className="px-2.5 py-2 w-[32%] border-r border-slate-200/70">
-                    Bản dịch (Tiếng Hàn)
-                  </th>
-                  <th className="px-2 py-2 w-24 text-center border-r border-slate-200/70 whitespace-nowrap">
-                    Ngày thêm
-                  </th>
-                  <th className="px-2 py-2 w-20 text-center border-r border-slate-200/70 whitespace-nowrap">
-                    Trạng thái
-                  </th>
-                  <th className="px-2 py-2 w-24 text-center whitespace-nowrap">
-                    Hành động
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-xs">
-                {filteredEntries.map((entry, idx) => {
-                  const isVerified = entry.is_verified !== false;
-                  const draftViValue = draftViById[entry.id] ?? entry.reasonVi;
-                  const draftKrValue = draftKrById[entry.id] ?? entry.reasonKr;
-                  const isViDirty =
-                    draftViValue.trim() !== entry.reasonVi.trim();
-                  const isKrDirty =
-                    draftKrValue.trim() !== entry.reasonKr.trim();
-                  const isDirty = isViDirty || isKrDirty;
-                  const canSave =
-                    isDirty &&
-                    Boolean(draftViValue.trim()) &&
-                    Boolean(draftKrValue.trim());
-                  const isSaving = savingId === entry.id;
-                  const isApproving = approvingId === entry.id;
-                  const isDeleting = deletingId === entry.id;
-                  const isBusy = isSaving || isApproving || isDeleting;
-
-                  return (
-                    <tr
-                      key={entry.id}
-                      className="hover:bg-blue-50/35 transition-colors"
-                    >
-                      <td className="px-2.5 py-1 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
-                        {formatNumberVN(idx + 1)}
-                      </td>
-
-                      <td className="px-2 py-1 border-r border-slate-100">
-                        <input
-                          type="text"
-                          value={draftViValue}
-                          disabled={isDeleting}
-                          onChange={(e) =>
-                            setDraftViById((prev) => ({
-                              ...prev,
-                              [entry.id]: e.target.value,
-                            }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && canSave && !isBusy) {
-                              e.preventDefault();
-                              void handleSaveEntry(entry);
-                            }
-                          }}
-                          aria-label={`Lý do tiếng Việt cho ${entry.reasonVi}`}
-                          className={`w-full min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 font-medium focus:outline-none transition-colors ${
-                            isViDirty
-                              ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
-                              : 'border-slate-200 focus:border-[#14539E]'
-                          }`}
-                        />
-                      </td>
-
-                      <td className="px-2 py-1 border-r border-slate-100">
-                        <input
-                          type="text"
-                          value={draftKrValue}
-                          disabled={isDeleting}
-                          onChange={(e) =>
-                            setDraftKrById((prev) => ({
-                              ...prev,
-                              [entry.id]: e.target.value,
-                            }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && canSave && !isBusy) {
-                              e.preventDefault();
-                              void handleSaveEntry(entry);
-                            }
-                          }}
-                          aria-label={`Bản dịch tiếng Hàn cho ${entry.reasonVi}`}
-                          className={`w-full min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 focus:outline-none transition-colors ${
-                            isKrDirty
-                              ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
-                              : 'border-slate-200 focus:border-[#14539E]'
-                          }`}
-                        />
-                      </td>
-
-                      <td className="px-2 py-1 text-center font-mono text-[11px] text-slate-600 tabular-nums border-r border-slate-100 whitespace-nowrap">
-                        {formatGlossaryDateDDMMYYYY(
-                          entry.created_at || entry.updatedAt
-                        )}
-                      </td>
-
-                      <td className="px-2 py-1 text-center border-r border-slate-100 whitespace-nowrap">
-                        {isVerified ? (
-                          <span
-                            title="Đã duyệt"
-                            aria-label="Đã duyệt"
-                            className="inline-flex items-center justify-center"
-                          >
-                            <CheckCircle2 className="w-4 h-4 text-[#10b981]" />
-                          </span>
-                        ) : (
-                          <span
-                            title="Chờ duyệt (AI)"
-                            aria-label="Chờ duyệt (AI)"
-                            className="inline-flex items-center justify-center"
-                          >
-                            <Clock className="w-4 h-4 text-[#f59e0b]" />
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-2 py-1 text-center whitespace-nowrap">
-                        <div className="inline-flex items-center justify-center gap-1.5">
-                          {isVerified ? (
-                            <button
-                              type="button"
-                              disabled={
-                                isBusy ||
-                                !draftViValue.trim() ||
-                                !draftKrValue.trim()
+                <div className="my-1 border-t border-slate-100" />
+                <div className="max-h-52 overflow-y-auto">
+                  {groupOptions.length === 0 ? (
+                    <div className="px-3 py-2 text-[11px] text-slate-400">
+                      Chưa có danh sách phòng ban.
+                    </div>
+                  ) : (
+                    groupOptions.map((grp) => {
+                      const checked = newTargetGroups.some(
+                        (selected) =>
+                          normalizeGlossaryKey(selected) ===
+                          normalizeGlossaryKey(grp.name)
+                      );
+                      return (
+                        <label
+                          key={grp.name}
+                          className="w-full px-3 py-1.5 text-xs hover:bg-blue-50/50 flex items-center justify-between gap-2 cursor-pointer select-none"
+                        >
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setNewTargetGroups((prev) =>
+                                  toggleGroupSelection(prev, grp.name)
+                                )
                               }
-                              onClick={() => void handleSaveEntry(entry, true)}
-                              title="Cập nhật thay đổi"
-                              aria-label={`Cập nhật thuật ngữ ${entry.reasonVi}`}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors bg-[#14539E] hover:bg-[#0F3E77] text-white shadow-2xs cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
-                            >
-                              {isSaving ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Save className="w-3.5 h-3.5" />
-                              )}
-                            </button>
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] shrink-0"
+                            />
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: grp.color }}
+                            />
+                            <span className="text-slate-700 truncate">{grp.name}</span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            disabled={isAddingManual}
+            onClick={() => void handleAddManualEntry()}
+            className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+          >
+            {isAddingManual ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+            ) : (
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span>Thêm</span>
+          </button>
+        </div>
+      </div>
+
+      {/* High-Density Scrollable Table */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto"
+        onScroll={() => {
+          if (rowPopover) setRowPopover(null);
+        }}
+      >
+        {isLoading && entries.length === 0 ? (
+          <div className="p-8 flex items-center justify-center gap-2 text-xs text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin text-[#14539E]" />
+            <span>Đang tải danh sách từ điển...</span>
+          </div>
+        ) : filteredEntries.length === 0 ? (
+          <div className="p-10 text-center space-y-2">
+            <p className="text-xs font-medium text-slate-600">
+              Không tìm thấy thuật ngữ nào phù hợp với bộ lọc hiện tại.
+            </p>
+            {(searchQuery || statusFilter !== 'all' || departmentFilter !== 'ALL') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                  setDepartmentFilter('ALL');
+                }}
+                className="text-xs font-semibold text-[#14539E] hover:underline cursor-pointer"
+              >
+                Xóa bộ lọc
+              </button>
+            )}
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left">
+            <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+              <tr>
+                <th className="px-2 py-2 w-11 text-center border-r border-slate-200/70">
+                  STT
+                </th>
+                <th className="px-2.5 py-2 w-[23%] border-r border-slate-200/70">
+                  Lý do (Tiếng Việt)
+                </th>
+                <th className="px-2.5 py-2 w-[25%] border-r border-slate-200/70">
+                  Bản dịch (Tiếng Hàn)
+                </th>
+                <th className="px-2.5 py-2 w-[22%] border-r border-slate-200/70 whitespace-nowrap">
+                  Nhóm / Bộ phận
+                </th>
+                <th className="px-2 py-2 w-24 text-center border-r border-slate-200/70 whitespace-nowrap">
+                  Ngày thêm
+                </th>
+                <th className="px-2 py-2 w-20 text-center border-r border-slate-200/70 whitespace-nowrap">
+                  Trạng thái
+                </th>
+                <th className="px-2 py-2 w-24 text-center whitespace-nowrap">
+                  Hành động
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-xs">
+              {filteredEntries.map((entry, idx) => {
+                const isVerified = entry.is_verified !== false;
+                const draftViValue = draftViById[entry.id] ?? entry.reasonVi;
+                const draftKrValue = draftKrById[entry.id] ?? entry.reasonKr;
+                const draftGroups =
+                  draftGroupsById[entry.id] ??
+                  normalizeTargetGroups(entry.target_groups);
+
+                const isViDirty = draftViValue.trim() !== entry.reasonVi.trim();
+                const isKrDirty = draftKrValue.trim() !== entry.reasonKr.trim();
+                const isGroupsDirty = !areTargetGroupsEqual(
+                  draftGroups,
+                  entry.target_groups
+                );
+                const isDirty = isViDirty || isKrDirty || isGroupsDirty;
+                const canSave =
+                  isDirty &&
+                  Boolean(draftViValue.trim()) &&
+                  Boolean(draftKrValue.trim());
+
+                const isSaving = savingId === entry.id;
+                const isApproving = approvingId === entry.id;
+                const isDeleting = deletingId === entry.id;
+                const isBusy = isSaving || isApproving || isDeleting;
+                const isRowPopoverOpen = rowPopover?.entryId === entry.id;
+
+                return (
+                  <tr
+                    key={entry.id}
+                    className="hover:bg-blue-50/35 transition-colors"
+                  >
+                    <td className="px-2.5 py-1 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
+                      {formatNumberVN(idx + 1)}
+                    </td>
+
+                    <td className="px-2 py-1 border-r border-slate-100">
+                      <input
+                        type="text"
+                        value={draftViValue}
+                        disabled={isDeleting}
+                        onChange={(e) =>
+                          setDraftViById((prev) => ({
+                            ...prev,
+                            [entry.id]: e.target.value,
+                          }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && canSave && !isBusy) {
+                            e.preventDefault();
+                            void handleSaveEntry(entry);
+                          }
+                        }}
+                        aria-label={`Lý do tiếng Việt cho ${entry.reasonVi}`}
+                        className={`w-full min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 font-medium focus:outline-none transition-colors ${
+                          isViDirty
+                            ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
+                            : 'border-slate-200 focus:border-[#14539E]'
+                        }`}
+                      />
+                    </td>
+
+                    <td className="px-2 py-1 border-r border-slate-100">
+                      <input
+                        type="text"
+                        value={draftKrValue}
+                        disabled={isDeleting}
+                        onChange={(e) =>
+                          setDraftKrById((prev) => ({
+                            ...prev,
+                            [entry.id]: e.target.value,
+                          }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && canSave && !isBusy) {
+                            e.preventDefault();
+                            void handleSaveEntry(entry);
+                          }
+                        }}
+                        aria-label={`Bản dịch tiếng Hàn cho ${entry.reasonVi}`}
+                        className={`w-full min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 focus:outline-none transition-colors ${
+                          isKrDirty
+                            ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
+                            : 'border-slate-200 focus:border-[#14539E]'
+                        }`}
+                      />
+                    </td>
+
+                    <td className="px-2 py-1 border-r border-slate-100">
+                      <button
+                        type="button"
+                        data-glossary-row-group-trigger="true"
+                        disabled={isDeleting}
+                        onClick={(e) => handleOpenRowGroupPopover(e, entry.id)}
+                        title="Bấm để chọn phòng ban áp dụng"
+                        aria-expanded={isRowPopoverOpen}
+                        aria-label={`Chọn nhóm áp dụng cho ${entry.reasonVi}`}
+                        className={`w-full min-h-[28px] px-1.5 py-0.5 rounded border text-left flex items-center justify-between gap-1.5 transition-colors cursor-pointer disabled:opacity-45 ${
+                          isGroupsDirty || isRowPopoverOpen
+                            ? 'bg-blue-50/40 border-[#14539E] ring-1 ring-[#14539E]/20'
+                            : 'bg-white border-slate-200 hover:border-[#14539E]'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-1 min-w-0">
+                          {draftGroups.length === 0 ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-medium">
+                              Dùng chung
+                            </span>
                           ) : (
-                            <button
-                              type="button"
-                              disabled={
-                                isBusy ||
-                                !draftViValue.trim() ||
-                                !draftKrValue.trim()
-                              }
-                              onClick={() => void handleApprove(entry)}
-                              title="Duyệt bản dịch"
-                              aria-label={`Duyệt thuật ngữ ${entry.reasonVi}`}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
-                            >
-                              {isApproving ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Check className="w-3.5 h-3.5" />
-                              )}
-                            </button>
+                            draftGroups.map((groupName) => (
+                              <span
+                                key={groupName}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-medium max-w-[125px]"
+                              >
+                                <span
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{
+                                    backgroundColor: getGroupColor(groupName),
+                                  }}
+                                />
+                                <span className="truncate">{groupName}</span>
+                              </span>
+                            ))
                           )}
+                        </div>
+                        <ChevronDown
+                          className={`w-3 h-3 text-slate-400 shrink-0 transition-transform ${
+                            isRowPopoverOpen ? 'rotate-180 text-[#14539E]' : ''
+                          }`}
+                        />
+                      </button>
+                    </td>
 
+                    <td className="px-2 py-1 text-center font-mono text-[11px] text-slate-600 tabular-nums border-r border-slate-100 whitespace-nowrap">
+                      {formatGlossaryDateDDMMYYYY(
+                        entry.created_at || entry.updatedAt
+                      )}
+                    </td>
+
+                    <td className="px-2 py-1 text-center border-r border-slate-100 whitespace-nowrap">
+                      {isVerified ? (
+                        <span
+                          title="Đã duyệt"
+                          aria-label="Đã duyệt"
+                          className="inline-flex items-center justify-center"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-[#10b981]" />
+                        </span>
+                      ) : (
+                        <span
+                          title="Chờ duyệt (AI)"
+                          aria-label="Chờ duyệt (AI)"
+                          className="inline-flex items-center justify-center"
+                        >
+                          <Clock className="w-4 h-4 text-[#f59e0b]" />
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-2 py-1 text-center whitespace-nowrap">
+                      <div className="inline-flex items-center justify-center gap-1.5">
+                        {isVerified ? (
                           <button
                             type="button"
-                            disabled={isBusy}
-                            onClick={() => void handleDelete(entry)}
-                            title="Xóa từ vựng"
-                            aria-label={`Xóa thuật ngữ ${entry.reasonVi}`}
-                            className="w-7 h-7 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
+                            disabled={
+                              isBusy ||
+                              !draftViValue.trim() ||
+                              !draftKrValue.trim()
+                            }
+                            onClick={() => void handleSaveEntry(entry, true)}
+                            title="Cập nhật thay đổi"
+                            aria-label={`Cập nhật thuật ngữ ${entry.reasonVi}`}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors bg-[#14539E] hover:bg-[#0F3E77] text-white shadow-2xs cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
                           >
-                            {isDeleting ? (
+                            {isSaving ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Save className="w-3.5 h-3.5" />
                             )}
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={
+                              isBusy ||
+                              !draftViValue.trim() ||
+                              !draftKrValue.trim()
+                            }
+                            onClick={() => void handleApprove(entry)}
+                            title="Duyệt bản dịch"
+                            aria-label={`Duyệt thuật ngữ ${entry.reasonVi}`}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
+                          >
+                            {isApproving ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void handleDelete(entry)}
+                          title="Xóa từ vựng"
+                          aria-label={`Xóa thuật ngữ ${entry.reasonVi}`}
+                          className="w-7 h-7 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
+                        >
+                          {isDeleting ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Floating Fixed Popover for Row Department Assignment */}
+      {rowPopover && activeRowPopoverEntry && (
+        <div
+          ref={rowPopoverRef}
+          style={{
+            top: `${rowPopover.top}px`,
+            left: `${rowPopover.left}px`,
+          }}
+          className={`fixed z-50 w-[248px] rounded-xl border border-slate-200 bg-white shadow-xl py-1.5 ${
+            rowPopover.openUpward ? '-translate-y-full' : ''
+          }`}
+        >
+          <div className="px-3 py-1 flex items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Chọn nhóm áp dụng
+            </span>
+            <button
+              type="button"
+              onClick={() => setRowPopover(null)}
+              aria-label="Đóng chọn nhóm"
+              className="text-slate-400 hover:text-slate-600 cursor-pointer"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setDraftGroupsById((prev) => ({
+                ...prev,
+                [activeRowPopoverEntry.id]: [],
+              }))
+            }
+            className="w-full px-3 py-1.5 text-left text-xs hover:bg-slate-50 flex items-center justify-between gap-2 cursor-pointer"
+          >
+            <span className="inline-flex items-center gap-2 text-slate-700 font-medium">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />
+              <span>Dùng chung (Xóa chọn riêng)</span>
+            </span>
+            {activeRowPopoverDraftGroups.length === 0 && (
+              <Check className="w-3.5 h-3.5 text-[#14539E] shrink-0" />
+            )}
+          </button>
+
+          <div className="my-1 border-t border-slate-100" />
+
+          <div className="max-h-52 overflow-y-auto">
+            {groupOptions.map((grp) => {
+              const checked = activeRowPopoverDraftGroups.some(
+                (name) =>
+                  normalizeGlossaryKey(name) === normalizeGlossaryKey(grp.name)
+              );
+              return (
+                <label
+                  key={grp.name}
+                  className="w-full px-3 py-1.5 text-xs hover:bg-blue-50/50 flex items-center gap-2 cursor-pointer select-none"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      setDraftGroupsById((prev) => ({
+                        ...prev,
+                        [activeRowPopoverEntry.id]: toggleGroupSelection(
+                          prev[activeRowPopoverEntry.id] ??
+                            normalizeTargetGroups(activeRowPopoverEntry.target_groups),
+                          grp.name
+                        ),
+                      }))
+                    }
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] shrink-0"
+                  />
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: grp.color }}
+                  />
+                  <span className="text-slate-700 truncate">{grp.name}</span>
+                </label>
+              );
+            })}
+
+            {activeRowPopoverExtraGroups.map((extraName) => (
+              <label
+                key={extraName}
+                className="w-full px-3 py-1.5 text-xs hover:bg-blue-50/50 flex items-center gap-2 cursor-pointer select-none"
+              >
+                <input
+                  type="checkbox"
+                  checked
+                  onChange={() =>
+                    setDraftGroupsById((prev) => ({
+                      ...prev,
+                      [activeRowPopoverEntry.id]: toggleGroupSelection(
+                        prev[activeRowPopoverEntry.id] ??
+                          normalizeTargetGroups(activeRowPopoverEntry.target_groups),
+                        extraName
+                      ),
+                    }))
+                  }
+                  className="w-3.5 h-3.5 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E] shrink-0"
+                />
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />
+                <span className="text-slate-700 truncate">{extraName}</span>
+              </label>
+            ))}
+          </div>
         </div>
+      )}
     </div>
   );
 };

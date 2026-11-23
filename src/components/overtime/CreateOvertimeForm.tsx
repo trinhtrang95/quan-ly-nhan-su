@@ -40,8 +40,10 @@ import {
   resolveOvertimeMainDepartment,
 } from '../../utils/overtimeFormsService';
 import {
+  filterAndSortGlossaryForCombobox,
   findExactGlossaryMatch,
   loadOvertimeGlossary,
+  normalizeTargetGroups,
   OvertimeGlossaryEntry,
   readLocalOvertimeGlossary,
   suggestFactoryKoreanTranslation,
@@ -287,12 +289,31 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     };
   }, [isReasonDropdownOpen]);
 
-  // MỚI: Lọc danh sách lý do dựa theo chữ đang gõ
-  const filteredGlossary = useMemo(() => {
-    const q = currentReasonVi.trim().toLowerCase();
-    if (!q) return glossaryEntries;
-    return glossaryEntries.filter((item) => item.reasonVi.toLowerCase().includes(q));
-  }, [currentReasonVi, glossaryEntries]);
+  const selectedEmployeeDepartments = useMemo(() => {
+    const depts: string[] = [];
+    for (const empId of currentSelectedEmployeeIds) {
+      const dept = (employees.find((e) => e.id === empId)?.department || '').trim();
+      if (dept) depts.push(dept);
+    }
+    return normalizeTargetGroups(depts);
+  }, [currentSelectedEmployeeIds, employees]);
+
+  // MỚI: Chỉ hiển thị các lý do Đã duyệt, ưu tiên theo Nhóm/Phòng ban đang chọn hoặc nhân sự đang tick
+  const filteredGlossary = useMemo(
+    () =>
+      filterAndSortGlossaryForCombobox({
+        entries: glossaryEntries,
+        selectedGroupFilter,
+        selectedEmployeeDepartments,
+        searchText: currentReasonVi,
+      }),
+    [
+      glossaryEntries,
+      selectedGroupFilter,
+      selectedEmployeeDepartments,
+      currentReasonVi,
+    ]
+  );
 
 
   useEffect(() => {
@@ -766,9 +787,26 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         : await translateMultilineKorean(currentReasonVi, glossaryEntries);
 
       if (cleanReasonVi && finalReasonKr.trim()) {
-        void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim()).then(
-          ({ entries }) => setGlossaryEntries(entries)
+        const existingGlossaryMatch = findExactGlossaryMatch(
+          glossaryEntries,
+          cleanReasonVi
         );
+        if (!existingGlossaryMatch) {
+          const blockDepartments = normalizeTargetGroups(
+            currentSelectedEmployeeIds.map(
+              (empId) => employeeMap.get(empId)?.department || ''
+            )
+          );
+          void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim(), {
+            isVerified: false,
+            targetGroups: blockDepartments,
+          }).then(({ entries }) => setGlossaryEntries(entries));
+        } else if (finalReasonKr.trim() !== existingGlossaryMatch.reasonKr.trim()) {
+          void upsertOvertimeGlossaryEntry(
+            cleanReasonVi,
+            finalReasonKr.trim()
+          ).then(({ entries }) => setGlossaryEntries(entries));
+        }
       }
 
       const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map((empId) => {
@@ -1496,44 +1534,47 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-lg border border-slate-200 bg-white shadow-xl max-h-48 overflow-y-auto">
                     {filteredGlossary.length === 0 ? (
                       <div className="p-2.5 text-center text-[11px] text-slate-500">
-                        Chưa có mẫu nào khớp. Hệ thống sẽ tự lưu mẫu mới khi bạn bấm Ghi nhận.
+                        Chưa có mẫu đã duyệt nào khớp. Hệ thống sẽ tự lưu mẫu mới (chờ duyệt) khi bạn bấm Ghi nhận.
                       </div>
                     ) : (
                       <div className="p-1.5 space-y-0.5">
-                        {filteredGlossary.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => {
-                              setCurrentReasonVi(item.reasonVi);
-                              setCurrentReasonKr(item.reasonKr);
-                              setIsReasonKrManuallyEdited(false);
-                              setIsReasonDropdownOpen(false);
-                            }}
-                            className="w-full text-left px-2 py-1.5 rounded-md text-[11px] hover:bg-blue-50 transition-colors cursor-pointer flex items-start justify-between gap-2 group"
-                          >
-                            <span className="break-words line-clamp-2 text-slate-700 group-hover:text-[#14539E] font-medium">
-                              {item.reasonVi}
-                            </span>
-                            
-                            {/* Hiển thị cờ kiểm duyệt */}
-                            {item.isVerified ? (
-                              <span
-                                title="Đã được duyệt"
-                                className="shrink-0 mt-0.5 inline-flex"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                        {filteredGlossary.map((item) => {
+                          const itemGroups = normalizeTargetGroups(item.target_groups);
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => {
+                                setCurrentReasonVi(item.reasonVi);
+                                setCurrentReasonKr(item.reasonKr);
+                                setIsReasonKrManuallyEdited(false);
+                                setIsReasonDropdownOpen(false);
+                              }}
+                              className="w-full text-left px-2 py-1.5 rounded-md text-[11px] hover:bg-blue-50 transition-colors cursor-pointer flex items-start justify-between gap-2 group"
+                            >
+                              <span className="break-words line-clamp-2 text-slate-700 group-hover:text-[#14539E] font-medium">
+                                {item.reasonVi}
                               </span>
-                            ) : (
-                              <span 
-                                className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[8px] font-bold text-amber-700 tracking-wide mt-0.5"
-                                title="Bản dịch AI - Đang chờ duyệt"
-                              >
-                                AI
+
+                              <span className="shrink-0 mt-0.5 inline-flex items-center gap-1">
+                                {itemGroups.length > 0 && (
+                                  <span
+                                    title={`Nhóm: ${itemGroups.join(', ')}`}
+                                    className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[9px] font-semibold text-[#14539E] max-w-[110px] truncate"
+                                  >
+                                    {itemGroups.join(', ')}
+                                  </span>
+                                )}
+                                <span
+                                  title="Đã được duyệt"
+                                  className="inline-flex"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                </span>
                               </span>
-                            )}
-                          </button>
-                        ))}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

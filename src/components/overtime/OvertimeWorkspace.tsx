@@ -486,6 +486,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4">
           <GlossaryManagerModal
             isActive={activeTab === 'glossary'}
+            groups={groups}
             onShowToast={onShowToast}
             onGlossaryUpdated={() => setGlossaryRevision((prev) => prev + 1)}
           />
