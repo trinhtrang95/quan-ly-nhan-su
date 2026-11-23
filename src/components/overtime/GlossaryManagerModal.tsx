@@ -5,16 +5,20 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  Save,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import { formatNumberVN, getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   approveGlossaryEntry,
+  deleteGlossaryEntry,
+  formatGlossaryDateDDMMYYYY,
   loadOvertimeGlossary,
   OvertimeGlossaryEntry,
   readLocalOvertimeGlossary,
-  updateGlossaryEntryKr,
+  updateGlossaryEntry,
 } from '../../utils/overtimeGlossaryService';
 
 export interface GlossaryManagerModalProps {
@@ -38,11 +42,20 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<GlossaryStatusFilter>('all');
+  const [draftViById, setDraftViById] = useState<Record<string, string>>({});
   const [draftKrById, setDraftKrById] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const syncDraftsFromEntries = useCallback((list: OvertimeGlossaryEntry[]) => {
+    setDraftViById((prev) => {
+      const next: Record<string, string> = {};
+      for (const item of list) {
+        next[item.id] = prev[item.id] !== undefined ? prev[item.id] : item.reasonVi;
+      }
+      return next;
+    });
     setDraftKrById((prev) => {
       const next: Record<string, string> = {};
       for (const item of list) {
@@ -57,22 +70,29 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     let active = true;
     const localInitial = readLocalOvertimeGlossary();
     setEntries(localInitial);
-    const initialDrafts: Record<string, string> = {};
+
+    const initialViDrafts: Record<string, string> = {};
+    const initialKrDrafts: Record<string, string> = {};
     for (const item of localInitial) {
-      initialDrafts[item.id] = item.reasonKr;
+      initialViDrafts[item.id] = item.reasonVi;
+      initialKrDrafts[item.id] = item.reasonKr;
     }
-    setDraftKrById(initialDrafts);
+    setDraftViById(initialViDrafts);
+    setDraftKrById(initialKrDrafts);
     setIsLoading(true);
 
     void loadOvertimeGlossary()
       .then((loaded) => {
         if (!active) return;
         setEntries(loaded);
-        const refreshedDrafts: Record<string, string> = {};
+        const refreshedViDrafts: Record<string, string> = {};
+        const refreshedKrDrafts: Record<string, string> = {};
         for (const item of loaded) {
-          refreshedDrafts[item.id] = item.reasonKr;
+          refreshedViDrafts[item.id] = item.reasonVi;
+          refreshedKrDrafts[item.id] = item.reasonKr;
         }
-        setDraftKrById(refreshedDrafts);
+        setDraftViById(refreshedViDrafts);
+        setDraftKrById(refreshedKrDrafts);
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -120,32 +140,47 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
     });
   }, [entries, searchQuery, statusFilter]);
 
-  const handleSaveKr = async (entry: OvertimeGlossaryEntry) => {
-    const draft = (draftKrById[entry.id] ?? entry.reasonKr).trim();
-    if (!draft) {
-      onShowToast?.('Bản dịch tiếng Hàn không được để trống.');
+  const handleSaveEntry = async (
+    entry: OvertimeGlossaryEntry,
+    forceSave: boolean = false
+  ) => {
+    const draftVi = (draftViById[entry.id] ?? entry.reasonVi).trim();
+    const draftKr = (draftKrById[entry.id] ?? entry.reasonKr).trim();
+    if (!draftVi || !draftKr) {
+      onShowToast?.('Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn) không được để trống.');
       return;
     }
-    if (draft === entry.reasonKr.trim()) {
+    if (
+      !forceSave &&
+      draftVi === entry.reasonVi.trim() &&
+      draftKr === entry.reasonKr.trim()
+    ) {
       return;
     }
 
     setSavingId(entry.id);
     try {
-      const res = await updateGlossaryEntryKr(entry.id, draft);
+      const res = await updateGlossaryEntry(entry.id, draftVi, draftKr);
       setEntries(res.entries);
       if (res.updatedEntry) {
+        const updated = res.updatedEntry;
+        setDraftViById((prev) => {
+          const next = { ...prev };
+          delete next[entry.id];
+          next[updated.id] = updated.reasonVi;
+          return next;
+        });
         setDraftKrById((prev) => {
           const next = { ...prev };
           delete next[entry.id];
-          next[res.updatedEntry!.id] = res.updatedEntry!.reasonKr;
+          next[updated.id] = updated.reasonKr;
           return next;
         });
       } else {
         syncDraftsFromEntries(res.entries);
       }
       onGlossaryUpdated?.();
-      onShowToast?.(`Đã lưu bản dịch tiếng Hàn cho "${entry.reasonVi}".`);
+      onShowToast?.(`Đã cập nhật từ vựng "${draftVi}".`);
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
@@ -155,34 +190,73 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
 
   const handleApprove = async (entry: OvertimeGlossaryEntry) => {
     if (entry.is_verified !== false) return;
+    const draftVi = (draftViById[entry.id] ?? entry.reasonVi).trim();
+    const draftKr = (draftKrById[entry.id] ?? entry.reasonKr).trim();
+    if (!draftVi || !draftKr) {
+      onShowToast?.('Lý do (Tiếng Việt) và Bản dịch (Tiếng Hàn) không được để trống.');
+      return;
+    }
+
     setApprovingId(entry.id);
     try {
-      // Nếu người dùng vừa gõ sửa bản dịch mà chưa bấm icon Check, tự lưu luôn trước khi duyệt
-      const draft = (draftKrById[entry.id] ?? entry.reasonKr).trim();
-      let targetId = entry.id;
-      if (draft && draft !== entry.reasonKr.trim()) {
-        const krRes = await updateGlossaryEntryKr(entry.id, draft);
-        if (krRes.updatedEntry) {
-          targetId = krRes.updatedEntry.id;
-        }
-      }
+      const editRes = await updateGlossaryEntry(entry.id, draftVi, draftKr);
+      const targetId = editRes.updatedEntry?.id || entry.id;
 
       const res = await approveGlossaryEntry(targetId);
       setEntries(res.entries);
       if (res.updatedEntry) {
+        const updated = res.updatedEntry;
+        setDraftViById((prev) => {
+          const next = { ...prev };
+          delete next[entry.id];
+          next[updated.id] = updated.reasonVi;
+          return next;
+        });
         setDraftKrById((prev) => {
           const next = { ...prev };
           delete next[entry.id];
-          next[res.updatedEntry!.id] = res.updatedEntry!.reasonKr;
+          next[updated.id] = updated.reasonKr;
           return next;
         });
       }
       onGlossaryUpdated?.();
-      onShowToast?.(`Đã duyệt thuật ngữ "${entry.reasonVi}".`);
+      onShowToast?.(`Đã duyệt thuật ngữ "${draftVi}".`);
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  const handleDelete = async (entry: OvertimeGlossaryEntry) => {
+    if (
+      !window.confirm(
+        'Bạn có chắc chắn muốn xóa từ vựng này khỏi từ điển không?'
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(entry.id);
+    try {
+      const res = await deleteGlossaryEntry(entry.id);
+      setEntries(res.entries);
+      setDraftViById((prev) => {
+        const next = { ...prev };
+        delete next[entry.id];
+        return next;
+      });
+      setDraftKrById((prev) => {
+        const next = { ...prev };
+        delete next[entry.id];
+        return next;
+      });
+      onGlossaryUpdated?.();
+      onShowToast?.(`Đã xóa từ vựng "${entry.reasonVi}" khỏi từ điển.`);
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -265,17 +339,6 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           <div className="inline-flex items-center gap-1 p-0.5 bg-slate-200/70 rounded-lg shrink-0">
             <button
               type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'all'
-                  ? 'bg-[#14539E] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Tất cả ({formatNumberVN(counts.total)})
-            </button>
-            <button
-              type="button"
               onClick={() => setStatusFilter('pending')}
               className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 statusFilter === 'pending'
@@ -295,6 +358,17 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
               }`}
             >
               Đã duyệt ({formatNumberVN(counts.verified)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                statusFilter === 'all'
+                  ? 'bg-[#14539E] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Tất cả ({formatNumberVN(counts.total)})
             </button>
           </div>
         </div>
@@ -328,19 +402,22 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
             <table className="w-full border-collapse text-left">
               <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
                 <tr>
-                  <th className="px-2.5 py-2 w-12 text-center border-r border-slate-200/70">
+                  <th className="px-2 py-2 w-11 text-center border-r border-slate-200/70">
                     STT
                   </th>
-                  <th className="px-3 py-2 w-[30%] border-r border-slate-200/70">
+                  <th className="px-2.5 py-2 w-[28%] border-r border-slate-200/70">
                     Lý do (Tiếng Việt)
                   </th>
-                  <th className="px-3 py-2 w-[34%] border-r border-slate-200/70">
+                  <th className="px-2.5 py-2 w-[32%] border-r border-slate-200/70">
                     Bản dịch (Tiếng Hàn)
                   </th>
-                  <th className="px-2.5 py-2 w-[18%] border-r border-slate-200/70">
+                  <th className="px-2 py-2 w-24 text-center border-r border-slate-200/70 whitespace-nowrap">
+                    Ngày thêm
+                  </th>
+                  <th className="px-2 py-2 w-20 text-center border-r border-slate-200/70 whitespace-nowrap">
                     Trạng thái
                   </th>
-                  <th className="px-2.5 py-2 w-[12%] text-center">
+                  <th className="px-2 py-2 w-32 text-center whitespace-nowrap">
                     Hành động
                   </th>
                 </tr>
@@ -348,29 +425,63 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
               <tbody className="divide-y divide-slate-200 text-xs">
                 {filteredEntries.map((entry, idx) => {
                   const isVerified = entry.is_verified !== false;
-                  const draftValue = draftKrById[entry.id] ?? entry.reasonKr;
-                  const isDirty = draftValue.trim() !== entry.reasonKr.trim();
+                  const draftViValue = draftViById[entry.id] ?? entry.reasonVi;
+                  const draftKrValue = draftKrById[entry.id] ?? entry.reasonKr;
+                  const isViDirty =
+                    draftViValue.trim() !== entry.reasonVi.trim();
+                  const isKrDirty =
+                    draftKrValue.trim() !== entry.reasonKr.trim();
+                  const isDirty = isViDirty || isKrDirty;
+                  const canSave =
+                    isDirty &&
+                    Boolean(draftViValue.trim()) &&
+                    Boolean(draftKrValue.trim());
                   const isSaving = savingId === entry.id;
                   const isApproving = approvingId === entry.id;
+                  const isDeleting = deletingId === entry.id;
+                  const isBusy = isSaving || isApproving || isDeleting;
 
                   return (
                     <tr
                       key={entry.id}
                       className="hover:bg-blue-50/35 transition-colors"
                     >
-                      <td className="px-2.5 py-1.5 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
+                      <td className="px-2.5 py-1 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
                         {formatNumberVN(idx + 1)}
                       </td>
 
-                      <td className="px-3 py-1.5 text-slate-800 font-medium leading-snug border-r border-slate-100">
-                        {entry.reasonVi}
+                      <td className="px-2 py-1 border-r border-slate-100">
+                        <input
+                          type="text"
+                          value={draftViValue}
+                          disabled={isDeleting}
+                          onChange={(e) =>
+                            setDraftViById((prev) => ({
+                              ...prev,
+                              [entry.id]: e.target.value,
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && canSave && !isBusy) {
+                              e.preventDefault();
+                              void handleSaveEntry(entry);
+                            }
+                          }}
+                          aria-label={`Lý do tiếng Việt cho ${entry.reasonVi}`}
+                          className={`w-full min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 font-medium focus:outline-none transition-colors ${
+                            isViDirty
+                              ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
+                              : 'border-slate-200 focus:border-[#14539E]'
+                          }`}
+                        />
                       </td>
 
-                      <td className="px-2.5 py-1 border-r border-slate-100">
+                      <td className="px-2 py-1 border-r border-slate-100">
                         <div className="flex items-center gap-1.5">
                           <input
                             type="text"
-                            value={draftValue}
+                            value={draftKrValue}
+                            disabled={isDeleting}
                             onChange={(e) =>
                               setDraftKrById((prev) => ({
                                 ...prev,
@@ -378,30 +489,30 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                               }))
                             }
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' && isDirty && !isSaving) {
+                              if (e.key === 'Enter' && canSave && !isBusy) {
                                 e.preventDefault();
-                                void handleSaveKr(entry);
+                                void handleSaveEntry(entry);
                               }
                             }}
                             aria-label={`Bản dịch tiếng Hàn cho ${entry.reasonVi}`}
                             className={`flex-1 min-w-0 h-7 px-2 text-xs rounded border bg-white text-slate-800 focus:outline-none transition-colors ${
-                              isDirty
+                              isKrDirty
                                 ? 'border-[#14539E] ring-1 ring-[#14539E]/20'
                                 : 'border-slate-200 focus:border-[#14539E]'
                             }`}
                           />
                           <button
                             type="button"
-                            disabled={!isDirty || isSaving || !draftValue.trim()}
-                            onClick={() => void handleSaveKr(entry)}
+                            disabled={!canSave || isBusy}
+                            onClick={() => void handleSaveEntry(entry)}
                             title={
-                              isDirty
-                                ? 'Lưu thay đổi bản dịch'
-                                : 'Chưa có thay đổi để lưu'
+                              canSave
+                                ? 'Lưu thay đổi (Việt & Hàn)'
+                                : 'Chưa có thay đổi hợp lệ để lưu'
                             }
-                            aria-label={`Lưu bản dịch cho ${entry.reasonVi}`}
+                            aria-label={`Lưu thay đổi cho ${entry.reasonVi}`}
                             className={`h-7 w-7 rounded border inline-flex items-center justify-center shrink-0 transition-colors ${
-                              isDirty && draftValue.trim()
+                              canSave && !isBusy
                                 ? 'bg-[#14539E] border-[#14539E] text-white hover:bg-[#0F3E77] cursor-pointer'
                                 : 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed'
                             }`}
@@ -415,37 +526,87 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                         </div>
                       </td>
 
-                      <td className="px-2.5 py-1.5 border-r border-slate-100 whitespace-nowrap">
+                      <td className="px-2 py-1 text-center font-mono text-[11px] text-slate-600 tabular-nums border-r border-slate-100 whitespace-nowrap">
+                        {formatGlossaryDateDDMMYYYY(
+                          entry.created_at || entry.updatedAt
+                        )}
+                      </td>
+
+                      <td className="px-2 py-1 text-center border-r border-slate-100 whitespace-nowrap">
                         {isVerified ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[11px] font-semibold text-emerald-700">
-                            <CheckCircle2 className="w-3 h-3 shrink-0" />
-                            <span>Đã duyệt</span>
+                          <span
+                            title="Đã duyệt"
+                            aria-label="Đã duyệt"
+                            className="inline-flex items-center justify-center"
+                          >
+                            <CheckCircle2 className="w-4 h-4 text-[#10b981]" />
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-700">
-                            <Clock className="w-3 h-3 shrink-0" />
-                            <span>AI dịch (Chờ duyệt)</span>
+                          <span
+                            title="Chờ duyệt (AI)"
+                            aria-label="Chờ duyệt (AI)"
+                            className="inline-flex items-center justify-center"
+                          >
+                            <Clock className="w-4 h-4 text-[#f59e0b]" />
                           </span>
                         )}
                       </td>
 
-                      <td className="px-2.5 py-1.5 text-center whitespace-nowrap">
-                        <button
-                          type="button"
-                          disabled={isVerified || isApproving}
-                          onClick={() => void handleApprove(entry)}
-                          aria-label={`Duyệt thuật ngữ ${entry.reasonVi}`}
-                          className={`h-7 px-2.5 rounded-md text-[11px] font-semibold inline-flex items-center justify-center gap-1 transition-colors ${
-                            isVerified
-                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                              : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer'
-                          }`}
-                        >
-                          {isApproving ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : null}
-                          <span>Duyệt</span>
-                        </button>
+                      <td className="px-2 py-1 text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-1">
+                          {isVerified ? (
+                            <button
+                              type="button"
+                              disabled={
+                                isBusy ||
+                                !draftViValue.trim() ||
+                                !draftKrValue.trim()
+                              }
+                              onClick={() => void handleSaveEntry(entry, true)}
+                              aria-label={`Cập nhật thuật ngữ ${entry.reasonVi}`}
+                              className="h-7 px-2.5 rounded-md text-[11px] font-semibold inline-flex items-center justify-center gap-1 bg-[#14539E] hover:bg-[#0F3E77] text-white shadow-2xs transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+                            >
+                              {isSaving ? (
+                                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                              ) : (
+                                <Save className="w-3 h-3 shrink-0" />
+                              )}
+                              <span>Cập nhật</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={
+                                isBusy ||
+                                !draftViValue.trim() ||
+                                !draftKrValue.trim()
+                              }
+                              onClick={() => void handleApprove(entry)}
+                              aria-label={`Duyệt thuật ngữ ${entry.reasonVi}`}
+                              className="h-7 px-2.5 rounded-md text-[11px] font-semibold inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+                            >
+                              {isApproving ? (
+                                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                              ) : null}
+                              <span>Duyệt</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleDelete(entry)}
+                            title="Xóa từ vựng"
+                            aria-label={`Xóa thuật ngữ ${entry.reasonVi}`}
+                            className="h-7 w-7 rounded-md text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
+                          >
+                            {isDeleting ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -458,7 +619,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
         {/* Footer */}
         <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3 text-[11px] text-slate-500 shrink-0">
           <span>
-            Sửa trực tiếp ở ô tiếng Hàn rồi nhấn icon Check (hoặc Enter) để lưu.
+            Sửa trực tiếp ở ô Tiếng Việt hoặc Tiếng Hàn rồi nhấn icon Check (hoặc Enter) để lưu.
           </span>
           <button
             type="button"

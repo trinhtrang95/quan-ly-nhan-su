@@ -5,10 +5,13 @@ import {
   cleanFactoryKoreanTranslation,
   composeLocalFactorySuggestion,
   DEFAULT_OVERTIME_GLOSSARY,
+  deleteGlossaryEntryInList,
   findExactGlossaryMatch,
+  formatGlossaryDateDDMMYYYY,
   isGlossaryEntryVerified,
   mapSupabaseGlossaryRowToEntry,
   normalizeGlossaryKey,
+  updateGlossaryEntryInList,
   updateGlossaryEntryKrInList,
   upsertGlossaryEntryInList,
   type OvertimeGlossaryEntry,
@@ -20,24 +23,34 @@ describe('overtimeGlossaryService pure logic', () => {
     assert.equal(normalizeGlossaryKey(''), '');
   });
 
+  it('formats glossary created_at timestamps as DD/MM/YYYY', () => {
+    assert.equal(formatGlossaryDateDDMMYYYY('2026-01-01T00:00:00.000Z'), '01/01/2026');
+    assert.equal(formatGlossaryDateDDMMYYYY('2026-11-23T08:45:00.000Z'), '23/11/2026');
+    assert.equal(formatGlossaryDateDDMMYYYY('2026-05-09'), '09/05/2026');
+    assert.equal(formatGlossaryDateDDMMYYYY(undefined), '—');
+  });
+
   it('marks built-in default glossary entries as verified', () => {
     assert.ok(DEFAULT_OVERTIME_GLOSSARY.length > 0);
     for (const entry of DEFAULT_OVERTIME_GLOSSARY) {
       assert.equal(entry.is_verified, true);
       assert.equal(entry.isVerified, true);
+      assert.ok(entry.created_at);
     }
   });
 
-  it('maps Supabase is_verified column into is_verified and treats legacy undefined/null as verified', () => {
+  it('maps Supabase is_verified and created_at columns and treats legacy undefined/null as verified', () => {
     const verified = mapSupabaseGlossaryRowToEntry({
       id: 'row-1',
       reason_vi: '  Kiểm tra hàng  ',
       reason_kr: '  품질 검사  ',
       is_verified: true,
+      created_at: '2026-10-15T04:00:00.000Z',
       updated_at: '2026-11-23T01:00:00.000Z',
     });
     assert.equal(verified.is_verified, true);
     assert.equal(verified.isVerified, true);
+    assert.equal(verified.created_at, '2026-10-15T04:00:00.000Z');
     assert.equal(isGlossaryEntryVerified(verified), true);
     assert.equal(verified.reasonVi, 'Kiểm tra hàng');
     assert.equal(verified.reasonKr, '품질 검사');
@@ -51,6 +64,7 @@ describe('overtimeGlossaryService pure logic', () => {
     });
     assert.equal(pending.is_verified, false);
     assert.equal(pending.isVerified, false);
+    assert.equal(pending.created_at, '2026-11-23T01:00:00.000Z');
     assert.equal(isGlossaryEntryVerified(pending), false);
 
     const legacyNull = mapSupabaseGlossaryRowToEntry({
@@ -133,11 +147,11 @@ describe('overtimeGlossaryService pure logic', () => {
     assert.equal(updatedPending.entries[0].isVerified, false);
   });
 
-  it('updates Korean translation without altering verification flag and approves pending entries', () => {
+  it('updates both Vietnamese and Korean text without altering verification flag, approves, and deletes entries', () => {
     const initial: OvertimeGlossaryEntry[] = [
       {
         id: 'ai-1',
-        reasonVi: 'Kiểm tra bo mạch',
+        reasonVi: 'Kiểm tra bo mach',
         reasonKr: '기판 검사',
         updatedAt: '2026-11-23T01:00:00.000Z',
         deletedAt: null,
@@ -146,26 +160,40 @@ describe('overtimeGlossaryService pure logic', () => {
       },
     ];
 
-    const edited = updateGlossaryEntryKrInList(
+    const editedBoth = updateGlossaryEntryInList(
       initial,
       'ai-1',
+      '  Kiểm tra   bo mạch ',
       '  PCB   회로 점검 ',
       '2026-11-23T02:00:00.000Z'
     );
-    assert.ok(edited.updatedEntry);
-    assert.equal(edited.updatedEntry?.reasonKr, 'PCB 회로 점검');
-    assert.equal(edited.updatedEntry?.is_verified, false);
-    assert.equal(edited.updatedEntry?.isVerified, false);
+    assert.ok(editedBoth.updatedEntry);
+    assert.equal(editedBoth.updatedEntry?.reasonVi, 'Kiểm tra bo mạch');
+    assert.equal(editedBoth.updatedEntry?.reasonKr, 'PCB 회로 점검');
+    assert.equal(editedBoth.updatedEntry?.is_verified, false);
+    assert.equal(editedBoth.updatedEntry?.isVerified, false);
+
+    const editedKrOnly = updateGlossaryEntryKrInList(
+      editedBoth.entries,
+      'ai-1',
+      'PCB 회로 최종 점검',
+      '2026-11-23T02:30:00.000Z'
+    );
+    assert.equal(editedKrOnly.updatedEntry?.reasonVi, 'Kiểm tra bo mạch');
+    assert.equal(editedKrOnly.updatedEntry?.reasonKr, 'PCB 회로 최종 점검');
 
     const approved = approveGlossaryEntryInList(
-      edited.entries,
+      editedKrOnly.entries,
       'ai-1',
       '2026-11-23T03:00:00.000Z'
     );
     assert.ok(approved.updatedEntry);
     assert.equal(approved.updatedEntry?.is_verified, true);
     assert.equal(approved.updatedEntry?.isVerified, true);
-    assert.equal(approved.updatedEntry?.reasonKr, 'PCB 회로 점검');
+
+    const deleted = deleteGlossaryEntryInList(approved.entries, 'ai-1');
+    assert.ok(deleted.deletedEntry);
+    assert.equal(deleted.entries.length, 0);
   });
 
   it('cleans polite Korean sentence endings into concise factory style', () => {
