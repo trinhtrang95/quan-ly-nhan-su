@@ -171,6 +171,31 @@ interface PrintableDateGroup {
 // Khóa lưu trữ để chống mất dữ liệu khi đổi tab
 const DRAFT_STORAGE_KEY = 'ot_form_draft_v1';
 
+// HÀM HỖ TRỢ: Dịch nhiều dòng giữ nguyên ký tự xuống dòng
+async function translateMultilineKorean(
+  reasonVi: string,
+  glossaryEntries: OvertimeGlossaryEntry[]
+): Promise<string> {
+  const lines = reasonVi.split(/\r?\n/);
+  const translatedLines = await Promise.all(
+    lines.map(async (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      // Khớp chính xác trước
+      const exact = findExactGlossaryMatch(glossaryEntries, trimmed);
+      if (exact) return exact.reasonKr;
+      // Không khớp thì dùng AI dịch
+      const { translation } = await suggestFactoryKoreanTranslation(
+        trimmed,
+        glossaryEntries
+      );
+      // Dọn dẹp khoảng trắng dư thừa
+      return translation.replace(/\s*\n\s*/g, ' ').trim();
+    })
+  );
+  return translatedLines.join('\n');
+}
+
 export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   employees = INITIAL_EMPLOYEES,
   groups = INITIAL_DEPARTMENT_GROUPS,
@@ -472,7 +497,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   const todayIso = getLocalTodayIsoDate();
 
-  // Kiểm tra các lượt ngày phát sinh có trùng với phiếu ngày trước để hiển thị nhắc không cộng đúp (KHÔNG chặn lưu vào vỏ phiếu đang mở)
+  // Kiểm tra các lượt ngày phát sinh có trùng với phiếu ngày trước để hiển thị nhắc không cộng đúp
   const dateConflictEval = useMemo(
     () =>
       evaluateOvertimeDateConflict({
@@ -514,8 +539,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     }
     setIsAutoTranslating(true);
     try {
-      const { translation } = await suggestFactoryKoreanTranslation(
-        cleanVi,
+      // Dùng hàm dịch nhiều dòng
+      const translation = await translateMultilineKorean(
+        currentReasonVi,
         glossaryEntries
       );
       setCurrentReasonKr(translation);
@@ -567,12 +593,12 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       return;
     }
 
-    // Tầng 3: Dịch gợi ý tự động theo ngữ cảnh nhà máy (debounce 500ms)
+    // Tầng 3: Dịch gợi ý tự động theo ngữ cảnh nhà máy (debounce 500ms) với hỗ trợ nhiều dòng
     let isCancelled = false;
     setIsAutoTranslating(true);
     const debounceTimer = window.setTimeout(async () => {
-      const { translation } = await suggestFactoryKoreanTranslation(
-        cleanVi,
+      const translation = await translateMultilineKorean(
+        currentReasonVi,
         glossaryEntries
       );
       if (!isCancelled) {
@@ -672,7 +698,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
     setIsCommittingBlock(true);
     try {
-      // Kiểm tra lại lần cuối trực tiếp trên Supabase để đảm bảo không ghi nhận nhân sự trùng đơn nghỉ
+      // Kiểm tra lại lần cuối trực tiếp trên Supabase
       const latestLeaveCheck = await fetchActiveLeaveRecordsForOvertimeCheck(employees);
       const recordsToCheck =
         latestLeaveCheck.source === 'supabase'
@@ -727,9 +753,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       const cleanReasonVi = currentReasonVi.trim();
       const finalReasonKr = currentReasonKr.trim()
         ? currentReasonKr.trim()
-        : (await suggestFactoryKoreanTranslation(cleanReasonVi, glossaryEntries)).translation;
+        : await translateMultilineKorean(currentReasonVi, glossaryEntries);
 
-      // Tự động học/cập nhật cặp (reasonVi, reasonKr) vào từ điển nội bộ khi ghi nhận
+      // Tự động học/cập nhật cặp (reasonVi, reasonKr) vào từ điển
       if (cleanReasonVi && finalReasonKr.trim()) {
         void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr.trim()).then(
           ({ entries }) => setGlossaryEntries(entries)
@@ -768,7 +794,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         showToast(`Đã ghi nhận nhóm [${formatDateToFormStyle(newBlock.overtimeDate)}] vào danh sách xem trước!`);
       }
 
-      // Sau khi ghi nhận lượt, Ngày làm thêm tiếp theo mặc định lấy lại theo Ngày phiếu cố định
+      // Sau khi ghi nhận, Ngày làm thêm tiếp theo mặc định lấy lại theo Ngày phiếu cố định
       setBlockOvertimeDate(shellOvertimeDate || getLocalTodayIsoDate());
       setCurrentReasonVi('');
       setCurrentReasonKr('');
@@ -1113,7 +1139,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                 value={currentReasonVi}
                 onChange={(e) => setCurrentReasonVi(e.target.value)}
                 placeholder="VD: Trực sản xuất, hỗ trợ sản xuất gấp hoặc mô tả chi tiết công việc tăng ca..."
-                className="w-full min-h-[66px] px-2.5 py-2 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
+                className="whitespace-pre-wrap w-full min-h-[66px] px-2.5 py-2 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
               />
             </div>
 
@@ -1133,7 +1159,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   setIsReasonKrManuallyEdited(true);
                 }}
                 placeholder="생산 당직 (Tự động gợi ý theo từ điển hoặc nhập/chỉnh sửa trực tiếp)..."
-                className="w-full min-h-[62px] px-2.5 py-2 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
+                className="whitespace-pre-wrap w-full min-h-[62px] px-2.5 py-2 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E]/20 transition-all resize-y"
               />
             </div>
           </div>
@@ -1747,7 +1773,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             <strong className="font-mono text-slate-700">
               {formatDateToFormStyle(shellOvertimeDate)}
             </strong>{' '}
-            • Tổng số nhóm:{' '}
+- Tổng số nhóm:{' '}
             <strong className="font-mono text-slate-700">{formatNumberVN(summaryStats.blockCount)}</strong> ({formatNumberVN(summaryStats.totalParticipants)} lượt • {summaryStats.datesCount} ngày)
           </div>
           <div className="flex items-center gap-2.5 shrink-0">
