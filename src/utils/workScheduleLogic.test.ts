@@ -3,13 +3,17 @@ import assert from 'node:assert/strict';
 import {
   buildMonthCalendarDays,
   calculateNetShiftHours,
+  calculateOvertimeNetHours,
   calculateShiftMetrics,
   convertLunarToSolarIso,
   createDefaultAdminShift,
+  evaluateOvertimeDaySchedule,
   generateCompanyHolidaysForYear,
   getLunarHolidayAnchorsForYear,
   getMondayFirstMonthOffset,
   getNextWeekdayMode,
+  resolveWorkShiftForDepartment,
+  type WorkShift,
 } from './workScheduleLogic';
 
 describe('workScheduleLogic', () => {
@@ -188,4 +192,196 @@ describe('workScheduleLogic', () => {
     assert.equal(findDay('2026-04-19')?.category, 'weekly_off'); // Sunday off on shift
     assert.equal(findDay('2026-04-20')?.category, 'working'); // Monday working
   });
+
+  it('resolves department-specific shift and falls back to default shift when unmatched', () => {
+    const hc = createDefaultAdminShift();
+    const peShift: WorkShift = {
+      ...createDefaultAdminShift(),
+      id: 'PE1',
+      code: 'PE1',
+      name: 'Ca PE',
+      startTime: '07:30',
+      endTime: '16:30',
+      breakStart: '11:30',
+      breakEnd: '12:30',
+      workingDays: {
+        mon: 'full_day',
+        tue: 'full_day',
+        wed: 'full_day',
+        thu: 'full_day',
+        fri: 'full_day',
+        sat: 'morning',
+        sun: 'off',
+      },
+      dayOverrides: {
+        fri: { startTime: '07:30', endTime: '16:00' },
+      },
+      isDefault: false,
+      departmentNames: ['PE', 'ST'],
+    };
+
+    assert.equal(resolveWorkShiftForDepartment([hc, peShift], 'PE').code, 'PE1');
+    assert.equal(
+      resolveWorkShiftForDepartment([hc, peShift], 'ALL', ['ST']).code,
+      'PE1'
+    );
+    assert.equal(
+      resolveWorkShiftForDepartment([hc, peShift], 'AUTO 1').code,
+      'HC'
+    );
+  });
+
+  it('evaluates holidays, compensatory days, makeup work, weekly off, and morning shifts for overtime auto-fill', () => {
+    const hc = createDefaultAdminShift();
+    const peShift: WorkShift = {
+      ...createDefaultAdminShift(),
+      id: 'PE1',
+      code: 'PE1',
+      name: 'Ca PE',
+      startTime: '07:30',
+      endTime: '16:30',
+      breakStart: '11:30',
+      breakEnd: '12:30',
+      workingDays: {
+        ...hc.workingDays,
+        sat: 'morning',
+      },
+      dayOverrides: {
+        fri: { endTime: '16:00' },
+      },
+      isDefault: false,
+      departmentNames: ['PE'],
+    };
+
+    const holidays = [
+      {
+        id: 'h-tet',
+        year: 2026,
+        holidayDate: '2026-04-30',
+        name: 'Ngày Giải phóng miền Nam (30/4)',
+        holidayType: 'holiday' as const,
+        isManual: false,
+      },
+      {
+        id: 'h-comp',
+        year: 2026,
+        holidayDate: '2026-04-27',
+        name: 'Nghỉ bù Giỗ Tổ',
+        holidayType: 'compensatory' as const,
+        isManual: false,
+      },
+      {
+        id: 'h-makeup',
+        year: 2026,
+        holidayDate: '2026-05-09',
+        name: 'Làm bù hoán đổi',
+        holidayType: 'makeup_work' as const,
+        isManual: true,
+      },
+    ];
+
+    const holidayEval = evaluateOvertimeDaySchedule({
+      isoDate: '2026-04-30',
+      holidays,
+      shifts: [hc, peShift],
+      departmentName: 'ALL',
+    });
+    assert.equal(holidayEval.dayKind, 'holiday');
+    assert.equal(holidayEval.suggestedStartTime, '08:00');
+    assert.deepEqual(holidayEval.quickEndSuggestions, ['12:00', '17:00', '20:00']);
+    assert.ok(holidayEval.bannerText.includes('Áp dụng đơn giá tăng ca Lễ/Tết'));
+
+    const compEval = evaluateOvertimeDaySchedule({
+      isoDate: '2026-04-27',
+      holidays,
+      shifts: [hc, peShift],
+    });
+    assert.equal(compEval.dayKind, 'compensatory_off');
+    assert.equal(compEval.suggestedStartTime, '08:00');
+    assert.ok(compEval.bannerText.includes('Ngày nghỉ bù / hoán đổi'));
+
+    const makeupEval = evaluateOvertimeDaySchedule({
+      isoDate: '2026-05-09',
+      holidays,
+      shifts: [hc, peShift],
+    });
+    assert.equal(makeupEval.dayKind, 'makeup_work');
+    assert.equal(makeupEval.suggestedStartTime, '17:00');
+
+    // Saturday morning on PE shift -> start at breakStart 11:30
+    const satMorningEval = evaluateOvertimeDaySchedule({
+      isoDate: '2026-11-21', // Saturday
+      holidays,
+      shifts: [hc, peShift],
+      departmentName: 'PE',
+    });
+    assert.equal(satMorningEval.dayKind, 'morning_work');
+    assert.equal(satMorningEval.suggestedStartTime, '11:30');
+
+    // Friday override on PE shift -> end_time = 16:00
+    const friOverrideEval = evaluateOvertimeDaySchedule({
+      isoDate: '2026-11-20', // Friday
+      holidays,
+      shifts: [hc, peShift],
+      departmentName: 'PE',
+    });
+    assert.equal(friOverrideEval.dayKind, 'working');
+    assert.equal(friOverrideEval.suggestedStartTime, '16:00');
+
+    // Sunday on HC shift -> weekly_off
+    const sunOffEval = evaluateOvertimeDaySchedule({
+      isoDate: '2026-11-22', // Sunday
+      holidays,
+      shifts: [hc, peShift],
+    });
+    assert.equal(sunOffEval.dayKind, 'weekly_off');
+    assert.equal(sunOffEval.suggestedStartTime, '08:00');
+    assert.deepEqual(sunOffEval.quickEndSuggestions, ['12:00', '17:00', '20:00']);
+  });
+
+  it('calculates net overtime hours subtracting overlapping mid-shift and dinner breaks without double counting', () => {
+    // Sunday 08:00 - 17:00 with 12:00 - 13:00 lunch break -> 8h net
+    const fullDay = calculateOvertimeNetHours({
+      startTime: '08:00',
+      endTime: '17:00',
+      breakWindows: [{ startTime: '12:00', endTime: '13:00', label: 'Nghỉ giữa ca' }],
+    });
+    assert.equal(fullDay.rawHours, 9);
+    assert.equal(fullDay.deductedBreakHours, 1);
+    assert.equal(fullDay.netHours, 8);
+
+    // Partial overlap 08:00 - 12:30 with 12:00 - 13:00 -> 4h net
+    const partial = calculateOvertimeNetHours({
+      startTime: '08:00',
+      endTime: '12:30',
+      breakWindows: [{ startTime: '12:00', endTime: '13:00', label: 'Nghỉ giữa ca' }],
+    });
+    assert.equal(partial.netHours, 4);
+
+    // Full-day + evening 08:00 - 20:00 with 12:00-13:00 lunch AND 17:30-18:00 dinner -> 10.5h net
+    const withDinner = calculateOvertimeNetHours({
+      startTime: '08:00',
+      endTime: '20:00',
+      breakWindows: [
+        { startTime: '12:00', endTime: '13:00', label: 'Nghỉ giữa ca' },
+        { startTime: '17:30', endTime: '18:00', label: 'Nghỉ ăn tối' },
+      ],
+    });
+    assert.equal(withDinner.rawHours, 12);
+    assert.equal(withDinner.deductedBreakHours, 1.5);
+    assert.equal(withDinner.netHours, 10.5);
+
+    // Overlapping break ranges must not double subtract
+    const overlappingBreaks = calculateOvertimeNetHours({
+      startTime: '17:00',
+      endTime: '20:00',
+      breakWindows: [
+        { startTime: '17:30', endTime: '18:00', label: 'Break 1' },
+        { startTime: '17:45', endTime: '18:15', label: 'Break 2' },
+      ],
+    });
+    assert.equal(overlappingBreaks.deductedBreakHours, 0.75);
+    assert.equal(overlappingBreaks.netHours, 2.25);
+  });
 });
+

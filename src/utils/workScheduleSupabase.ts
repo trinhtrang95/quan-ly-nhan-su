@@ -289,6 +289,9 @@ export function mapSupabaseRowToWorkShift(row: SupabaseWorkShiftRow): WorkShift 
 }
 
 function normalizeHolidayType(raw?: string | null): HolidayType {
+  if (raw === 'compensatory_off') {
+    return 'compensatory';
+  }
   const valid = new Set<HolidayType>([
     'holiday',
     'compensatory',
@@ -827,6 +830,50 @@ export async function fetchCompanyHolidays(
   }
 }
 
+export async function fetchAllCompanyHolidays(): Promise<{
+  holidays: CompanyHoliday[];
+  source: 'supabase' | 'local';
+}> {
+  try {
+    const rows = await overtimeSupabase.request<SupabaseCompanyHolidayRow[]>(
+      'company_holidays?select=*&order=holiday_date.asc'
+    );
+
+    const mapped = (Array.isArray(rows) ? rows : [])
+      .map(mapSupabaseRowToCompanyHoliday)
+      .sort((a, b) => a.holidayDate.localeCompare(b.holidayDate));
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(COMPANY_HOLIDAYS_STORAGE_KEY, JSON.stringify(mapped));
+      } catch {
+        // Ignore storage error
+      }
+    }
+
+    return {
+      holidays: mapped,
+      source: 'supabase',
+    };
+  } catch {
+    if (typeof window === 'undefined') {
+      return { holidays: [], source: 'local' };
+    }
+    try {
+      const raw = localStorage.getItem(COMPANY_HOLIDAYS_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as CompanyHoliday[]) : [];
+      return {
+        holidays: Array.isArray(parsed)
+          ? parsed.sort((a, b) => a.holidayDate.localeCompare(b.holidayDate))
+          : [],
+        source: 'local',
+      };
+    } catch {
+      return { holidays: [], source: 'local' };
+    }
+  }
+}
+
 export async function replaceGeneratedCompanyHolidays(
   year: number,
   nextCombinedList: CompanyHoliday[],
@@ -993,7 +1040,7 @@ export interface CompanyHolidaysRealtimeEvent {
 export function applyRealtimeHolidayPayload(
   current: CompanyHoliday[],
   event: CompanyHolidaysRealtimeEvent,
-  year: number,
+  year?: number,
   _companyId?: string | null
 ): CompanyHoliday[] {
   if (event.eventType === 'DELETE') {
@@ -1007,7 +1054,7 @@ export function applyRealtimeHolidayPayload(
     event.newRow as unknown as SupabaseCompanyHolidayRow
   );
   if (!mapped.id) return current;
-  if (mapped.year !== year) {
+  if (typeof year === 'number' && mapped.year !== year) {
     return current.filter((item) => item.id !== mapped.id);
   }
   return [...current.filter((item) => item.id !== mapped.id), mapped].sort(

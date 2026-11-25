@@ -39,6 +39,19 @@ import {
   subscribeToOvertimeGlossaryRealtime,
 } from '../../utils/overtimeGlossaryService';
 import {
+  CompanyHoliday,
+  createDefaultAdminShift,
+  WorkShift,
+} from '../../utils/workScheduleLogic';
+import {
+  applyRealtimeHolidayPayload,
+  applyRealtimeWorkShiftPayload,
+  fetchAllCompanyHolidays,
+  fetchWorkShifts,
+  subscribeToCompanyHolidaysRealtime,
+  subscribeToWorkShiftsRealtime,
+} from '../../utils/workScheduleSupabase';
+import {
   CreateOvertimeForm,
   CreateOvertimeFormPayload,
 } from './CreateOvertimeForm';
@@ -78,6 +91,21 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   const [supabaseLeaveRecords, setSupabaseLeaveRecords] = useState<
     OvertimeLeaveCheckEntry[] | null
   >(null);
+  const [workShifts, setWorkShifts] = useState<WorkShift[]>(() => [
+    createDefaultAdminShift(),
+  ]);
+  const [companyHolidays, setCompanyHolidays] = useState<CompanyHoliday[]>([]);
+
+  const loadScheduleData = useCallback(async () => {
+    const [shiftsRes, holidaysRes] = await Promise.all([
+      fetchWorkShifts(),
+      fetchAllCompanyHolidays(),
+    ]);
+    if (shiftsRes.shifts.length > 0) {
+      setWorkShifts(shiftsRes.shifts);
+    }
+    setCompanyHolidays(holidaysRes.holidays);
+  }, []);
 
   const loadGlossary = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
@@ -151,6 +179,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     void loadForms();
     void loadLeaveRecords();
     void loadGlossary();
+    void loadScheduleData();
 
     let refreshTimer: number | null = null;
     const unsubscribeGlossaryRealtime = subscribeToOvertimeGlossaryRealtime(
@@ -166,13 +195,27 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       }
     );
 
+    const unsubscribeWorkShiftsRealtime = subscribeToWorkShiftsRealtime(
+      (event) => {
+        setWorkShifts((prev) => applyRealtimeWorkShiftPayload(prev, event));
+      }
+    );
+
+    const unsubscribeHolidaysRealtime = subscribeToCompanyHolidaysRealtime(
+      (event) => {
+        setCompanyHolidays((prev) => applyRealtimeHolidayPayload(prev, event));
+      }
+    );
+
     return () => {
       if (refreshTimer !== null) {
         window.clearTimeout(refreshTimer);
       }
       unsubscribeGlossaryRealtime();
+      unsubscribeWorkShiftsRealtime();
+      unsubscribeHolidaysRealtime();
     };
-  }, [loadForms, loadLeaveRecords, loadGlossary]);
+  }, [loadForms, loadLeaveRecords, loadGlossary, loadScheduleData]);
 
   const handleCreateOrOpenShell = async (overtimeDate: string) => {
     const res = await createOrOpenOvertimeShell(overtimeDate, {
@@ -455,6 +498,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             isCheckingExistingForms={isLoadingForms}
             editingForm={editingForm}
             glossaryEntries={glossaryEntries}
+            workShifts={workShifts}
+            companyHolidays={companyHolidays}
             onGlossaryEntriesUpdated={setGlossaryEntries}
             onOpenExistingForm={(form) => void handleStartEditForm(form)}
             onCancelEdit={handleCancelEdit}

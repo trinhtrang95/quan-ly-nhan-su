@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Calendar,
+  CalendarHeart,
   Check,
   CheckCircle2,
   ChevronUp,
   ChevronDown,
   Clock,
+  Coffee,
   FileSpreadsheet,
   Info,
   Save,
@@ -15,6 +17,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';  
@@ -55,11 +58,20 @@ import {
   formatTimeToFormStyle,
   overtimeExportService,
 } from '../../utils/overtimeExportService';
+import {
+  type BreakWindowInput,
+  calculateOvertimeNetHours,
+  type CompanyHoliday,
+  createDefaultAdminShift,
+  evaluateOvertimeDaySchedule,
+  type WorkShift,
+} from '../../utils/workScheduleLogic';
 
 export interface OvertimeParticipant {
   employeeId: string;
   startTime: string;
   endTime: string;
+  totalHours?: number;
 }
 
 export interface OvertimeTaskBlock {
@@ -91,6 +103,8 @@ export interface CreateOvertimeFormProps {
   editingForm?: OvertimeFormWithItems | null;
   glossaryRefreshKey?: number;
   glossaryEntries?: OvertimeGlossaryEntry[];
+  workShifts?: WorkShift[];
+  companyHolidays?: CompanyHoliday[];
   onGlossaryEntriesUpdated?: (entries: OvertimeGlossaryEntry[]) => void;
   onOpenExistingForm?: (form: OvertimeFormWithItems) => void;
   onCancelEdit?: () => void;
@@ -206,6 +220,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   editingForm = null,
   glossaryRefreshKey = 0,
   glossaryEntries: propGlossaryEntries,
+  workShifts: propWorkShifts,
+  companyHolidays = [],
   onGlossaryEntriesUpdated,
   onOpenExistingForm,
   onCancelEdit,
@@ -243,8 +259,37 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   });
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
 
-  const [currentStartTime, setCurrentStartTime] = useState<string>('16:10');
-  const [currentEndTime, setCurrentEndTime] = useState<string>('18:10');
+  const [currentStartTime, setCurrentStartTime] = useState<string>('17:00');
+  const [currentEndTime, setCurrentEndTime] = useState<string>('19:00');
+  const [isStartTimeManuallyEdited, setIsStartTimeManuallyEdited] = useState<boolean>(false);
+  const [isEndTimeManuallyEdited, setIsEndTimeManuallyEdited] = useState<boolean>(false);
+  const [deductDinnerBreak, setDeductDinnerBreak] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ot_dinner_break_v1');
+      if (saved) return Boolean(JSON.parse(saved).enabled);
+    } catch {
+      // ignore storage error
+    }
+    return false;
+  });
+  const [dinnerBreakStart, setDinnerBreakStart] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('ot_dinner_break_v1');
+      if (saved) return JSON.parse(saved).startTime || '17:30';
+    } catch {
+      // ignore storage error
+    }
+    return '17:30';
+  });
+  const [dinnerBreakEnd, setDinnerBreakEnd] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('ot_dinner_break_v1');
+      if (saved) return JSON.parse(saved).endTime || '18:00';
+    } catch {
+      // ignore storage error
+    }
+    return '18:00';
+  });
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
@@ -309,6 +354,95 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     return normalizeTargetGroups(depts);
   }, [currentSelectedEmployeeIds, employees]);
 
+  const effectiveWorkShifts = useMemo<WorkShift[]>(
+    () =>
+      propWorkShifts && propWorkShifts.length > 0
+        ? propWorkShifts
+        : [createDefaultAdminShift()],
+    [propWorkShifts]
+  );
+
+  const dayEvaluation = useMemo(
+    () =>
+      evaluateOvertimeDaySchedule({
+        isoDate: blockOvertimeDate || shellOvertimeDate || getLocalTodayIsoDate(),
+        holidays: companyHolidays,
+        shifts: effectiveWorkShifts,
+        departmentName: selectedGroupFilter,
+        employeeDepartments: selectedEmployeeDepartments,
+      }),
+    [
+      blockOvertimeDate,
+      shellOvertimeDate,
+      companyHolidays,
+      effectiveWorkShifts,
+      selectedGroupFilter,
+      selectedEmployeeDepartments,
+    ]
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'ot_dinner_break_v1',
+        JSON.stringify({
+          enabled: deductDinnerBreak,
+          startTime: dinnerBreakStart,
+          endTime: dinnerBreakEnd,
+        })
+      );
+    } catch {
+      // ignore storage error
+    }
+  }, [deductDinnerBreak, dinnerBreakStart, dinnerBreakEnd]);
+
+  useEffect(() => {
+    if (!editingBlockId && !isStartTimeManuallyEdited) {
+      setCurrentStartTime(dayEvaluation.suggestedStartTime);
+    }
+  }, [editingBlockId, isStartTimeManuallyEdited, dayEvaluation.suggestedStartTime]);
+
+  useEffect(() => {
+    if (!editingBlockId && !isEndTimeManuallyEdited) {
+      setCurrentEndTime(dayEvaluation.suggestedDefaultEndTime);
+    }
+  }, [editingBlockId, isEndTimeManuallyEdited, dayEvaluation.suggestedDefaultEndTime]);
+
+  const activeBreakWindows = useMemo<BreakWindowInput[]>(() => {
+    const windows: BreakWindowInput[] = [];
+    if (dayEvaluation.daySchedule.breakStart && dayEvaluation.daySchedule.breakEnd) {
+      windows.push({
+        startTime: dayEvaluation.daySchedule.breakStart,
+        endTime: dayEvaluation.daySchedule.breakEnd,
+        label: 'Nghỉ giữa ca',
+      });
+    }
+    if (deductDinnerBreak && dinnerBreakStart && dinnerBreakEnd) {
+      windows.push({
+        startTime: dinnerBreakStart,
+        endTime: dinnerBreakEnd,
+        label: 'Nghỉ ăn tối tăng ca',
+      });
+    }
+    return windows;
+  }, [
+    dayEvaluation.daySchedule.breakStart,
+    dayEvaluation.daySchedule.breakEnd,
+    deductDinnerBreak,
+    dinnerBreakStart,
+    dinnerBreakEnd,
+  ]);
+
+  const draftNetHoursResult = useMemo(
+    () =>
+      calculateOvertimeNetHours({
+        startTime: currentStartTime,
+        endTime: currentEndTime,
+        breakWindows: activeBreakWindows,
+      }),
+    [currentStartTime, currentEndTime, activeBreakWindows]
+  );
+
   // MỚI: Chỉ hiển thị các lý do Đã duyệt, ưu tiên theo Nhóm/Phòng ban đang chọn hoặc nhân sự đang tick
   const filteredGlossary = useMemo(
     () =>
@@ -361,6 +495,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       setBlockOvertimeDate(formDate);
       setPreviewData(reconstructed);
       setEditingBlockId(null);
+      setIsStartTimeManuallyEdited(false);
+      setIsEndTimeManuallyEdited(false);
       setCurrentSelectedEmployeeIds([]);
       setCustomTimes({});
       setEditingTimeEmpId(null);
@@ -522,18 +658,68 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     );
   }, [onLeaveMapForCurrentDate, blockOvertimeDate, currentSelectedEmployeeIds]);
 
+  const getNetHoursForParticipant = (
+    isoDate: string,
+    empId: string,
+    startTime: string,
+    endTime: string
+  ) => {
+    const empDept = (employeeMap.get(empId)?.department || '').trim();
+    const evalForEmp = evaluateOvertimeDaySchedule({
+      isoDate: isoDate || shellOvertimeDate || getLocalTodayIsoDate(),
+      holidays: companyHolidays,
+      shifts: effectiveWorkShifts,
+      departmentName: empDept || selectedGroupFilter,
+      employeeDepartments: empDept ? [empDept] : [],
+    });
+    const windows: BreakWindowInput[] = [];
+    if (evalForEmp.daySchedule.breakStart && evalForEmp.daySchedule.breakEnd) {
+      windows.push({
+        startTime: evalForEmp.daySchedule.breakStart,
+        endTime: evalForEmp.daySchedule.breakEnd,
+        label: 'Nghỉ giữa ca',
+      });
+    }
+    if (deductDinnerBreak && dinnerBreakStart && dinnerBreakEnd) {
+      windows.push({
+        startTime: dinnerBreakStart,
+        endTime: dinnerBreakEnd,
+        label: 'Nghỉ ăn tối tăng ca',
+      });
+    }
+    return calculateOvertimeNetHours({
+      startTime,
+      endTime,
+      breakWindows: windows,
+    });
+  };
+
   const summaryStats = useMemo(() => {
     let totalParticipants = 0;
     let totalHours = 0;
     const dateSet = new Set<string>();
     for (const block of previewData) {
       if (block.overtimeDate) dateSet.add(block.overtimeDate);
-      const parts = Array.isArray(block.participants) && block.participants.length > 0
+      const parts: OvertimeParticipant[] =
+        Array.isArray(block.participants) && block.participants.length > 0
           ? block.participants
-          : block.selectedEmployeeIds.map((id) => ({ employeeId: id, startTime: block.startTime, endTime: block.endTime }));
+          : block.selectedEmployeeIds.map((id) => ({
+              employeeId: id,
+              startTime: block.startTime,
+              endTime: block.endTime,
+            }));
       totalParticipants += parts.length;
       for (const p of parts) {
-        totalHours += OvertimeFormService.calculateDurationHours(p.startTime || block.startTime, p.endTime || block.endTime);
+        if (typeof p.totalHours === 'number' && Number.isFinite(p.totalHours)) {
+          totalHours += p.totalHours;
+        } else {
+          totalHours += getNetHoursForParticipant(
+            block.overtimeDate || shellOvertimeDate,
+            p.employeeId,
+            p.startTime || block.startTime,
+            p.endTime || block.endTime
+          ).netHours;
+        }
       }
     }
     return {
@@ -542,7 +728,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       totalHours: Number(totalHours.toFixed(2)),
       datesCount: dateSet.size || (previewData.length > 0 ? 1 : 0),
     };
-  }, [previewData]);
+  }, [previewData, employeeMap, companyHolidays, effectiveWorkShifts, selectedGroupFilter, deductDinnerBreak, dinnerBreakStart, dinnerBreakEnd, shellOvertimeDate]);
 
   const todayIso = getLocalTodayIsoDate();
 
@@ -693,9 +879,11 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     const block = previewData[index];
     if (!block) return;
     setEditingBlockId(block.id);
+    setIsStartTimeManuallyEdited(true);
+    setIsEndTimeManuallyEdited(true);
     setBlockOvertimeDate(block.overtimeDate || shellOvertimeDate || getLocalTodayIsoDate());
-    setCurrentStartTime(block.startTime || '16:10');
-    setCurrentEndTime(block.endTime || '18:10');
+    setCurrentStartTime(block.startTime || dayEvaluation.suggestedStartTime || '17:00');
+    setCurrentEndTime(block.endTime || dayEvaluation.suggestedDefaultEndTime || '19:00');
     setCurrentSelectedEmployeeIds([...block.selectedEmployeeIds]);
     const nextCustom: Record<string, { startTime: string; endTime: string }> = {};
     for (const p of block.participants || []) {
@@ -714,6 +902,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
   const handleCancelBlockEdit = () => {
     setEditingBlockId(null);
+    setIsStartTimeManuallyEdited(false);
+    setIsEndTimeManuallyEdited(false);
     setBlockOvertimeDate(shellOvertimeDate || getLocalTodayIsoDate());
     setCurrentSelectedEmployeeIds([]);
     setCustomTimes({});
@@ -787,8 +977,14 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         return;
       }
 
-      const normalizedStart = OvertimeFormService.normalize24hTime(currentStartTime, '16:10');
-      const normalizedEnd = OvertimeFormService.normalize24hTime(currentEndTime, '18:10');
+      const normalizedStart = OvertimeFormService.normalize24hTime(
+        currentStartTime,
+        dayEvaluation.suggestedStartTime || '17:00'
+      );
+      const normalizedEnd = OvertimeFormService.normalize24hTime(
+        currentEndTime,
+        dayEvaluation.suggestedDefaultEndTime || '19:00'
+      );
       setCurrentStartTime(normalizedStart);
       setCurrentEndTime(normalizedEnd);
 
@@ -822,10 +1018,23 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
       const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map((empId) => {
         const custom = customTimes[empId];
+        const pStart = custom?.startTime
+          ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart)
+          : normalizedStart;
+        const pEnd = custom?.endTime
+          ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd)
+          : normalizedEnd;
+        const netResult = getNetHoursForParticipant(
+          resolvedBlockDate,
+          empId,
+          pStart,
+          pEnd
+        );
         return {
           employeeId: empId,
-          startTime: custom?.startTime ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart) : normalizedStart,
-          endTime: custom?.endTime ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd) : normalizedEnd,
+          startTime: pStart,
+          endTime: pEnd,
+          totalHours: netResult.netHours,
         };
       });
 
@@ -869,6 +1078,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
 
       // Reset Form sau khi Ghi nhận
       setBlockOvertimeDate(shellOvertimeDate || getLocalTodayIsoDate());
+      setIsStartTimeManuallyEdited(false);
+      setIsEndTimeManuallyEdited(false);
       setCurrentReasonVi('');
       setCurrentReasonKr('');
       setIsReasonKrManuallyEdited(false);
@@ -1076,6 +1287,38 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               <div className="leading-snug">
                 <span className="font-bold">Phiếu đã chốt:</span> Đã khóa chức năng sửa và lưu. Để chỉnh sửa lại, vui lòng sử dụng{' '}
                 <strong>Mở khóa khẩn cấp</strong> tại tab Nhật ký.
+              </div>
+            </div>
+          )}
+
+          {dayEvaluation.bannerTone !== 'none' && (
+            <div
+              role="status"
+              data-testid="overtime-day-schedule-banner"
+              data-day-kind={dayEvaluation.dayKind}
+              className={`rounded-xl border px-3 py-2 text-[11px] flex items-start gap-2 ${
+                dayEvaluation.bannerTone === 'holiday'
+                  ? 'border-purple-300 bg-gradient-to-r from-purple-50 to-rose-50 text-purple-900 shadow-2xs'
+                  : dayEvaluation.bannerTone === 'compensatory'
+                    ? 'border-violet-300 bg-violet-50 text-violet-900'
+                    : dayEvaluation.bannerTone === 'weekly_off'
+                      ? 'border-orange-200 bg-orange-50 text-orange-900'
+                      : dayEvaluation.bannerTone === 'morning'
+                        ? 'border-amber-200 bg-amber-50 text-amber-900'
+                        : 'border-blue-200 bg-blue-50/80 text-[#14539E]'
+              }`}
+            >
+              {dayEvaluation.bannerTone === 'holiday' ? (
+                <CalendarHeart className="w-4 h-4 text-purple-700 shrink-0 mt-0.5" />
+              ) : dayEvaluation.bannerTone === 'compensatory' ? (
+                <Sparkles className="w-3.5 h-3.5 text-violet-700 shrink-0 mt-0.5" />
+              ) : dayEvaluation.bannerTone === 'weekly_off' ? (
+                <Clock className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
+              ) : (
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              )}
+              <div className="leading-snug font-semibold">
+                {dayEvaluation.bannerText}
               </div>
             </div>
           )}
@@ -1452,48 +1695,205 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             )}
           </div>
 
-          {/* HÀNG 3: GIỜ BẮT ĐẦU / KẾT THÚC */}
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">Giờ bắt đầu (chung)</label>
-              <div className="relative">
-                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={5}
-                  value={currentStartTime}
-                  onChange={(e) => setCurrentStartTime(OvertimeFormService.sanitize24hTimeInput(e.target.value))}
-                  onBlur={() => setCurrentStartTime((prev) => OvertimeFormService.normalize24hTime(prev, '16:10'))}
-                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-                />
+          {/* HÀNG 3: GIỜ BẮT ĐẦU / KẾT THÚC & TÍNH GIỜ THỰC TẾ */}
+          <div className="space-y-2 mt-3">
+            <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
+              <span>
+                Ca áp dụng:{' '}
+                <strong className="font-mono text-[#14539E]">
+                  {dayEvaluation.shift.code}
+                </strong>{' '}
+                ({dayEvaluation.daySchedule.startTime}–{dayEvaluation.daySchedule.endTime}
+                {dayEvaluation.daySchedule.breakStart &&
+                dayEvaluation.daySchedule.breakEnd
+                  ? ` · Nghỉ ${dayEvaluation.daySchedule.breakStart}–${dayEvaluation.daySchedule.breakEnd}`
+                  : ''}
+                )
+              </span>
+              {(isStartTimeManuallyEdited || isEndTimeManuallyEdited) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsStartTimeManuallyEdited(false);
+                    setIsEndTimeManuallyEdited(false);
+                  }}
+                  className="text-[10px] font-semibold text-[#14539E] hover:underline cursor-pointer shrink-0"
+                >
+                  Theo giờ ca
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label
+                  htmlFor="overtime-start-time-input"
+                  className="block text-[11px] font-semibold text-slate-600 mb-0.5"
+                >
+                  Giờ bắt đầu (chung)
+                </label>
+                <div className="relative">
+                  <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="overtime-start-time-input"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={5}
+                    value={currentStartTime}
+                    onChange={(e) => {
+                      setIsStartTimeManuallyEdited(true);
+                      setCurrentStartTime(
+                        OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                      );
+                    }}
+                    onBlur={() =>
+                      setCurrentStartTime((prev) =>
+                        OvertimeFormService.normalize24hTime(
+                          prev,
+                          dayEvaluation.suggestedStartTime || '17:00'
+                        )
+                      )
+                    }
+                    className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                  />
+                </div>
+              </div>
+              <div>
+                <label
+                  htmlFor="overtime-end-time-input"
+                  className="block text-[11px] font-semibold text-slate-600 mb-0.5"
+                >
+                  Giờ kết thúc (chung)
+                </label>
+                <div className="relative">
+                  <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="overtime-end-time-input"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={5}
+                    value={currentEndTime}
+                    onChange={(e) => {
+                      setIsEndTimeManuallyEdited(true);
+                      setCurrentEndTime(
+                        OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                      );
+                    }}
+                    onBlur={() =>
+                      setCurrentEndTime((prev) =>
+                        OvertimeFormService.normalize24hTime(
+                          prev,
+                          dayEvaluation.suggestedDefaultEndTime || '19:00'
+                        )
+                      )
+                    }
+                    className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  {dayEvaluation.quickEndSuggestions.map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => {
+                        setIsEndTimeManuallyEdited(true);
+                        setCurrentEndTime(time);
+                      }}
+                      className={`px-2 py-0.5 text-[10px] font-mono font-medium rounded border transition-colors cursor-pointer ${
+                        currentEndTime === time
+                          ? 'bg-[#14539E] text-white border-[#14539E]'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-[#14539E] hover:border-blue-200'
+                      }`}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">Giờ kết thúc (chung)</label>
-              <div className="relative">
-                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={5}
-                  value={currentEndTime}
-                  onChange={(e) => setCurrentEndTime(OvertimeFormService.sanitize24hTimeInput(e.target.value))}
-                  onBlur={() => setCurrentEndTime((prev) => OvertimeFormService.normalize24hTime(prev, '18:10'))}
-                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-                />
+
+            {/* Khung giờ công thực tế & Tùy chọn nghỉ ăn tối tăng ca */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-2 space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                <span className="text-slate-600 font-medium">
+                  Giờ tăng ca thực tế:
+                </span>
+                <span
+                  data-testid="overtime-net-hours-preview"
+                  className="font-mono font-bold text-[#14539E] tabular-nums"
+                >
+                  {formatNumberVN(draftNetHoursResult.netHours)} giờ
+                  {draftNetHoursResult.deductedBreakHours > 0 && (
+                    <span className="font-sans font-normal text-[10px] text-slate-500 ml-1">
+                      (Tổng {formatNumberVN(draftNetHoursResult.rawHours)}g −{' '}
+                      {formatNumberVN(draftNetHoursResult.deductedBreakHours)}g nghỉ)
+                    </span>
+                  )}
+                </span>
               </div>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                {['19:10', '20:10', '20:40'].map(time => (
-                  <button
-                    key={time}
-                    type="button"
-                    onClick={() => setCurrentEndTime(time)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-[#14539E] hover:border-blue-200 transition-colors cursor-pointer"
-                  >
-                    {time}
-                  </button>
-                ))}
+
+              {draftNetHoursResult.appliedBreaks.length > 0 && (
+                <div className="text-[10px] text-slate-500 flex flex-wrap gap-x-2 gap-y-0.5">
+                  {draftNetHoursResult.appliedBreaks.map((brk, idx) => (
+                    <span key={`${brk.label}-${idx}`} className="tabular-nums">
+                      • Đã trừ {brk.label} ({brk.startTime}–{brk.endTime}:{' '}
+                      {formatNumberVN(Number((brk.deductedMinutes / 60).toFixed(2)))}g)
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-1 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={deductDinnerBreak}
+                    onChange={(e) => setDeductDinnerBreak(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#14539E] focus:ring-[#14539E]"
+                  />
+                  <Coffee className="w-3 h-3 text-slate-500" />
+                  <span>Trừ nghỉ ăn tối tăng ca</span>
+                </label>
+
+                {deductDinnerBreak && (
+                  <div className="inline-flex items-center gap-1">
+                    <input
+                      type="text"
+                      maxLength={5}
+                      value={dinnerBreakStart}
+                      onChange={(e) =>
+                        setDinnerBreakStart(
+                          OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                        )
+                      }
+                      onBlur={() =>
+                        setDinnerBreakStart((prev) =>
+                          OvertimeFormService.normalize24hTime(prev, '17:30')
+                        )
+                      }
+                      aria-label="Nghỉ ăn tối từ"
+                      className="w-12 h-6 px-1 text-[10px] font-mono text-center rounded border border-slate-300 bg-white focus:outline-none focus:border-[#14539E]"
+                    />
+                    <span className="text-[10px] text-slate-400">–</span>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      value={dinnerBreakEnd}
+                      onChange={(e) =>
+                        setDinnerBreakEnd(
+                          OvertimeFormService.sanitize24hTimeInput(e.target.value)
+                        )
+                      }
+                      onBlur={() =>
+                        setDinnerBreakEnd((prev) =>
+                          OvertimeFormService.normalize24hTime(prev, '18:00')
+                        )
+                      }
+                      aria-label="Nghỉ ăn tối đến"
+                      className="w-12 h-6 px-1 text-[10px] font-mono text-center rounded border border-slate-300 bg-white focus:outline-none focus:border-[#14539E]"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1840,8 +2240,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             <strong className="font-mono text-slate-700">
               {formatDateToFormStyle(shellOvertimeDate)}
             </strong>{' '}
-- Tổng số nhóm:{' '}
-            <strong className="font-mono text-slate-700">{formatNumberVN(summaryStats.blockCount)}</strong> ({formatNumberVN(summaryStats.totalParticipants)} lượt • {summaryStats.datesCount} ngày)
+            • Tổng số nhóm:{' '}
+            <strong className="font-mono text-slate-700">{formatNumberVN(summaryStats.blockCount)}</strong> ({formatNumberVN(summaryStats.totalParticipants)} lượt • {summaryStats.datesCount} ngày • <strong className="font-mono text-[#14539E]">{formatNumberVN(summaryStats.totalHours)} giờ</strong>)
           </div>
           <div className="flex items-center gap-2.5 shrink-0">
             

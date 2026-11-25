@@ -812,3 +812,477 @@ export function getMondayFirstMonthOffset(year: number, month: number): number {
   const jsDay = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
   return jsDay === 0 ? 6 : jsDay - 1;
 }
+
+// ============================================================================
+// Overtime Automation & Net Working Hours Helpers
+// ============================================================================
+
+export type OvertimeDayKind =
+  | 'holiday'
+  | 'compensatory_off'
+  | 'makeup_work'
+  | 'weekly_off'
+  | 'morning_work'
+  | 'working';
+
+export type OvertimeDayBannerTone =
+  | 'holiday'
+  | 'compensatory'
+  | 'makeup'
+  | 'weekly_off'
+  | 'morning'
+  | 'none';
+
+export interface EffectiveShiftDaySchedule {
+  weekdayKey: WeekdayKey;
+  rawMode: WeekdayWorkMode;
+  effectiveMode: 'full_day' | 'morning' | 'off';
+  startTime: string;
+  endTime: string;
+  breakStart: string;
+  breakEnd: string;
+  morningEndTime: string;
+}
+
+export interface OvertimeDayEvaluation {
+  isoDate: string;
+  shift: WorkShift;
+  daySchedule: EffectiveShiftDaySchedule;
+  dayKind: OvertimeDayKind;
+  matchedHoliday: CompanyHoliday | null;
+  bannerTone: OvertimeDayBannerTone;
+  bannerText: string;
+  suggestedStartTime: string;
+  suggestedDefaultEndTime: string;
+  quickEndSuggestions: string[];
+}
+
+export interface BreakWindowInput {
+  startTime?: string | null;
+  endTime?: string | null;
+  label?: string;
+}
+
+export interface AppliedBreakDeduction {
+  label: string;
+  startTime: string;
+  endTime: string;
+  deductedMinutes: number;
+}
+
+export interface OvertimeNetHoursResult {
+  rawHours: number;
+  deductedBreakHours: number;
+  netHours: number;
+  appliedBreaks: AppliedBreakDeduction[];
+}
+
+export function formatMinutesToHHMM(totalMinutes: number): string {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  const hh = Math.floor(normalized / 60);
+  const mm = normalized % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/**
+ * Resolves which WorkShift applies to the given department (or selected employees' departments),
+ * preferring a shift whose `departmentNames` (`target_groups`) contains the department,
+ * otherwise falling back to the shift marked `isDefault === true`.
+ */
+export function resolveWorkShiftForDepartment(
+  shifts: WorkShift[],
+  departmentName?: string | null,
+  employeeDepartments: string[] = []
+): WorkShift {
+  const safeShifts = Array.isArray(shifts) && shifts.length > 0
+    ? shifts
+    : [createDefaultAdminShift()];
+
+  const candidates: string[] = [];
+  const cleanFilter = (departmentName || '').trim();
+  if (cleanFilter && cleanFilter.toUpperCase() !== 'ALL') {
+    candidates.push(cleanFilter.toLowerCase());
+  }
+  for (const dept of employeeDepartments) {
+    const clean = (dept || '').trim().toLowerCase();
+    if (clean && !candidates.includes(clean)) {
+      candidates.push(clean);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const dedicatedMatch = safeShifts.find(
+      (s) =>
+        !s.isDefault &&
+        (s.departmentNames || []).some(
+          (d) => d.trim().toLowerCase() === candidate
+        )
+    );
+    if (dedicatedMatch) return dedicatedMatch;
+
+    const anyMatch = safeShifts.find((s) =>
+      (s.departmentNames || []).some((d) => d.trim().toLowerCase() === candidate)
+    );
+    if (anyMatch) return anyMatch;
+  }
+
+  return (
+    safeShifts.find((s) => s.isDefault) ||
+    safeShifts[0] ||
+    createDefaultAdminShift()
+  );
+}
+
+/**
+ * Resolves the effective schedule for `isoDate` on a given shift,
+ * prioritizing `dayOverrides` (`weekly_schedule`) over the shift's base times.
+ */
+export function getEffectiveShiftDaySchedule(
+  shift: WorkShift,
+  isoDate: string
+): EffectiveShiftDaySchedule {
+  const weekdayKey = getWeekdayKeyFromIsoDate(isoDate);
+  const rawMode: WeekdayWorkMode = shift.workingDays?.[weekdayKey] ?? 'off';
+
+  let effectiveMode: 'full_day' | 'morning' | 'off';
+  if (rawMode === 'off') {
+    effectiveMode = 'off';
+  } else if (rawMode === 'morning') {
+    effectiveMode = 'morning';
+  } else if (rawMode === 'biweekly') {
+    effectiveMode = getIsoWeekNumber(isoDate) % 2 === 0 ? 'off' : 'full_day';
+  } else {
+    effectiveMode = 'full_day';
+  }
+
+  const override = shift.dayOverrides?.[weekdayKey];
+  const startTime = override?.startTime?.trim() || shift.startTime || '08:00';
+  const endTime = override?.endTime?.trim() || shift.endTime || '17:00';
+  const breakStart =
+    override?.breakStart !== undefined
+      ? override.breakStart.trim()
+      : (shift.breakStart || '').trim();
+  const breakEnd =
+    override?.breakEnd !== undefined
+      ? override.breakEnd.trim()
+      : (shift.breakEnd || '').trim();
+
+  let morningEndTime = breakStart || '12:00';
+  if (effectiveMode === 'morning') {
+    if (override?.endTime?.trim()) {
+      morningEndTime = override.endTime.trim();
+    } else if (breakStart) {
+      morningEndTime = breakStart;
+    } else {
+      const sMin = parseTimeToMinutes(startTime);
+      const eMin = parseTimeToMinutes(endTime);
+      if (sMin !== null && eMin !== null && eMin > sMin) {
+        morningEndTime = formatMinutesToHHMM(sMin + Math.floor((eMin - sMin) / 2));
+      } else {
+        morningEndTime = '12:00';
+      }
+    }
+  }
+
+  return {
+    weekdayKey,
+    rawMode,
+    effectiveMode,
+    startTime,
+    endTime,
+    breakStart,
+    breakEnd,
+    morningEndTime,
+  };
+}
+
+function buildWorkdayQuickEndSuggestions(startTime: string): string[] {
+  const startMin = parseTimeToMinutes(startTime);
+  if (startMin === null) return ['19:00', '20:00', '21:00'];
+
+  const offsets = [120, 180, 210];
+  const results: string[] = [];
+  for (const offset of offsets) {
+    const target = startMin + offset;
+    if (target < 24 * 60) {
+      const formatted = formatMinutesToHHMM(target);
+      if (!results.includes(formatted)) {
+        results.push(formatted);
+      }
+    }
+  }
+  return results.length > 0 ? results : ['19:00', '20:00', '21:00'];
+}
+
+function buildMorningQuickEndSuggestions(morningEndTime: string, shiftEndTime: string): string[] {
+  const startMin = parseTimeToMinutes(morningEndTime) ?? 12 * 60;
+  const candidates = [shiftEndTime || '17:00', '19:00', '20:00'];
+  const unique: string[] = [];
+  for (const c of candidates) {
+    const m = parseTimeToMinutes(c);
+    if (m !== null && m > startMin && !unique.includes(c)) {
+      unique.push(c);
+    }
+  }
+  if (unique.length === 0) {
+    return buildWorkdayQuickEndSuggestions(morningEndTime);
+  }
+  return unique;
+}
+
+/**
+ * Classifies an overtime date against `company_holidays` and the resolved `WorkShift`,
+ * returning banner metadata, auto-filled start time, and quick end-time suggestions.
+ */
+export function evaluateOvertimeDaySchedule(params: {
+  isoDate: string;
+  holidays: CompanyHoliday[];
+  shifts: WorkShift[];
+  departmentName?: string | null;
+  employeeDepartments?: string[];
+}): OvertimeDayEvaluation {
+  const {
+    isoDate,
+    holidays,
+    shifts,
+    departmentName,
+    employeeDepartments = [],
+  } = params;
+
+  const shift = resolveWorkShiftForDepartment(
+    shifts,
+    departmentName,
+    employeeDepartments
+  );
+  const daySchedule = getEffectiveShiftDaySchedule(shift, isoDate);
+
+  const dayHolidays = (holidays || []).filter(
+    (h) => (h.holidayDate || '').trim() === isoDate
+  );
+
+  const holidayMatch = dayHolidays.find((h) => h.holidayType === 'holiday');
+  const compMatch = dayHolidays.find(
+    (h) =>
+      h.holidayType === 'compensatory' ||
+      h.holidayType === 'swap_off' ||
+      (h.holidayType as string) === 'compensatory_off'
+  );
+  const makeupMatch = dayHolidays.find((h) => h.holidayType === 'makeup_work');
+  const morningMatch = dayHolidays.find((h) => h.holidayType === 'morning_work');
+
+  if (holidayMatch) {
+    return {
+      isoDate,
+      shift,
+      daySchedule,
+      dayKind: 'holiday',
+      matchedHoliday: holidayMatch,
+      bannerTone: 'holiday',
+      bannerText: `Ngày nghỉ lễ, tết: ${holidayMatch.name} (Áp dụng đơn giá tăng ca Lễ/Tết)`,
+      suggestedStartTime: daySchedule.startTime,
+      suggestedDefaultEndTime: daySchedule.endTime || '17:00',
+      quickEndSuggestions: ['12:00', '17:00', '20:00'],
+    };
+  }
+
+  if (compMatch) {
+    return {
+      isoDate,
+      shift,
+      daySchedule,
+      dayKind: 'compensatory_off',
+      matchedHoliday: compMatch,
+      bannerTone: 'compensatory',
+      bannerText: `Ngày nghỉ bù / hoán đổi: ${compMatch.name}`,
+      suggestedStartTime: daySchedule.startTime,
+      suggestedDefaultEndTime: daySchedule.endTime || '17:00',
+      quickEndSuggestions: ['12:00', '17:00', '20:00'],
+    };
+  }
+
+  if (makeupMatch) {
+    const start = daySchedule.endTime;
+    const quick = buildWorkdayQuickEndSuggestions(start);
+    return {
+      isoDate,
+      shift,
+      daySchedule,
+      dayKind: 'makeup_work',
+      matchedHoliday: makeupMatch,
+      bannerTone: 'makeup',
+      bannerText: makeupMatch.name
+        ? `Ngày làm bù (${makeupMatch.name}) — xử lý theo lịch ngày làm việc bình thường`
+        : 'Ngày làm bù',
+      suggestedStartTime: start,
+      suggestedDefaultEndTime: quick[0] || '19:00',
+      quickEndSuggestions: quick,
+    };
+  }
+
+  if (morningMatch) {
+    const start = daySchedule.morningEndTime || daySchedule.breakStart || '12:00';
+    const quick = buildMorningQuickEndSuggestions(start, daySchedule.endTime);
+    return {
+      isoDate,
+      shift,
+      daySchedule,
+      dayKind: 'morning_work',
+      matchedHoliday: morningMatch,
+      bannerTone: 'morning',
+      bannerText: `Ca làm buổi sáng (${morningMatch.name}) — Tăng ca tính từ giờ tan ca sáng`,
+      suggestedStartTime: start,
+      suggestedDefaultEndTime: daySchedule.endTime || quick[0] || '17:00',
+      quickEndSuggestions: quick,
+    };
+  }
+
+  if (daySchedule.effectiveMode === 'off') {
+    return {
+      isoDate,
+      shift,
+      daySchedule,
+      dayKind: 'weekly_off',
+      matchedHoliday: null,
+      bannerTone: 'weekly_off',
+      bannerText: `Ngày nghỉ hằng tuần theo Ca làm việc (${shift.code} – ${shift.name})`,
+      suggestedStartTime: daySchedule.startTime,
+      suggestedDefaultEndTime: daySchedule.endTime || '17:00',
+      quickEndSuggestions: ['12:00', '17:00', '20:00'],
+    };
+  }
+
+  if (daySchedule.effectiveMode === 'morning') {
+    const start = daySchedule.morningEndTime || daySchedule.breakStart || '12:00';
+    const quick = buildMorningQuickEndSuggestions(start, daySchedule.endTime);
+    return {
+      isoDate,
+      shift,
+      daySchedule,
+      dayKind: 'morning_work',
+      matchedHoliday: null,
+      bannerTone: 'morning',
+      bannerText: `Ca làm buổi sáng (Tăng ca tính từ giờ tan ca sáng ${start})`,
+      suggestedStartTime: start,
+      suggestedDefaultEndTime: daySchedule.endTime || quick[0] || '17:00',
+      quickEndSuggestions: quick,
+    };
+  }
+
+  const start = daySchedule.endTime;
+  const quick = buildWorkdayQuickEndSuggestions(start);
+  return {
+    isoDate,
+    shift,
+    daySchedule,
+    dayKind: 'working',
+    matchedHoliday: null,
+    bannerTone: 'none',
+    bannerText: '',
+    suggestedStartTime: start,
+    suggestedDefaultEndTime: quick[0] || '19:00',
+    quickEndSuggestions: quick,
+  };
+}
+
+/**
+ * Computes net overtime working hours between `startTime` and `endTime`,
+ * subtracting any overlapping intervals from `breakWindows` (e.g., mid-shift break
+ * `break_start - break_end` and optional overtime dinner break), without double-counting
+ * overlapping break ranges.
+ */
+export function calculateOvertimeNetHours(params: {
+  startTime: string;
+  endTime: string;
+  breakWindows?: BreakWindowInput[];
+}): OvertimeNetHoursResult {
+  const s = parseTimeToMinutes(params.startTime);
+  const e = parseTimeToMinutes(params.endTime);
+  if (s === null || e === null || e <= s) {
+    return {
+      rawHours: 0,
+      deductedBreakHours: 0,
+      netHours: 0,
+      appliedBreaks: [],
+    };
+  }
+
+  const rawMinutes = e - s;
+  const overlaps: Array<{
+    start: number;
+    end: number;
+    label: string;
+    startTime: string;
+    endTime: string;
+  }> = [];
+
+  for (const bw of params.breakWindows || []) {
+    const bs = parseTimeToMinutes(bw.startTime);
+    const be = parseTimeToMinutes(bw.endTime);
+    if (bs === null || be === null || be <= bs) continue;
+
+    const overlapStart = Math.max(s, bs);
+    const overlapEnd = Math.min(e, be);
+    if (overlapEnd > overlapStart) {
+      overlaps.push({
+        start: overlapStart,
+        end: overlapEnd,
+        label: bw.label || 'Nghỉ giữa ca',
+        startTime: bw.startTime!.trim(),
+        endTime: bw.endTime!.trim(),
+      });
+    }
+  }
+
+  if (overlaps.length === 0) {
+    const rawHours = Number((rawMinutes / 60).toFixed(2));
+    return {
+      rawHours,
+      deductedBreakHours: 0,
+      netHours: rawHours,
+      appliedBreaks: [],
+    };
+  }
+
+  // Sort and merge overlapping break intervals so union minutes are never double-subtracted
+  overlaps.sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number }> = [];
+  const appliedBreaks: AppliedBreakDeduction[] = [];
+
+  for (const item of overlaps) {
+    if (merged.length === 0 || item.start >= merged[merged.length - 1].end) {
+      merged.push({ start: item.start, end: item.end });
+      appliedBreaks.push({
+        label: item.label,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        deductedMinutes: item.end - item.start,
+      });
+    } else {
+      const prev = merged[merged.length - 1];
+      const extraMinutes = Math.max(0, item.end - prev.end);
+      if (extraMinutes > 0) {
+        prev.end = item.end;
+        appliedBreaks.push({
+          label: item.label,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          deductedMinutes: extraMinutes,
+        });
+      }
+    }
+  }
+
+  const totalBreakMinutes = merged.reduce(
+    (sum, interval) => sum + (interval.end - interval.start),
+    0
+  );
+  const netMinutes = Math.max(0, rawMinutes - totalBreakMinutes);
+
+  return {
+    rawHours: Number((rawMinutes / 60).toFixed(2)),
+    deductedBreakHours: Number((totalBreakMinutes / 60).toFixed(2)),
+    netHours: Number((netMinutes / 60).toFixed(2)),
+    appliedBreaks,
+  };
+}
+

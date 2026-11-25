@@ -40,6 +40,7 @@ export interface OvertimeParticipantInput {
   employeeId: string;
   startTime: string;
   endTime: string;
+  totalHours?: number;
 }
 
 export interface OvertimeBlockInput {
@@ -387,7 +388,11 @@ export function buildOvertimeFormItemsFromBlocks(
       const emp = empMap.get(participant.employeeId);
       const startTime = participant.startTime || block.startTime || '16:10';
       const endTime = participant.endTime || block.endTime || '20:10';
-      const totalHours = calculateHoursBetween(startTime, endTime);
+      const totalHours =
+        typeof participant.totalHours === 'number' &&
+        Number.isFinite(participant.totalHours)
+          ? Number(Math.max(0, participant.totalHours).toFixed(2))
+          : calculateHoursBetween(startTime, endTime);
 
       items.push({
         id: `${formId}-b${blockIndex}-i${itemIndex}`,
