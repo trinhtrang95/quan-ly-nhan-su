@@ -588,9 +588,14 @@ function unpackReasonWithFallbackMeta(rawReason?: string | null): {
 export function encodeLeaveTypeForDb(
   type: LeaveRecordType,
   regimeSubtype?: RegimeSubtype,
-  paperStatus?: 'Chưa có' | 'Đã có'
+  paperStatus?: 'Chưa có' | 'Đã có',
+  symbolCode?: string
 ): string {
   const sub = type === 'regime_leave' && regimeSubtype ? regimeSubtype : '';
+  const cleanCode = (symbolCode || '').trim().toUpperCase();
+  if (cleanCode) {
+    return `${type}|${sub}|${paperStatus || 'Chưa có'}|${cleanCode}`;
+  }
   if (paperStatus) {
     return `${type}|${sub}|${paperStatus}`;
   }
@@ -601,18 +606,20 @@ export function encodeLeaveTypeForDb(
 }
 
 /**
- * Decodes `leave_type` column from Supabase into `{ type, regimeSubtype, encodedPaperStatus }`
+ * Decodes `leave_type` column from Supabase into `{ type, regimeSubtype, encodedPaperStatus, symbolCode }`
  */
 export function decodeLeaveTypeFromDb(rawType: string): {
   type: LeaveRecordType;
   regimeSubtype?: RegimeSubtype;
   encodedPaperStatus?: 'Chưa có' | 'Đã có';
+  symbolCode?: string;
 } {
   if (!rawType) return { type: 'annual_leave' };
   const parts = rawType.split('|');
   const baseType = parts[0];
   const subPart = parts[1] as RegimeSubtype | undefined;
   const statusPart = parts[2] as 'Chưa có' | 'Đã có' | undefined;
+  const symbolPart = parts[3] ? parts[3].trim().toUpperCase() : undefined;
   const encodedPaperStatus =
     statusPart === 'Đã có' || statusPart === 'Chưa có' ? statusPart : undefined;
 
@@ -629,23 +636,25 @@ export function decodeLeaveTypeFromDb(rawType: string): {
           ? subPart || 'Ốm đau / Viện phí'
           : undefined,
       encodedPaperStatus,
+      symbolCode: symbolPart || undefined,
     };
   }
   const lower = rawType.toLowerCase();
   if (lower.includes('muộn') || lower.includes('sớm') || lower.includes('late')) {
-    return { type: 'late_early', encodedPaperStatus };
+    return { type: 'late_early', encodedPaperStatus, symbolCode: symbolPart || undefined };
   }
   if (lower.includes('không lương') || lower.includes('unpaid')) {
-    return { type: 'unpaid_leave', encodedPaperStatus };
+    return { type: 'unpaid_leave', encodedPaperStatus, symbolCode: symbolPart || undefined };
   }
   if (lower.includes('chế độ') || lower.includes('ốm') || lower.includes('thai sản')) {
     return {
       type: 'regime_leave',
       regimeSubtype: 'Ốm đau / Viện phí',
       encodedPaperStatus,
+      symbolCode: symbolPart || undefined,
     };
   }
-  return { type: 'annual_leave', encodedPaperStatus };
+  return { type: 'annual_leave', encodedPaperStatus, symbolCode: symbolPart || undefined };
 }
 
 /**
@@ -655,7 +664,7 @@ export function mapSupabaseRowToLeaveRecord(
   row: SupabaseLeaveLogRow,
   empMap?: Map<string, Employee>
 ): LeaveRecord {
-  const { type, regimeSubtype, encodedPaperStatus } = decodeLeaveTypeFromDb(
+  const { type, regimeSubtype, encodedPaperStatus, symbolCode } = decodeLeaveTypeFromDb(
     row.leave_type
   );
   const { cleanReason, meta: reasonMeta } = unpackReasonWithFallbackMeta(
@@ -678,6 +687,7 @@ export function mapSupabaseRowToLeaveRecord(
     id: String(row.id),
     employeeId: String(row.employee_id),
     type,
+    ...(symbolCode ? { symbolCode } : {}),
     regimeSubtype,
     startDate: resolvedStartDate,
     endDate: resolvedEndDate,
@@ -1859,7 +1869,8 @@ export async function createLeaveLogInSupabase(
   const encodedType = encodeLeaveTypeForDb(
     recData.type,
     recData.regimeSubtype,
-    resolvedPaperStatus
+    resolvedPaperStatus,
+    recData.symbolCode
   );
   const safeEndDate = recData.endDate || recData.startDate;
 
@@ -1974,7 +1985,8 @@ export async function bulkCreateLeaveLogsInSupabase(
     const encodedType = encodeLeaveTypeForDb(
       recData.type,
       recData.regimeSubtype,
-      resolvedPaperStatus
+      resolvedPaperStatus,
+      recData.symbolCode
     );
     const safeEndDate = recData.endDate || recData.startDate;
     return {
@@ -2015,7 +2027,8 @@ export async function bulkCreateLeaveLogsInSupabase(
     const encodedType = encodeLeaveTypeForDb(
       recData.type,
       recData.regimeSubtype,
-      resolvedPaperStatus
+      resolvedPaperStatus,
+      recData.symbolCode
     );
     const safeEndDate = recData.endDate || recData.startDate;
     const packedReason = packReasonWithFallbackMeta(recData.reason || '', {
@@ -2058,7 +2071,8 @@ export async function bulkCreateLeaveLogsInSupabase(
     const encodedType = encodeLeaveTypeForDb(
       recData.type,
       recData.regimeSubtype,
-      resolvedPaperStatus
+      resolvedPaperStatus,
+      recData.symbolCode
     );
     const safeEndDate = recData.endDate || recData.startDate;
     const fullPackedReason = packReasonWithFallbackMeta(recData.reason || '', {
@@ -2109,7 +2123,8 @@ export async function updateLeaveLogInSupabase(
   const encodedType = encodeLeaveTypeForDb(
     recData.type,
     recData.regimeSubtype,
-    resolvedPaperStatus
+    resolvedPaperStatus,
+    recData.symbolCode
   );
   const safeEndDate = recData.endDate || recData.startDate;
 

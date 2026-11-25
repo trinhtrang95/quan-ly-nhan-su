@@ -20,6 +20,13 @@ import {
   formatDateVN,
   sortEmployees,
 } from '../utils/hrCalculations';
+import { useAttendanceSymbols } from '../contexts/AttendanceSymbolsContext';
+import {
+  mapSymbolToLeaveRecordType,
+  resolveSymbolByCode,
+  resolveSymbolForLeaveRecord,
+  resolveSymbolForSystemKey,
+} from '../utils/attendanceSymbolsLogic';
 
 interface BulkLeaveRecordModalProps {
   isOpen: boolean;
@@ -34,6 +41,7 @@ interface BulkLeaveRecordModalProps {
 
 interface BulkRowConfig {
   leaveType: 'annual_leave' | 'unpaid_leave' | 'regime_leave';
+  symbolCode: string;
   regimeSubtype: RegimeSubtype;
   leaveAmount: number;
   lateHours: number;
@@ -81,6 +89,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
   onClose,
   onSaveBulk,
 }) => {
+  const { symbols, leaveSymbols } = useAttendanceSymbols();
   const [activeTab, setActiveTab] = useState<'leave' | 'late'>('leave');
   const [commonDate, setCommonDate] = useState<string>(() => getTodayIsoString());
 
@@ -165,8 +174,12 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
 
   const createDefaultConfigForEmp = (emp: Employee): BulkRowConfig => {
     const rem = remainingLeaveMap.get(emp.id) ?? emp.standardAnnualLeave;
+    const annualSym = resolveSymbolForSystemKey(symbols, 'LEAVE_ANNUAL', 'PN');
+    const unpaidSym = resolveSymbolForSystemKey(symbols, 'LEAVE_UNPAID', 'KL');
+    const defaultSym = rem > 0 ? annualSym : unpaidSym;
     return {
       leaveType: rem > 0 ? 'annual_leave' : 'unpaid_leave',
+      symbolCode: defaultSym?.code || (rem > 0 ? 'PN' : 'KL'),
       regimeSubtype: 'Ốm đau / Viện phí',
       leaveAmount: 1,
       lateHours: 1,
@@ -201,6 +214,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
           ? createDefaultConfigForEmp(emp)
           : {
               leaveType: 'annual_leave',
+              symbolCode: 'PN',
               regimeSubtype: 'Ốm đau / Viện phí',
               leaveAmount: 1,
               lateHours: 1,
@@ -247,8 +261,12 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
     const createdAtToday = new Date().toISOString().slice(0, 10);
 
     const existingSigSet = new Set(
-      leaveRecords.map((r) => `${r.employeeId}|${r.type}|${r.startDate}`)
+      leaveRecords.map(
+        (r) =>
+          `${r.employeeId}|${r.type}|${resolveSymbolForLeaveRecord(symbols, r).code}|${r.startDate}`
+      )
     );
+    const lateSym = resolveSymbolForSystemKey(symbols, 'VIOLATION_LATE', 'ĐM');
 
     const recordsToInsert: Omit<LeaveRecord, 'id'>[] = [];
     const duplicateNames: string[] = [];
@@ -261,14 +279,28 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
           ? createDefaultConfigForEmp(emp)
           : {
               leaveType: 'annual_leave',
+              symbolCode: 'PN',
               regimeSubtype: 'Ốm đau / Viện phí',
               leaveAmount: 1,
               lateHours: 1,
               reason: '',
             });
 
+      const resolvedLeaveSym =
+        resolveSymbolByCode(leaveSymbols, cfg.symbolCode) || leaveSymbols[0];
+      const mappedLeaveType = resolvedLeaveSym
+        ? mapSymbolToLeaveRecordType(resolvedLeaveSym)
+        : cfg.leaveType;
       const recordType: LeaveRecordType =
-        activeTab === 'late' ? 'late_early' : cfg.leaveType;
+        activeTab === 'late'
+          ? 'late_early'
+          : mappedLeaveType === 'late_early'
+            ? 'regime_leave'
+            : mappedLeaveType;
+      const recordSymbolCode =
+        activeTab === 'late'
+          ? lateSym?.code || 'ĐM'
+          : resolvedLeaveSym?.code || cfg.symbolCode || 'PN';
       const recordAmount =
         activeTab === 'late' ? Number(cfg.lateHours) : Number(cfg.leaveAmount);
 
@@ -279,7 +311,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
         return;
       }
 
-      const sig = `${empId}|${recordType}|${commonDate}`;
+      const sig = `${empId}|${recordType}|${recordSymbolCode}|${commonDate}`;
       if (existingSigSet.has(sig)) {
         duplicateNames.push(emp?.fullName || empId);
         continue;
@@ -293,13 +325,22 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
       const defaultReason =
         activeTab === 'late'
           ? 'Đi muộn có báo cáo quản lý bộ phận'
-          : 'Xin nghỉ phép giải quyết việc cá nhân';
+          : resolvedLeaveSym && !resolvedLeaveSym.isSystem
+            ? resolvedLeaveSym.name
+            : 'Xin nghỉ phép giải quyết việc cá nhân';
+
+      const isCoreRegime =
+        resolvedLeaveSym?.systemKey === 'LEAVE_REGIME' ||
+        resolvedLeaveSym?.code === 'CĐ';
 
       recordsToInsert.push({
         employeeId: empId,
         type: recordType,
+        symbolCode: recordSymbolCode,
         regimeSubtype:
-          recordType === 'regime_leave' ? cfg.regimeSubtype : undefined,
+          recordType === 'regime_leave' && isCoreRegime
+            ? cfg.regimeSubtype
+            : undefined,
         startDate: commonDate,
         endDate: computedEndDate,
         amount: recordAmount,
@@ -616,20 +657,30 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                             {activeTab === 'leave' && (
                               <td className="py-2 px-2.5 align-middle whitespace-nowrap">
                                 <select
-                                  value={cfg.leaveType}
-                                  onChange={(e) =>
+                                  value={cfg.symbolCode}
+                                  onChange={(e) => {
+                                    const chosen = resolveSymbolByCode(
+                                      leaveSymbols,
+                                      e.target.value
+                                    );
+                                    const mapped = chosen
+                                      ? mapSymbolToLeaveRecordType(chosen)
+                                      : 'annual_leave';
                                     updateRowConfig(empId, {
-                                      leaveType: e.target.value as
-                                        | 'annual_leave'
-                                        | 'unpaid_leave'
-                                        | 'regime_leave',
-                                    })
-                                  }
+                                      symbolCode: e.target.value,
+                                      leaveType:
+                                        mapped === 'late_early'
+                                          ? 'regime_leave'
+                                          : mapped,
+                                    });
+                                  }}
                                   className="w-full px-2 py-1 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 hover:bg-white focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-800 cursor-pointer"
                                 >
-                                  <option value="annual_leave">Phép năm</option>
-                                  <option value="unpaid_leave">Không lương</option>
-                                  <option value="regime_leave">Chế độ</option>
+                                  {leaveSymbols.map((sym) => (
+                                    <option key={sym.id} value={sym.code}>
+                                      [{sym.code}] {sym.name}
+                                    </option>
+                                  ))}
                                 </select>
                               </td>
                             )}

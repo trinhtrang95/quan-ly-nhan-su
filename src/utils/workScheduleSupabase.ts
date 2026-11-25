@@ -166,6 +166,55 @@ BEGIN
   END IF;
 END $$;
 
+-- 6. Tạo bảng Ký hiệu công (attendance_symbols)
+CREATE TABLE IF NOT EXISTS public.attendance_symbols (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  work_value NUMERIC NOT NULL DEFAULT 1,
+  paid_ratio INTEGER NOT NULL DEFAULT 100,
+  color_theme TEXT NOT NULL DEFAULT 'emerald',
+  category TEXT NOT NULL DEFAULT 'work',
+  is_system BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.attendance_symbols ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  pol RECORD;
+BEGIN
+  FOR pol IN
+    SELECT policyname
+    FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'attendance_symbols'
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.attendance_symbols', pol.policyname);
+  END LOOP;
+END $$;
+
+CREATE POLICY "Allow public full access on attendance_symbols"
+  ON public.attendance_symbols
+  FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE public.attendance_symbols REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'attendance_symbols'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.attendance_symbols;
+  END IF;
+END $$;
+
 NOTIFY pgrst, 'reload schema';`;
 
 export interface SupabaseWorkShiftRow {

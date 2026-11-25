@@ -31,6 +31,13 @@ import {
 import { exportMonthlyAttendanceMatrixToExcel } from '../utils/exportUtils';
 import { formatNumberVN } from '../utils/errorAndSecurityService';
 import { ReportSubTab } from './Sidebar';
+import { useAttendanceSymbols } from '../contexts/AttendanceSymbolsContext';
+import {
+  getSymbolBadgeClasses,
+  getSymbolColorToken,
+  resolveSymbolForLeaveRecord,
+  sortAttendanceSymbols,
+} from '../utils/attendanceSymbolsLogic';
 
 interface AnnualMatrixReportViewProps {
   employees: Employee[];
@@ -94,6 +101,12 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
   onInspectAttachment,
   onQuickAddForEmployeeMonth,
 }) => {
+  const { symbols } = useAttendanceSymbols();
+  const sortedSymbols = useMemo(
+    () => sortAttendanceSymbols(symbols),
+    [symbols]
+  );
+
   // Monthly Summary filters
   const [selectedYearMonth, setSelectedYearMonth] = useState<string>(
     getDefaultYearMonth
@@ -181,7 +194,8 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
         monthlyDeptFilter,
         monthlySearchQuery,
         undefined,
-        leavePolicy
+        leavePolicy,
+        symbols
       ),
     [
       employees,
@@ -191,6 +205,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
       monthlyDeptFilter,
       monthlySearchQuery,
       leavePolicy,
+      symbols,
     ]
   );
 
@@ -266,12 +281,12 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
   const popupMonthData =
     popupRow && selectedCell ? popupRow.months[selectedCell.month] : null;
 
-  // Render ultra-compact semantic badge:
-  // PN: bg-green-100 text-green-700
-  // CĐ: bg-blue-100 text-blue-700
-  // KL: bg-orange-100 text-orange-700
-  // ĐM: bg-red-100 text-red-700 (Hover/click hiện Tooltip xem số giờ/phút)
+  // Render ultra-compact semantic badge synced with attendance_symbols
   const renderBadge = (badge: MonthlyDayBadge) => {
+    const resolvedSym = resolveSymbolForLeaveRecord(symbols, badge.record);
+    const badgeColorClass = getSymbolBadgeClasses(resolvedSym);
+    const colorToken = getSymbolColorToken(resolvedSym.color);
+
     if (badge.type === 'late_early') {
       const isOpen = activeLateBadgeId === badge.id;
       return (
@@ -288,9 +303,9 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                 prev === badge.id ? null : badge.id
               );
             }}
-            className="inline-flex items-center justify-center px-1 py-0.5 rounded text-[10px] font-mono font-bold leading-none bg-red-100 text-red-700 hover:bg-red-200/80 transition-colors cursor-pointer"
+            className={`inline-flex items-center justify-center px-1 py-0.5 rounded text-[10px] font-mono font-bold leading-none transition-colors cursor-pointer ${badgeColorClass}`}
           >
-            {badge.code}
+            {resolvedSym.code}
           </button>
 
           {/* Interactive Tooltip / Popover báo chính xác số giờ/phút đi muộn (VD: 3h, 15p) khi click hoặc hover */}
@@ -304,7 +319,9 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
             } pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 px-2.5 py-1.5 rounded-lg bg-white text-slate-800 text-[11px] font-sans font-medium whitespace-nowrap shadow-lg border border-slate-200 transition-all duration-150`}
           >
             <div className="flex items-center gap-1">
-              <span className="text-red-600 font-semibold">Đi muộn:</span>
+              <span className={`${colorToken.textClass} font-semibold`}>
+                {resolvedSym.name}:
+              </span>
               <span className="font-mono font-bold text-slate-900">
                 {badge.durationText}
               </span>
@@ -319,21 +336,13 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
       );
     }
 
-    // Semantic Pastel Colors: PN (green-100/700), CĐ (blue-100/700), KL (orange-100/700)
-    let badgeStyle = 'bg-green-100 text-green-700'; // PN (Phép năm)
-    if (badge.type === 'regime_leave') {
-      badgeStyle = 'bg-blue-100 text-blue-700'; // CĐ (Chế độ)
-    } else if (badge.type === 'unpaid_leave') {
-      badgeStyle = 'bg-orange-100 text-orange-700'; // KL (Không lương)
-    }
-
     return (
       <span
         key={badge.id}
         title={badge.tooltip}
-        className={`inline-flex items-center justify-center px-1 py-0.5 rounded text-[10px] font-mono font-bold leading-none whitespace-nowrap ${badgeStyle}`}
+        className={`inline-flex items-center justify-center px-1 py-0.5 rounded text-[10px] font-mono font-bold leading-none whitespace-nowrap ${badgeColorClass}`}
       >
-        {badge.code}
+        {resolvedSym.code}
       </span>
     );
   };
@@ -494,54 +503,47 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
             </div>
           </div>
 
-          {/* DẢI CHÚ THÍCH THẺ MÀU (LEGEND) ĐẶT NGAY DƯỚI HÀNG BỘ LỌC, TRÊN ĐẦU BẢNG DỮ LIỆU */}
+          {/* THÔNG TIN NHÂN SỰ & HƯỚNG DẪN TƯƠNG TÁC */}
           <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-0.5 text-[11px] text-slate-500">
             <span>
-              Hiển thị <strong className="text-slate-800 font-mono">{monthlyReport.rows.length}</strong> nhân sự · Hover cột <strong className="text-slate-700">Tồn phép</strong> để xem giải trình chi tiết 3 dòng
+              Hiển thị <strong className="text-slate-800 font-mono">{monthlyReport.rows.length}</strong> nhân sự · Hover cột <strong className="text-slate-700">Tồn phép</strong> để xem giải trình chi tiết 3 dòng · Cột <strong className="text-slate-700">Công</strong> quy đổi theo Ký hiệu công
             </span>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <span className="inline-flex items-center gap-1">
-                <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-mono font-bold text-[10px] leading-none">
-                  PN
-                </span>
-                <span>Phép năm</span>
-              </span>
-              <span className="text-slate-300">·</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-mono font-bold text-[10px] leading-none">
-                  CĐ
-                </span>
-                <span>Chế độ</span>
-              </span>
-              <span className="text-slate-300">·</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-mono font-bold text-[10px] leading-none">
-                  KL
-                </span>
-                <span>Không lương</span>
-              </span>
-              <span className="text-slate-300">·</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-mono font-bold text-[10px] leading-none">
-                  ĐM
-                </span>
-                <span>Đi muộn (Hover/chạm xem giờ)</span>
-              </span>
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              {sortedSymbols
+                .filter((sym) => sym.category === 'leave' || sym.category === 'violation')
+                .map((sym, idx, arr) => (
+                  <React.Fragment key={sym.id}>
+                    <span className="inline-flex items-center gap-1">
+                      <span
+                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] leading-none ${getSymbolBadgeClasses(
+                          sym
+                        )}`}
+                      >
+                        {sym.code}
+                      </span>
+                      <span>
+                        {sym.name}
+                        {sym.note && sym.category === 'violation' ? ` (${sym.note})` : ''}
+                      </span>
+                    </span>
+                    {idx < arr.length - 1 && <span className="text-slate-300">·</span>}
+                  </React.Fragment>
+                ))}
             </div>
           </div>
 
           {/* BẢNG DỮ LIỆU MA TRẬN "BÁO CÁO THÁNG" (HIGH DENSITY - ZERO VISUAL NOISE)
               - Header Siêu Mềm: <th> cột ngày (01-31) dùng bg-slate-50, text-slate-500 (không in đậm), căn giữa
-              - 5 cột cố định (Sticky Left):
-                1. Nhân sự: w-56 (224px), left-0 (Dòng 1: font-medium text-slate-800 | Dòng 2: Mã NV • Nhóm text-xs text-slate-500)
-                2. Tồn phép: w-14 (56px), left-[224px] (Hover hiện Tooltip 3 dòng: Phép tích lũy, Phép tồn chuyển sang, Số đã nghỉ)
-                3. PN / CĐ: w-16 (64px), left-[280px]
-                4. K.Lương: w-14 (56px), left-[344px]
-                5. Đi muộn: w-15 (60px), left-[400px] + border-r border-slate-200 + shadow-[4px_0_12px_rgba(0,0,0,0.05)]
-              - Cột ngày 01->31: w-8 (32px), px-1.5 py-1, border-slate-100, align-middle, ĐỂ KHOẢNG TRẮNG HOÀN TOÀN ở ngày đi làm bình thường (không có dấu '-')
+              - 6 cột cố định (Sticky Left):
+                1. Nhân sự: w-56 (224px), left-0
+                2. Còn lại: w-14 (56px), left-[224px]
+                3. Công: w-14 (56px), left-[280px] (Tổng ngày công quy đổi theo attendance_symbols)
+                4. PN / CĐ: w-16 (64px), left-[336px]
+                5. K.Lương: w-14 (56px), left-[400px]
+                6. Đi muộn: w-15 (60px), left-[456px] + border-r border-slate-200 + shadow-[4px_0_12px_rgba(0,0,0,0.05)]
           */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="max-h-[calc(100vh-220px)] overflow-y-auto overflow-x-auto">
+            <div className="max-h-[calc(100vh-355px)] min-h-[240px] overflow-y-auto overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs compact-matrix-table">
                 <thead className="sticky top-0 z-30 bg-slate-50 text-slate-500 select-none text-[11px] border-b border-slate-200">
                   <tr className="font-normal">
@@ -558,25 +560,33 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                       Còn lại
                     </th>
 
-                    {/* CỘT 3 (STICKY left-[280px], w-16 = 64px): PN / CĐ */}
+                    {/* CỘT 3 (STICKY left-[280px], w-14 = 56px): CÔNG */}
                     <th
-                      className="px-1.5 py-1.5 w-16 min-w-[64px] max-w-[64px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-100 whitespace-nowrap sticky left-[280px] z-40 align-middle"
+                      className="px-1.5 py-1.5 w-14 min-w-[56px] max-w-[56px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-100 whitespace-nowrap sticky left-[280px] z-40 align-middle"
+                      title="Tổng ngày công thực tế trong tháng quy đổi theo hệ số Ký hiệu công"
+                    >
+                      Công
+                    </th>
+
+                    {/* CỘT 4 (STICKY left-[336px], w-16 = 64px): PN / CĐ */}
+                    <th
+                      className="px-1.5 py-1.5 w-16 min-w-[64px] max-w-[64px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-100 whitespace-nowrap sticky left-[336px] z-40 align-middle"
                       title="Tổng số ngày Nghỉ phép năm (PN) & Chế độ (CĐ) trong tháng"
                     >
                       PN/CĐ
                     </th>
 
-                    {/* CỘT 4 (STICKY left-[344px], w-14 = 56px): K.LƯƠNG */}
+                    {/* CỘT 5 (STICKY left-[400px], w-14 = 56px): K.LƯƠNG */}
                     <th
-                      className="px-1.5 py-1.5 w-14 min-w-[56px] max-w-[56px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-100 whitespace-nowrap sticky left-[344px] z-40 align-middle"
+                      className="px-1.5 py-1.5 w-14 min-w-[56px] max-w-[56px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-100 whitespace-nowrap sticky left-[400px] z-40 align-middle"
                       title="Tổng số ngày Nghỉ không lương (KL) trong tháng"
                     >
                       K.Lương
                     </th>
 
-                    {/* CỘT 5 (STICKY left-[400px], w-15 = 60px + VIỀN PHẢI + ĐỔ BÓNG PHÂN CÁCH): ĐI MUỘN */}
+                    {/* CỘT 6 (STICKY left-[456px], w-15 = 60px + VIỀN PHẢI + ĐỔ BÓNG PHÂN CÁCH): ĐI MUỘN */}
                     <th
-                      className="px-1.5 py-1.5 w-15 min-w-[60px] max-w-[60px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-200 whitespace-nowrap sticky left-[400px] z-40 shadow-[4px_0_12px_rgba(0,0,0,0.05)] align-middle"
+                      className="px-1.5 py-1.5 w-15 min-w-[60px] max-w-[60px] text-center font-normal bg-slate-50 text-slate-500 border-r border-slate-200 whitespace-nowrap sticky left-[456px] z-40 shadow-[4px_0_12px_rgba(0,0,0,0.05)] align-middle"
                       title="Tổng số giờ / số lần Đi muộn (ĐM) trong tháng"
                     >
                       Đi muộn
@@ -610,7 +620,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   {monthlyReport.rows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={5 + monthlyReport.daysInMonth}
+                        colSpan={6 + monthlyReport.daysInMonth}
                         className="py-8 text-center text-slate-500 italic bg-white align-middle"
                       >
                         Không tìm thấy nhân sự nào phù hợp với bộ lọc hiện tại.
@@ -728,7 +738,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             </div>
                           </td>
 
-                          {/* CỘT 3 (STICKY left-[280px], w-16 = 64px): PN/CĐ */}
+                          {/* CỘT 3 (STICKY left-[280px], w-14 = 56px): CÔNG */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -737,7 +747,26 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-1.5 py-1 w-16 min-w-[64px] max-w-[64px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-100 sticky left-[280px] z-20 cursor-pointer whitespace-nowrap align-middle"
+                            title={`Ngày công thực tế: ${formatNumberVN(
+                              row.monthEffectiveWorkdays ?? 0
+                            )} / ${formatNumberVN(
+                              row.standardWorkingDays ?? 0
+                            )} công chuẩn`}
+                            className="px-1.5 py-1 w-14 min-w-[56px] max-w-[56px] text-center font-mono tabular-nums font-semibold text-xs text-[#14539E] bg-white group-hover:bg-slate-50 border-r border-slate-100 sticky left-[280px] z-20 cursor-pointer whitespace-nowrap align-middle"
+                          >
+                            {formatNumberVN(row.monthEffectiveWorkdays ?? 0)}
+                          </td>
+
+                          {/* CỘT 4 (STICKY left-[336px], w-16 = 64px): PN/CĐ */}
+                          <td
+                            onClick={() =>
+                              setSelectedCell({
+                                employee: emp,
+                                month: parsedMonthNum,
+                                year: parsedMonthYear,
+                              })
+                            }
+                            className="px-1.5 py-1 w-16 min-w-[64px] max-w-[64px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-100 sticky left-[336px] z-20 cursor-pointer whitespace-nowrap align-middle"
                           >
                             {(row.monthAnnualDays > 0 ||
                               row.monthRegimeDays > 0) && (
@@ -766,7 +795,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             )}
                           </td>
 
-                          {/* CỘT 4 (STICKY left-[344px], w-14 = 56px): K.LƯƠNG */}
+                          {/* CỘT 5 (STICKY left-[400px], w-14 = 56px): K.LƯƠNG */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -775,7 +804,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-1.5 py-1 w-14 min-w-[56px] max-w-[56px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-100 sticky left-[344px] z-20 cursor-pointer align-middle"
+                            className="px-1.5 py-1 w-14 min-w-[56px] max-w-[56px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-100 sticky left-[400px] z-20 cursor-pointer align-middle"
                           >
                             {row.monthUnpaidDays > 0 && (
                               <span className="font-semibold text-orange-700">
@@ -784,7 +813,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                             )}
                           </td>
 
-                          {/* CỘT 5 (STICKY left-[400px], w-15 = 60px + border-r border-slate-200 + shadow-[4px_0_12px_rgba(0,0,0,0.05)]): ĐI MUỘN */}
+                          {/* CỘT 6 (STICKY left-[456px], w-15 = 60px + border-r border-slate-200 + shadow-[4px_0_12px_rgba(0,0,0,0.05)]): ĐI MUỘN */}
                           <td
                             onClick={() =>
                               setSelectedCell({
@@ -793,7 +822,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                                 year: parsedMonthYear,
                               })
                             }
-                            className="px-1.5 py-1 w-15 min-w-[60px] max-w-[60px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-[400px] z-20 shadow-[4px_0_12px_rgba(0,0,0,0.05)] cursor-pointer whitespace-nowrap align-middle"
+                            className="px-1.5 py-1 w-15 min-w-[60px] max-w-[60px] text-center font-mono text-xs bg-white group-hover:bg-slate-50 border-r border-slate-200 sticky left-[456px] z-20 shadow-[4px_0_12px_rgba(0,0,0,0.05)] cursor-pointer whitespace-nowrap align-middle"
                           >
                             {row.monthLateHours > 0 && (
                               <span className="font-semibold text-red-700">
@@ -842,6 +871,38 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* BẢNG CHÚ THÍCH KÝ HIỆU CÔNG ĐỘNG Ở CHÂN BẢNG CHẤM CÔNG */}
+            <div
+              data-testid="monthly-attendance-footer-legend"
+              className="border-t border-slate-200 bg-slate-50/70 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600"
+            >
+              <span className="font-semibold text-slate-700 whitespace-nowrap">
+                Chú thích Ký hiệu công:
+              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 flex-1">
+                {sortedSymbols.map((sym) => (
+                  <span
+                    key={sym.id}
+                    title={sym.note || sym.name}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <span
+                      className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold leading-none ${getSymbolBadgeClasses(
+                        sym,
+                        true
+                      )}`}
+                    >
+                      {sym.code}
+                    </span>
+                    <span className="text-slate-700 font-medium">{sym.name}</span>
+                    <span className="text-slate-400 font-mono text-[10px]">
+                      ({formatNumberVN(sym.workdayValue)} công)
+                    </span>
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </>
@@ -931,34 +992,24 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
 
             {/* Legend Strip */}
             <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-mono font-bold text-[10px]">
-                    PN
-                  </span>
-                  <span>Phép năm</span>
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-mono font-bold text-[10px]">
-                    KL
-                  </span>
-                  <span>Không lương</span>
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-mono font-bold text-[10px]">
-                    CĐ
-                  </span>
-                  <span>Chế độ BHXH</span>
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-mono font-bold text-[10px]">
-                    ĐM
-                  </span>
-                  <span>Đi muộn</span>
-                </span>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {sortedSymbols
+                  .filter((sym) => sym.category === 'leave' || sym.category === 'violation')
+                  .map((sym, idx, arr) => (
+                    <React.Fragment key={sym.id}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] ${getSymbolBadgeClasses(
+                            sym
+                          )}`}
+                        >
+                          {sym.code}
+                        </span>
+                        <span>{sym.name}</span>
+                      </span>
+                      {idx < arr.length - 1 && <span aria-hidden="true">·</span>}
+                    </React.Fragment>
+                  ))}
               </div>
               <div className="inline-flex items-center gap-1 text-xs text-slate-500">
                 <Info className="w-3.5 h-3.5 text-[#14539E]" />
@@ -1321,6 +1372,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   <div className="space-y-2">
                     {popupMonthData.records.map((rec) => {
                       const meta = LEAVE_TYPE_META[rec.type as LeaveRecordType];
+                      const resolvedSym = resolveSymbolForLeaveRecord(symbols, rec);
                       return (
                         <div
                           key={rec.id}
@@ -1329,13 +1381,13 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <span
-                                className="text-xs font-bold px-2 py-0.5 rounded-md"
-                                style={{
-                                  backgroundColor: meta.bgLight,
-                                  color: meta.textColor,
-                                }}
+                                className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-md border ${getSymbolBadgeClasses(
+                                  resolvedSym,
+                                  true
+                                )}`}
                               >
-                                {meta.label}
+                                <span className="font-mono">{resolvedSym.code}</span>
+                                <span>· {resolvedSym.name}</span>
                               </span>
                               <span className="text-xs font-mono font-bold text-slate-800">
                                 {rec.amount} {meta.unit}
@@ -1457,6 +1509,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                     <tr className="bg-slate-50 text-slate-700 font-medium">
                       <th className="border border-slate-300 px-2 py-1 text-left">Nhân sự</th>
                       <th className="border border-slate-300 px-1 py-1 text-center">Tồn phép</th>
+                      <th className="border border-slate-300 px-1 py-1 text-center">Công</th>
                       <th className="border border-slate-300 px-1 py-1 text-center">PN/CĐ</th>
                       <th className="border border-slate-300 px-1 py-1 text-center">K.Lương</th>
                       <th className="border border-slate-300 px-1 py-1 text-center">Đi muộn</th>
@@ -1487,6 +1540,9 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                         </td>
                         <td className="border border-slate-300 px-1 py-1 text-center font-mono font-bold">
                           {row.remainingAnnualLeave}
+                        </td>
+                        <td className="border border-slate-300 px-1 py-1 text-center font-mono font-bold">
+                          {formatNumberVN(row.monthEffectiveWorkdays ?? 0)}
                         </td>
                         <td className="border border-slate-300 px-1 py-1 text-center font-mono">
                           {row.monthAnnualAndRegimeDays || ''}

@@ -6,6 +6,7 @@ import {
   Clock,
   Copy,
   Database,
+  Tag,
   Timer,
   X,
 } from 'lucide-react';
@@ -45,8 +46,10 @@ import {
 import { CompanyHolidaysTab } from './CompanyHolidaysTab';
 import { OvertimeSettingsTab } from './OvertimeSettingsTab';
 import { WorkShiftsTab } from './WorkShiftsTab';
+import { AttendanceSymbolsTab } from './AttendanceSymbolsTab';
+import { useAttendanceSymbols } from '../../contexts/AttendanceSymbolsContext';
 
-export type GeneralSettingsSubTab = 'shifts' | 'holidays' | 'overtime';
+export type GeneralSettingsSubTab = 'shifts' | 'holidays' | 'overtime' | 'symbols';
 
 export interface GeneralSettingsViewProps {
   groups: DepartmentGroup[];
@@ -86,8 +89,20 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
     loadHolidayPlanForYear(currentYear, activeCompanyId)
   );
 
+  const {
+    symbols,
+    isLoading: isLoadingSymbols,
+    isSaving: isSavingSymbols,
+    schemaNeedsMigration: symbolsSchemaNeedsMigration,
+    refreshSymbols,
+    saveSymbol,
+    removeSymbol,
+  } = useAttendanceSymbols();
+
   const [schemaNeedsMigration, setSchemaNeedsMigration] =
     useState<boolean>(false);
+  const effectiveSchemaNeedsMigration =
+    schemaNeedsMigration || symbolsSchemaNeedsMigration;
   const [isSqlModalOpen, setIsSqlModalOpen] = useState<boolean>(false);
   const [sqlCopied, setSqlCopied] = useState<boolean>(false);
 
@@ -435,10 +450,23 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             <Timer className="w-3.5 h-3.5 shrink-0" />
             <span>Làm thêm giờ</span>
           </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSubTab === 'symbols'}
+            onClick={() => setActiveSubTab('symbols')}
+            className={`${tabBaseClass} ${
+              activeSubTab === 'symbols' ? tabActiveClass : tabInactiveClass
+            }`}
+          >
+            <Tag className="w-3.5 h-3.5 shrink-0" />
+            <span>Ký hiệu công</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {schemaNeedsMigration && (
+          {effectiveSchemaNeedsMigration && (
             <button
               type="button"
               onClick={() => setIsSqlModalOpen(true)}
@@ -452,13 +480,14 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
       </div>
 
       {/* Optional Schema Notice Banner */}
-      {schemaNeedsMigration && (
+      {effectiveSchemaNeedsMigration && (
         <div className="mx-4 mt-3 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-800 shrink-0">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
             <span>
-              Bảng <code className="font-mono font-bold">work_shifts</code> /{' '}
-              <code className="font-mono font-bold">company_holidays</code> chưa
+              Bảng thiết lập (<code className="font-mono font-bold">work_shifts</code> /{' '}
+              <code className="font-mono font-bold">company_holidays</code> /{' '}
+              <code className="font-mono font-bold">attendance_symbols</code>) chưa
               được tạo trên Supabase (dữ liệu đang lưu tạm trên trình duyệt).
             </span>
           </div>
@@ -499,7 +528,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             onAddManualHoliday={handleAddManualHoliday}
             onDeleteHoliday={handleDeleteHoliday}
           />
-        ) : (
+        ) : activeSubTab === 'overtime' ? (
           <OvertimeSettingsTab
             settings={overtimeSettings}
             shifts={shifts}
@@ -507,6 +536,33 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             isLoading={isLoadingOvertimeSettings}
             isSaving={isSavingOvertimeSettings}
             onSaveSettings={handleSaveOvertimeSettings}
+          />
+        ) : (
+          <AttendanceSymbolsTab
+            symbols={symbols}
+            isLoading={isLoadingSymbols}
+            isSaving={isSavingSymbols}
+            onSaveSymbol={async (input) => {
+              try {
+                const res = await saveSymbol(input);
+                onShowToast?.(
+                  res.source === 'supabase'
+                    ? `Đã lưu ký hiệu "${res.savedSymbol.code} - ${res.savedSymbol.name}" lên Cloud.`
+                    : `Đã lưu ký hiệu "${res.savedSymbol.code} - ${res.savedSymbol.name}" (chế độ cục bộ).`
+                );
+              } catch (err) {
+                onShowToast?.(getFriendlyErrorMessage(err));
+              }
+            }}
+            onDeleteSymbol={async (symbolId) => {
+              try {
+                const target = symbols.find((s) => s.id === symbolId);
+                await removeSymbol(symbolId);
+                onShowToast?.(`Đã xóa ký hiệu "${target?.code || ''}".`);
+              } catch (err) {
+                onShowToast?.(getFriendlyErrorMessage(err));
+              }
+            }}
           />
         )}
       </div>
@@ -573,6 +629,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                     loadShifts(false),
                     loadHolidays(selectedYear, false),
                     loadOvertimeSettings(false),
+                    refreshSymbols(false),
                   ]);
                 }}
                 className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer"

@@ -35,6 +35,11 @@ import {
   compressImageClientSide,
   uploadImageToHrBucket,
 } from '../utils/supabaseService';
+import { useAttendanceSymbols } from '../contexts/AttendanceSymbolsContext';
+import {
+  getSymbolBadgeClasses,
+  getSymbolColorToken,
+} from '../utils/attendanceSymbolsLogic';
 
 interface LeaveLateLogViewProps {
   records: LeaveRecord[];
@@ -80,6 +85,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
   onInspectAttachment,
   onExportExcel,
 }) => {
+  const { getSymbolForRecord, leaveSymbols } = useAttendanceSymbols();
   const [startDateFilter, setStartDateFilter] = useState<string>('');
   const [endDateFilter, setEndDateFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>(() =>
@@ -173,8 +179,15 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
       if (startDateFilter && rec.startDate < startDateFilter) return false;
       if (endDateFilter && rec.startDate > endDateFilter) return false;
 
-      if (typeFilter !== 'ALL' && rec.type !== typeFilter) {
-        return false;
+      if (typeFilter !== 'ALL') {
+        if (typeFilter.startsWith('sym:')) {
+          const targetCode = typeFilter.slice(4);
+          if (getSymbolForRecord(rec).code !== targetCode) {
+            return false;
+          }
+        } else if (rec.type !== typeFilter) {
+          return false;
+        }
       }
 
       if (departmentFilter !== 'ALL' && emp.department !== departmentFilter) {
@@ -588,6 +601,16 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               <option value="unpaid_leave">Nghỉ không lương</option>
               <option value="regime_leave">Nghỉ chế độ (BHXH)</option>
               <option value="late_early">Đi muộn</option>
+              {leaveSymbols
+                .filter(
+                  (sym) =>
+                    sym.code !== 'PN' && sym.code !== 'KL' && sym.code !== 'CĐ'
+                )
+                .map((sym) => (
+                  <option key={sym.id} value={`sym:${sym.code}`}>
+                    [{sym.code}] {sym.name}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -737,6 +760,8 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
               filteredRecords.map((rec, idx) => {
                 const emp = empMap.get(rec.employeeId);
                 const meta = LEAVE_TYPE_META[rec.type as LeaveRecordType];
+                const resolvedSym = getSymbolForRecord(rec);
+                const colorToken = getSymbolColorToken(resolvedSym.color);
                 const paperStat =
                   rec.paperStatus || (rec.attachmentUrl ? 'Đã có' : 'Chưa có');
                 const isUploadingThisRow = uploadingRecordId === rec.id;
@@ -769,15 +794,19 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                       {emp?.department || '-'}
                     </td>
                     <td className="py-2 px-2 whitespace-nowrap">
-                      <span
-                        className="inline-block px-2 py-0.5 rounded-md text-[11px] font-bold"
-                        style={{
-                          backgroundColor: meta.bgLight,
-                          color: meta.textColor,
-                        }}
-                      >
-                        {rec.type === 'late_early' ? 'Đi muộn' : meta.shortLabel}
-                      </span>
+                      <div className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold leading-none ${getSymbolBadgeClasses(
+                            resolvedSym,
+                            true
+                          )}`}
+                        >
+                          {resolvedSym.code}
+                        </span>
+                        <span className={`text-[11px] font-bold ${colorToken.textClass}`}>
+                          {resolvedSym.name}
+                        </span>
+                      </div>
                       {rec.regimeSubtype && (
                         <span className="ml-1 text-[10px] text-slate-500">
                           ({rec.regimeSubtype})
@@ -792,7 +821,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                           )}`}
                     </td>
                     <td className="py-2 px-2 text-right font-mono tabular-nums font-bold whitespace-nowrap">
-                      <span style={{ color: meta.textColor }}>
+                      <span className={colorToken.textClass}>
                         {rec.amount} {meta.unit}
                       </span>
                     </td>
@@ -1024,10 +1053,11 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                         rec.startDate === rec.endDate
                           ? formatDateVN(rec.startDate)
                           : `${formatDateVN(rec.startDate)} - ${formatDateVN(rec.endDate)}`;
+                      const resolvedSym = getSymbolForRecord(rec);
                       const leaveTypeName =
                         rec.type === 'late_early'
-                          ? `Đi muộn (${rec.amount} giờ)`
-                          : `${meta.label} (${rec.amount} ${meta.unit})`;
+                          ? `${resolvedSym.name} (${rec.amount} giờ)`
+                          : `${resolvedSym.name} (${rec.amount} ${meta.unit})`;
 
                       return (
                         <tr key={rec.id}>

@@ -12,6 +12,13 @@ import {
   MonthCellData,
 } from '../types/hr';
 import { formatCommuneProvinceAddress } from './vnAddressData';
+import {
+  AttendanceSymbol,
+  AttendanceSymbolColor,
+  calculateMonthlyEffectiveWorkdays,
+  DEFAULT_ATTENDANCE_SYMBOLS,
+  resolveSymbolForLeaveRecord,
+} from './attendanceSymbolsLogic';
 
 export const LEAVE_TYPE_META: Record<
   LeaveRecordType,
@@ -1126,7 +1133,9 @@ export interface MonthlyDayColumnMeta {
 export interface MonthlyDayBadge {
   id: string;
   type: LeaveRecordType;
-  code: 'PN' | 'CĐ' | 'KL' | 'ĐM'; // Standardized short badge code
+  code: string; // Dynamic symbol code from attendance_symbols (e.g. PN, CĐ, KL, NB, ĐM)
+  symbolName?: string;
+  color?: AttendanceSymbolColor;
   durationText: string; // e.g. '30p', '1.5h', '3h', '1 ngày', '0.5 ngày'
   tooltip: string;
   record: LeaveRecord;
@@ -1146,6 +1155,8 @@ export interface EmployeeMonthlyAttendanceRow {
   monthUnpaidCount: number;
   monthLateHours: number;
   monthLateCount: number;
+  monthEffectiveWorkdays?: number;
+  standardWorkingDays?: number;
   hasAnyActivityInMonth: boolean;
   monthRecords: LeaveRecord[];
   dayBadges: Record<number, MonthlyDayBadge[]>; // day 1..daysInMonth -> badges
@@ -1230,9 +1241,14 @@ export function calculateMonthlyAttendanceMatrix(
   departmentFilter: string = 'ALL',
   searchQuery: string = '',
   todayDateStr?: string,
-  policyOverride?: LeavePolicyConfig
+  policyOverride?: LeavePolicyConfig,
+  symbolsOverride?: AttendanceSymbol[]
 ): MonthlyAttendanceSummaryReport {
   const policy = policyOverride || loadLeavePolicyConfig();
+  const activeSymbols =
+    symbolsOverride && symbolsOverride.length > 0
+      ? symbolsOverride
+      : DEFAULT_ATTENDANCE_SYMBOLS;
   const resolvedToday =
     todayDateStr ||
     (() => {
@@ -1303,8 +1319,10 @@ export function calculateMonthlyAttendanceMatrix(
     );
 
     const dayBadges: Record<number, MonthlyDayBadge[]> = {};
+    const dayRecordsMap: Record<number, LeaveRecord[]> = {};
     for (let d = 1; d <= daysInMonth; d++) {
       dayBadges[d] = [];
+      dayRecordsMap[d] = [];
     }
 
     // Find all records for this employee that overlap with this month
@@ -1344,40 +1362,41 @@ export function calculateMonthlyAttendanceMatrix(
       // Populate daily badges for each day in the month covered by [rec.startDate, rec.endDate]
       const start = rec.startDate;
       const end = rec.endDate || rec.startDate;
+      const resolvedSym = resolveSymbolForLeaveRecord(activeSymbols, rec);
 
       for (const col of dayColumns) {
         if (isDateInRange(col.dateStr, start, end)) {
-          let code: 'PN' | 'CĐ' | 'KL' | 'ĐM' = 'PN';
-          let durationText = `${rec.amount} ngày`;
-          if (rec.type === 'annual_leave') {
-            code = 'PN';
-            durationText = `${rec.amount} ngày`;
-          } else if (rec.type === 'regime_leave') {
-            code = 'CĐ';
-            durationText = `${rec.amount} ngày`;
-          } else if (rec.type === 'unpaid_leave') {
-            code = 'KL';
-            durationText = `${rec.amount} ngày`;
-          } else if (rec.type === 'late_early') {
-            code = 'ĐM';
-            durationText = formatLateDurationBadge(rec.amount);
-          }
+          const durationText =
+            rec.type === 'late_early'
+              ? formatLateDurationBadge(rec.amount)
+              : `${rec.amount} ngày`;
 
           const meta = LEAVE_TYPE_META[rec.type];
+          dayRecordsMap[col.day].push(rec);
           dayBadges[col.day].push({
             id: `${rec.id}-${col.day}`,
             type: rec.type,
-            code,
+            code: resolvedSym.code,
+            symbolName: resolvedSym.name,
+            color: resolvedSym.color,
             durationText,
             tooltip:
               rec.type === 'late_early'
-                ? `Đi muộn: ${durationText}${rec.reason ? ` — ${rec.reason}` : ''}`
-                : `${meta.shortLabel}: ${rec.amount} ${meta.unit}${rec.reason ? ` — ${rec.reason}` : ''}`,
+                ? `${resolvedSym.name}: ${durationText}${rec.reason ? ` — ${rec.reason}` : ''}`
+                : `${resolvedSym.name}: ${rec.amount} ${meta.unit}${rec.reason ? ` — ${rec.reason}` : ''}`,
             record: rec,
           });
         }
       }
     }
+
+    const { effectiveWorkdays, standardWorkingDays } =
+      calculateMonthlyEffectiveWorkdays({
+        year,
+        month,
+        dayRecordsMap,
+        symbols: activeSymbols,
+      });
 
     const monthAnnualAndRegimeDays = Number(
       (monthAnnualDays + monthRegimeDays).toFixed(2)
@@ -1414,6 +1433,8 @@ export function calculateMonthlyAttendanceMatrix(
       monthUnpaidCount,
       monthLateHours,
       monthLateCount,
+      monthEffectiveWorkdays: effectiveWorkdays,
+      standardWorkingDays,
       hasAnyActivityInMonth,
       monthRecords: empMonthRecords,
       dayBadges,

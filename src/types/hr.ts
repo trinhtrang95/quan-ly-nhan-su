@@ -82,6 +82,7 @@ export interface LeaveRecord {
   id: string;
   employeeId: string;
   type: LeaveRecordType;
+  symbolCode?: string;  // Mã ký hiệu công (VD: PN, CĐ, KL, NB, ĐM...)
   regimeSubtype?: RegimeSubtype;
   startDate: string;    // YYYY-MM-DD
   endDate: string;      // YYYY-MM-DD

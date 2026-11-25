@@ -29,6 +29,14 @@ import {
   deleteImageFromHrBucket,
   uploadImageToHrBucket,
 } from '../utils/supabaseService';
+import { useAttendanceSymbols } from '../contexts/AttendanceSymbolsContext';
+import {
+  getSymbolBadgeClasses,
+  mapSymbolToLeaveRecordType,
+  resolveSymbolByCode,
+  resolveSymbolForLeaveRecord,
+  resolveSymbolForSystemKey,
+} from '../utils/attendanceSymbolsLogic';
 
 interface LeaveRecordModalProps {
   isOpen: boolean;
@@ -79,6 +87,8 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const { symbols, leaveSymbols } = useAttendanceSymbols();
+
   // 1. Top Business Tab: 'leave' (📅 Nghỉ phép) vs 'late' (⏰ Đi muộn)
   const [activeTab, setActiveTab] = useState<'leave' | 'late'>('leave');
 
@@ -92,6 +102,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
   const [leaveSubType, setLeaveSubType] = useState<
     'annual_leave' | 'unpaid_leave' | 'regime_leave'
   >('annual_leave');
+  const [selectedSymbolCode, setSelectedSymbolCode] = useState<string>('PN');
   const [regimeSubtype, setRegimeSubtype] =
     useState<RegimeSubtype>('Ốm đau / Viện phí');
   const [startDate, setStartDate] = useState<string>(() =>
@@ -173,13 +184,18 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
 
     if (editingRecord) {
       setEmployeeId(editingRecord.employeeId);
+      const resolvedSym = resolveSymbolForLeaveRecord(symbols, editingRecord);
       if (editingRecord.type === 'late_early') {
         setActiveTab('late');
         setLateHours(editingRecord.amount || 1);
         setLeaveDays(1);
+        setSelectedSymbolCode(
+          resolveSymbolForSystemKey(symbols, 'LEAVE_ANNUAL', 'PN')?.code || 'PN'
+        );
       } else {
         setActiveTab('leave');
         setLeaveSubType(editingRecord.type);
+        setSelectedSymbolCode(resolvedSym.code);
         setLeaveDays(editingRecord.amount || 1);
         setLateHours(1);
       }
@@ -200,7 +216,11 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       setEmployeeId(initialEmpId);
 
       const rem = initialEmpId ? remainingLeaveMap.get(initialEmpId) ?? 12 : 12;
+      const annualSym = resolveSymbolForSystemKey(symbols, 'LEAVE_ANNUAL', 'PN');
+      const unpaidSym = resolveSymbolForSystemKey(symbols, 'LEAVE_UNPAID', 'KL');
+      const defaultSym = rem > 0 ? annualSym : unpaidSym;
       setLeaveSubType(rem > 0 ? 'annual_leave' : 'unpaid_leave');
+      setSelectedSymbolCode(defaultSym?.code || (rem > 0 ? 'PN' : 'KL'));
       setRegimeSubtype('Ốm đau / Viện phí');
 
       const todayIso = getTodayDateString(defaultMonth, defaultYear);
@@ -301,6 +321,15 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
     }
   };
 
+  const activeLeaveSymbol =
+    resolveSymbolByCode(leaveSymbols, selectedSymbolCode) ||
+    leaveSymbols[0] ||
+    resolveSymbolForSystemKey(symbols, 'LEAVE_ANNUAL', 'PN');
+
+  const isCoreRegimeSymbol =
+    activeLeaveSymbol?.systemKey === 'LEAVE_REGIME' ||
+    activeLeaveSymbol?.code === 'CĐ';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -310,8 +339,17 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       return;
     }
 
+    const lateSymbol = resolveSymbolForSystemKey(symbols, 'VIOLATION_LATE', 'ĐM');
     const finalType: LeaveRecordType =
-      activeTab === 'late' ? 'late_early' : leaveSubType;
+      activeTab === 'late'
+        ? 'late_early'
+        : activeLeaveSymbol
+          ? mapSymbolToLeaveRecordType(activeLeaveSymbol)
+          : leaveSubType;
+    const finalSymbolCode =
+      activeTab === 'late'
+        ? lateSymbol?.code || 'ĐM'
+        : activeLeaveSymbol?.code || selectedSymbolCode || 'PN';
     const finalAmount =
       activeTab === 'late' ? Number(lateHours) : Number(leaveDays);
 
@@ -325,17 +363,20 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
     }
 
     if (!editingRecord) {
-      const isDuplicate = leaveRecords.some(
-        (r) =>
+      const isDuplicate = leaveRecords.some((r) => {
+        const existingCode = resolveSymbolForLeaveRecord(symbols, r).code;
+        return (
           r.employeeId === employeeId &&
           r.type === finalType &&
+          existingCode === finalSymbolCode &&
           r.startDate === startDate
-      );
+        );
+      });
       if (isDuplicate) {
         setErrorMsg(
           `Nhân sự ${
             selectedEmployee?.fullName || ''
-          } đã có bản ghi cùng loại trong ngày ${startDate}.`
+          } đã có bản ghi cùng loại (${finalSymbolCode}) trong ngày ${startDate}.`
         );
         return;
       }
@@ -352,14 +393,19 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
       reason.trim() ||
       (activeTab === 'late'
         ? 'Đi muộn có báo cáo quản lý bộ phận'
-        : 'Xin nghỉ phép giải quyết việc cá nhân');
+        : activeLeaveSymbol && !activeLeaveSymbol.isSystem
+          ? activeLeaveSymbol.name
+          : 'Xin nghỉ phép giải quyết việc cá nhân');
 
     onSave(
       {
         employeeId,
         type: finalType,
+        symbolCode: finalSymbolCode,
         regimeSubtype:
-          finalType === 'regime_leave' ? regimeSubtype : undefined,
+          finalType === 'regime_leave' && isCoreRegimeSymbol
+            ? regimeSubtype
+            : undefined,
         startDate,
         endDate:
           activeTab === 'late'
@@ -548,8 +594,23 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                               setComboQuery('');
                               setIsComboOpen(false);
                               if (!editingRecord) {
+                                const annualSym = resolveSymbolForSystemKey(
+                                  symbols,
+                                  'LEAVE_ANNUAL',
+                                  'PN'
+                                );
+                                const unpaidSym = resolveSymbolForSystemKey(
+                                  symbols,
+                                  'LEAVE_UNPAID',
+                                  'KL'
+                                );
                                 setLeaveSubType(
                                   rem > 0 ? 'annual_leave' : 'unpaid_leave'
+                                );
+                                setSelectedSymbolCode(
+                                  rem > 0
+                                    ? annualSym?.code || 'PN'
+                                    : unpaidSym?.code || 'KL'
                                 );
                               }
                             }}
@@ -590,42 +651,48 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
             <div className="p-2.5 rounded-xl bg-slate-50/90 border border-slate-200/80 space-y-2">
               {activeTab === 'leave' ? (
                 <>
-                  {/* 3 nút Loại hình nghỉ phép */}
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                  {/* Danh sách Loại hình nghỉ phép động từ Ký hiệu công */}
+                  <div className="space-y-2">
                     <div
-                      className={`${
-                        leaveSubType === 'regime_leave'
-                          ? 'sm:col-span-8'
-                          : 'sm:col-span-12'
-                      } grid grid-cols-3 gap-1.5`}
+                      data-testid="leave-modal-symbol-grid"
+                      className="grid grid-cols-2 sm:grid-cols-3 gap-1.5"
                     >
-                      {(
-                        [
-                          { id: 'annual_leave', title: 'Nghỉ phép năm' },
-                          { id: 'unpaid_leave', title: 'Nghỉ không lương' },
-                          { id: 'regime_leave', title: 'Nghỉ chế độ' },
-                        ] as {
-                          id: 'annual_leave' | 'unpaid_leave' | 'regime_leave';
-                          title: string;
-                        }[]
-                      ).map((opt) => {
-                        const active = leaveSubType === opt.id;
+                      {leaveSymbols.map((sym) => {
+                        const active =
+                          (activeLeaveSymbol?.code || selectedSymbolCode) === sym.code;
                         return (
                           <button
-                            key={opt.id}
+                            key={sym.id}
                             type="button"
-                            onClick={() => setLeaveSubType(opt.id)}
-                            className={`flex items-center justify-between px-3 py-1.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                            data-testid={`leave-symbol-opt-${sym.code}`}
+                            onClick={() => {
+                              setSelectedSymbolCode(sym.code);
+                              const mappedType = mapSymbolToLeaveRecordType(sym);
+                              if (mappedType !== 'late_early') {
+                                setLeaveSubType(mappedType);
+                              }
+                            }}
+                            className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all cursor-pointer ${
                               active
-                                ? 'border-[#0D9488] bg-teal-50 ring-1 ring-[#0D9488] font-bold text-[#0F766E]'
+                                ? 'border-[#14539E] bg-blue-50/70 ring-1 ring-[#14539E] font-bold text-[#14539E]'
                                 : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium'
                             }`}
                           >
-                            <span className="truncate">{opt.title}</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold leading-none shrink-0 ${getSymbolBadgeClasses(
+                                  sym,
+                                  true
+                                )}`}
+                              >
+                                {sym.code}
+                              </span>
+                              <span className="truncate">{sym.name}</span>
+                            </div>
                             <span
                               className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
                                 active
-                                  ? 'border-[#0D9488] bg-[#0D9488] text-white'
+                                  ? 'border-[#14539E] bg-[#14539E] text-white'
                                   : 'border-slate-300'
                               }`}
                             >
@@ -636,15 +703,15 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                       })}
                     </div>
 
-                    {leaveSubType === 'regime_leave' && (
-                      <div className="sm:col-span-4">
+                    {leaveSubType === 'regime_leave' && isCoreRegimeSymbol && (
+                      <div>
                         <select
                           value={regimeSubtype}
                           onChange={(e) =>
                             setRegimeSubtype(e.target.value as RegimeSubtype)
                           }
                           aria-label="Chọn chế độ nghỉ"
-                          className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-teal-300 bg-white text-slate-800 focus:outline-none focus:border-[#0D9488]"
+                          className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-blue-300 bg-white text-slate-800 focus:outline-none focus:border-[#14539E]"
                         >
                           <option value="Ốm đau / Viện phí">
                             Ốm đau / Viện phí (BHXH)

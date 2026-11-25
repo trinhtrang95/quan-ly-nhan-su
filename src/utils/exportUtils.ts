@@ -697,6 +697,7 @@ export function exportMonthlyAttendanceMatrixToExcel(
           <td style="font-weight:bold;">${escapeHtml(row.employee.fullName)}</td>
           <td style="text-align:center;font-weight:bold;">${escapeHtml(getShortGroupCode(row.employee.department, groups))}</td>
           <td style="text-align:center;font-weight:bold;background-color:#F0FDFA;color:#0F766E;">${row.remainingAnnualLeave}</td>
+          <td style="text-align:center;font-weight:bold;color:#14539E;">${row.monthEffectiveWorkdays ?? '-'}</td>
           <td style="text-align:center;font-weight:bold;">${row.monthAnnualAndRegimeDays > 0 ? row.monthAnnualAndRegimeDays : '-'}</td>
           <td style="text-align:center;color:#B45309;font-weight:bold;">${row.monthUnpaidDays > 0 ? row.monthUnpaidDays : '-'}</td>
           <td style="text-align:center;color:#DC2626;font-weight:bold;">${escapeHtml(lateSummary)}</td>
@@ -731,6 +732,7 @@ export function exportMonthlyAttendanceMatrixToExcel(
             <th>HỌ VÀ TÊN</th>
             <th>NHÓM / BỘ PHẬN</th>
             <th>CÒN LẠI</th>
+            <th>CÔNG</th>
             <th>NGHỈ PHÉP NĂM / CHẾ ĐỘ</th>
             <th>NGHỈ KHÔNG LƯƠNG</th>
             <th>ĐI MUỘN</th>

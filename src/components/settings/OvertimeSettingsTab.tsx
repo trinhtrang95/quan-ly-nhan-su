@@ -23,6 +23,11 @@ import {
   WeekdayKey,
   WorkShift,
 } from '../../utils/workScheduleLogic';
+import { useAttendanceSymbols } from '../../contexts/AttendanceSymbolsContext';
+import {
+  getSymbolBadgeClasses,
+  resolveSimulatorSymbolDisplay,
+} from '../../utils/attendanceSymbolsLogic';
 
 export interface OvertimeSettingsTabProps {
   settings: OvertimeSettings;
@@ -48,6 +53,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
   isSaving,
   onSaveSettings,
 }) => {
+  const { symbols } = useAttendanceSymbols();
   const [draft, setDraft] = useState<OvertimeSettings>(() => settings);
 
   useEffect(() => {
@@ -1017,12 +1023,37 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
           >
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5">
               <div className="text-[11px] font-medium text-slate-500">Ký hiệu</div>
-              <div
-                data-testid="ot-sim-symbol"
-                className="text-lg font-bold text-[#14539E] font-mono mt-0.5 tabular-nums"
-              >
-                {simResult.symbol}
-              </div>
+              {(() => {
+                const simSym = resolveSimulatorSymbolDisplay(symbols, simResult);
+                return (
+                  <div className="mt-1 space-y-1">
+                    <div
+                      data-testid="ot-sim-symbol"
+                      className="flex flex-wrap items-center gap-1.5"
+                    >
+                      <span
+                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md border text-sm font-mono font-bold leading-none ${simSym.badgeClass}`}
+                      >
+                        {simSym.displayCode}
+                      </span>
+                      {simSym.lateViolationSymbol && (
+                        <span
+                          title={simSym.lateViolationSymbol.name}
+                          className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md border text-[11px] font-mono font-bold leading-none ${getSymbolBadgeClasses(
+                            simSym.lateViolationSymbol,
+                            true
+                          )}`}
+                        >
+                          {simSym.lateViolationSymbol.code}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-600 font-medium truncate">
+                      {simSym.displayName}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5">

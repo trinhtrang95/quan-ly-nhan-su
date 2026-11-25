@@ -91,6 +91,7 @@ import {
   getFriendlyErrorMessage,
   maskSensitiveUserAccount,
 } from './utils/errorAndSecurityService';
+import { AttendanceSymbolsProvider } from './contexts/AttendanceSymbolsContext';
 
 const DATA_VERSION = 'v2_cloud_strict';
 
@@ -143,7 +144,7 @@ function enforceCloudStrictCacheVersion(): void {
 
 enforceCloudStrictCacheVersion();
 
-export default function App() {
+function AppContent() {
   enforceCloudStrictCacheVersion();
 
   const initialRoute =
@@ -2036,5 +2037,13 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AttendanceSymbolsProvider>
+      <AppContent />
+    </AttendanceSymbolsProvider>
   );
 }
