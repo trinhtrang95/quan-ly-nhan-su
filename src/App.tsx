@@ -1888,6 +1888,7 @@ export default function App() {
               >
                 <GeneralSettingsView
                   groups={effectiveGroups}
+                  employees={companyEmployees}
                   activeCompanyId={activeCompany.id}
                   onShowToast={showToast}
                 />

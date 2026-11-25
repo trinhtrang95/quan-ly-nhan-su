@@ -1286,3 +1286,560 @@ export function calculateOvertimeNetHours(params: {
   };
 }
 
+// ============================================================================
+// Overtime Settings, Factory Meal-Break Rules & Attendance Simulator
+// ============================================================================
+
+export interface DinnerBreakRule {
+  enabled: boolean;
+  break_start: string; // e.g. '18:10'
+  break_end: string; // e.g. '18:40'
+  deduct_minutes: number; // e.g. 30
+  threshold_end_time: string; // e.g. '19:40'
+  continuous_cutoff_time: string; // e.g. '19:10'
+}
+
+export interface SundayLunchRule {
+  enabled: boolean;
+  break_start: string; // e.g. '12:00'
+  break_end: string; // e.g. '12:40'
+  deduct_minutes: number; // e.g. 40
+}
+
+export interface OvertimeSettings {
+  id: string;
+  weekday_rate: number;
+  weekend_rate: number;
+  holiday_rate: number;
+  min_ot_minutes: number;
+  rounding_minutes: number; // 0 | 15 | 30 | 60
+  auto_approve_ot: boolean;
+  weekend_is_ot_only: boolean;
+  dinner_break_rule: DinnerBreakRule;
+  sunday_lunch_rule: SundayLunchRule;
+  updated_at?: string;
+}
+
+export const DEFAULT_OVERTIME_SETTINGS: OvertimeSettings = {
+  id: 'default',
+  weekday_rate: 150,
+  weekend_rate: 200,
+  holiday_rate: 300,
+  min_ot_minutes: 60,
+  rounding_minutes: 30,
+  auto_approve_ot: true,
+  weekend_is_ot_only: true,
+  dinner_break_rule: {
+    enabled: true,
+    break_start: '18:10',
+    break_end: '18:40',
+    deduct_minutes: 30,
+    threshold_end_time: '19:40',
+    continuous_cutoff_time: '19:10',
+  },
+  sunday_lunch_rule: {
+    enabled: true,
+    break_start: '12:00',
+    break_end: '12:40',
+    deduct_minutes: 40,
+  },
+};
+
+export interface ActualOvertimeHoursResult {
+  rawMinutes: number;
+  rawHours: number;
+  lunchDeductedMinutes: number;
+  dinnerDeductedMinutes: number;
+  totalDeductedMinutes: number;
+  deductedBreakHours: number;
+  netMinutes: number;
+  netHours: number;
+  lunchApplied: boolean;
+  dinnerApplied: boolean;
+  noteText: string;
+  explanations: string[];
+}
+
+export function formatActualOvertimeDeductionNote(params: {
+  lunchDeductedMinutes: number;
+  dinnerDeductedMinutes: number;
+}): string {
+  const parts: string[] = [];
+  if (params.lunchDeductedMinutes > 0) {
+    parts.push(`${params.lunchDeductedMinutes}p ăn trưa`);
+  }
+  if (params.dinnerDeductedMinutes > 0) {
+    parts.push(`${params.dinnerDeductedMinutes}p ăn tối`);
+  }
+  if (parts.length === 0) return '';
+  return `Đã trừ ${parts.join(' + ')}`;
+}
+
+/**
+ * Shared factory overtime meal-break calculator used by both CreateOvertimeForm
+ * and the Overtime Settings simulator:
+ * - Dinner rule (both weekday & Sunday/weekly off): if enabled and startTime <= break_start (18:10)
+ *   and endTime >= threshold_end_time (19:40), deducts deduct_minutes (30m).
+ *   Continuous OT ending <= continuous_cutoff_time (19:10) deducts 0m for dinner.
+ * - Sunday / weekly-off lunch rule: if isSundayOrWeekend (or date is Sunday) and enabled and
+ *   time span covers break_start..break_end (startTime <= 12:00 && endTime >= 12:40),
+ *   deducts deduct_minutes (40m) for lunch.
+ */
+export function calculateActualOvertimeHours(
+  date: string,
+  startTime: string,
+  endTime: string,
+  isSundayOrWeekend: boolean,
+  settings: OvertimeSettings = DEFAULT_OVERTIME_SETTINGS
+): ActualOvertimeHoursResult {
+  const s = parseTimeToMinutes(startTime);
+  const e = parseTimeToMinutes(endTime);
+  if (s === null || e === null || e <= s) {
+    return {
+      rawMinutes: 0,
+      rawHours: 0,
+      lunchDeductedMinutes: 0,
+      dinnerDeductedMinutes: 0,
+      totalDeductedMinutes: 0,
+      deductedBreakHours: 0,
+      netMinutes: 0,
+      netHours: 0,
+      lunchApplied: false,
+      dinnerApplied: false,
+      noteText: '',
+      explanations: [],
+    };
+  }
+
+  const rawMinutes = e - s;
+  const effectiveSettings = settings || DEFAULT_OVERTIME_SETTINGS;
+  const dinnerRule =
+    effectiveSettings.dinner_break_rule || DEFAULT_OVERTIME_SETTINGS.dinner_break_rule;
+  const lunchRule =
+    effectiveSettings.sunday_lunch_rule || DEFAULT_OVERTIME_SETTINGS.sunday_lunch_rule;
+
+  const isSundayDate = Boolean(date && /^\d{4}-\d{2}-\d{2}$/.test(date) && getWeekdayKeyFromIsoDate(date) === 'sun');
+  const applyWeekendLunchScope = isSundayOrWeekend || isSundayDate;
+
+  let lunchDeductedMinutes = 0;
+  let dinnerDeductedMinutes = 0;
+  const explanations: string[] = [];
+
+  // 1. Sunday / Weekly rest lunch deduction
+  if (applyWeekendLunchScope && lunchRule.enabled) {
+    const lunchStart = parseTimeToMinutes(lunchRule.break_start) ?? 12 * 60;
+    const lunchEnd = parseTimeToMinutes(lunchRule.break_end) ?? 12 * 60 + 40;
+    const lunchMinutes = Math.max(0, Number(lunchRule.deduct_minutes ?? 40));
+    if (lunchMinutes > 0 && s < lunchEnd && e > lunchStart && s <= lunchStart && e >= lunchEnd) {
+      lunchDeductedMinutes = Math.min(rawMinutes, lunchMinutes);
+      explanations.push(
+        `Ngày nghỉ / Chủ nhật làm qua khung nghỉ trưa (${lunchRule.break_start}–${lunchRule.break_end}): trừ ${lunchDeductedMinutes} phút ăn trưa.`
+      );
+    }
+  }
+
+  // 2. Dinner deduction (applies to both weekdays and weekends/holidays)
+  if (dinnerRule.enabled) {
+    const dinnerBreakStart = parseTimeToMinutes(dinnerRule.break_start) ?? 18 * 60 + 10;
+    const dinnerThresholdEnd =
+      parseTimeToMinutes(dinnerRule.threshold_end_time) ?? 19 * 60 + 40;
+    const continuousCutoff =
+      parseTimeToMinutes(dinnerRule.continuous_cutoff_time) ?? 19 * 60 + 10;
+    const dinnerMinutes = Math.max(0, Number(dinnerRule.deduct_minutes ?? 30));
+
+    if (dinnerMinutes > 0 && s <= dinnerBreakStart && e >= dinnerThresholdEnd) {
+      dinnerDeductedMinutes = Math.min(
+        Math.max(0, rawMinutes - lunchDeductedMinutes),
+        dinnerMinutes
+      );
+      explanations.push(
+        `Tăng ca bắt đầu ≤ ${dinnerRule.break_start} và kết thúc từ ${dinnerRule.threshold_end_time} trở đi: trừ ${dinnerDeductedMinutes} phút ăn tối (${dinnerRule.break_start}–${dinnerRule.break_end}).`
+      );
+    } else if (s <= dinnerBreakStart && e <= continuousCutoff) {
+      explanations.push(
+        `Tăng ca liên tục kết thúc ≤ ${dinnerRule.continuous_cutoff_time}: không trừ giờ nghỉ ăn tối.`
+      );
+    }
+  }
+
+  const totalDeductedMinutes = lunchDeductedMinutes + dinnerDeductedMinutes;
+  const netMinutes = Math.max(0, rawMinutes - totalDeductedMinutes);
+  const noteText = formatActualOvertimeDeductionNote({
+    lunchDeductedMinutes,
+    dinnerDeductedMinutes,
+  });
+
+  return {
+    rawMinutes,
+    rawHours: Number((rawMinutes / 60).toFixed(2)),
+    lunchDeductedMinutes,
+    dinnerDeductedMinutes,
+    totalDeductedMinutes,
+    deductedBreakHours: Number((totalDeductedMinutes / 60).toFixed(2)),
+    netMinutes,
+    netHours: Number((netMinutes / 60).toFixed(2)),
+    lunchApplied: lunchDeductedMinutes > 0,
+    dinnerApplied: dinnerDeductedMinutes > 0,
+    noteText,
+    explanations,
+  };
+}
+
+export type SimulatorDayType = 'workday' | 'weekend' | 'holiday';
+
+export interface AttendanceSimulationInput {
+  shift: WorkShift;
+  weekdayKey: WeekdayKey;
+  dayType: SimulatorDayType;
+  checkIn: string;
+  checkOut: string;
+  settings: OvertimeSettings;
+}
+
+export interface AttendanceSimulationResult {
+  symbol: string;
+  workdays: number;
+  inShiftHours: number;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+  nightHours: number;
+  otHours: number;
+  rawOtHours: number;
+  otRatePercent: number;
+  convertedSalaryHours: number;
+  requiresConfirmation: boolean;
+  mealDeductionNote: string;
+  explanations: string[];
+}
+
+function calculateOverlapMinutes(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number
+): number {
+  const s = Math.max(aStart, bStart);
+  const e = Math.min(aEnd, bEnd);
+  return Math.max(0, e - s);
+}
+
+/**
+ * Pure attendance + overtime payroll simulator for Tab 3 ("Làm thêm giờ" -> "Xem thử cách tính").
+ */
+export function simulateAttendanceAndOvertime(
+  input: AttendanceSimulationInput
+): AttendanceSimulationResult {
+  const { shift, weekdayKey, dayType, checkIn, checkOut, settings } = input;
+  const s = parseTimeToMinutes(checkIn);
+  const rawE = parseTimeToMinutes(checkOut);
+
+  if (s === null || rawE === null || s === rawE) {
+    return {
+      symbol: '-',
+      workdays: 0,
+      inShiftHours: 0,
+      lateMinutes: 0,
+      earlyLeaveMinutes: 0,
+      nightHours: 0,
+      otHours: 0,
+      rawOtHours: 0,
+      otRatePercent:
+        dayType === 'holiday'
+          ? settings.holiday_rate
+          : dayType === 'weekend'
+            ? settings.weekend_rate
+            : settings.weekday_rate,
+      convertedSalaryHours: 0,
+      requiresConfirmation: !settings.auto_approve_ot,
+      mealDeductionNote: '',
+      explanations: ['Vui lòng nhập Giờ vào và Giờ ra hợp lệ (HH:mm) để xem kết quả tính.'],
+    };
+  }
+
+  // Support overnight check-out if rawE < s
+  const e = rawE > s ? rawE : rawE + 24 * 60;
+  const explanations: string[] = [];
+
+  // Calculate Night Hours (22:00 - 06:00 across day 0 & day 1)
+  const nightMinutes =
+    calculateOverlapMinutes(s, e, 0, 6 * 60) +
+    calculateOverlapMinutes(s, e, 22 * 60, 30 * 60);
+  const nightHours = Number((nightMinutes / 60).toFixed(2));
+
+  // Resolve effective shift schedule for selected weekday
+  const override = shift.dayOverrides?.[weekdayKey];
+  const shiftStartStr = override?.startTime?.trim() || shift.startTime || '08:00';
+  const shiftEndStr = override?.endTime?.trim() || shift.endTime || '17:00';
+  const breakStartStr =
+    override?.breakStart !== undefined
+      ? override.breakStart.trim()
+      : (shift.breakStart || '').trim();
+  const breakEndStr =
+    override?.breakEnd !== undefined
+      ? override.breakEnd.trim()
+      : (shift.breakEnd || '').trim();
+
+  const shiftStartMin = parseTimeToMinutes(shiftStartStr) ?? 8 * 60;
+  const rawShiftEndMin = parseTimeToMinutes(shiftEndStr) ?? 17 * 60;
+  const shiftEndMin =
+    rawShiftEndMin > shiftStartMin ? rawShiftEndMin : rawShiftEndMin + 24 * 60;
+
+  const weekdayMode = shift.workingDays?.[weekdayKey] ?? 'off';
+  const isMorningShiftDay = dayType === 'workday' && weekdayMode === 'morning';
+  const morningEndMin = parseTimeToMinutes(breakStartStr) ?? Math.floor((shiftStartMin + shiftEndMin) / 2);
+  const effectiveShiftEndMin = isMorningShiftDay ? morningEndMin : shiftEndMin;
+
+  const breakStartMin = parseTimeToMinutes(breakStartStr);
+  const breakEndMin = parseTimeToMinutes(breakEndStr);
+  const hasShiftBreak =
+    !isMorningShiftDay &&
+    breakStartMin !== null &&
+    breakEndMin !== null &&
+    breakEndMin > breakStartMin;
+
+  const standardInShiftMinutes = (() => {
+    const span = Math.max(0, effectiveShiftEndMin - shiftStartMin);
+    if (!hasShiftBreak) return span;
+    const brkOverlap = calculateOverlapMinutes(
+      shiftStartMin,
+      effectiveShiftEndMin,
+      breakStartMin!,
+      breakEndMin!
+    );
+    return Math.max(0, span - brkOverlap);
+  })();
+
+  const minOtMinutes = Math.max(0, Number(settings.min_ot_minutes ?? 60));
+  const roundingMinutes = Math.max(0, Number(settings.rounding_minutes ?? 0));
+
+  const applyFloorRounding = (minutes: number): { roundedMinutes: number; wasRounded: boolean } => {
+    if (roundingMinutes <= 0 || minutes <= 0) {
+      return { roundedMinutes: minutes, wasRounded: false };
+    }
+    const floored = Math.floor(minutes / roundingMinutes) * roundingMinutes;
+    return { roundedMinutes: floored, wasRounded: floored !== minutes };
+  };
+
+  let symbol = 'X';
+  let workdays = 0;
+  let inShiftHours = 0;
+  let lateMinutes = 0;
+  let earlyLeaveMinutes = 0;
+  let otMinutes = 0;
+  let rawOtMinutes = 0;
+  let mealDeductionNote = '';
+  let otRatePercent = settings.weekday_rate;
+
+  // Map weekdayKey to a deterministic sample ISO date matching that weekday (2026-11-23 is Monday)
+  const weekdayOffsetMap: Record<WeekdayKey, number> = {
+    mon: 0,
+    tue: 1,
+    wed: 2,
+    thu: 3,
+    fri: 4,
+    sat: 5,
+    sun: 6,
+  };
+  const sampleIsoDate = addDaysToIsoDate('2026-11-23', weekdayOffsetMap[weekdayKey]);
+
+  const computeOtFromWindow = (
+    otStartMin: number,
+    otEndMin: number,
+    isWeekendScope: boolean
+  ) => {
+    if (otEndMin <= otStartMin) {
+      return { finalMinutes: 0, rawAfterBreaks: 0 };
+    }
+
+    // If same-day within 24h, use shared calculateActualOvertimeHours directly
+    if (otEndMin < 24 * 60) {
+      const otStartStr = formatMinutesToHHMM(otStartMin);
+      const otEndStr = formatMinutesToHHMM(otEndMin);
+      const actualRes = calculateActualOvertimeHours(
+        sampleIsoDate,
+        otStartStr,
+        otEndStr,
+        isWeekendScope,
+        settings
+      );
+
+      if (actualRes.rawMinutes < minOtMinutes) {
+        explanations.push(
+          `Tổng thời gian làm thêm ${actualRes.rawMinutes} phút < ngưỡng tối thiểu ${minOtMinutes} phút: chưa tính làm thêm giờ.`
+        );
+        return { finalMinutes: 0, rawAfterBreaks: 0 };
+      }
+
+      if (actualRes.explanations.length > 0) {
+        explanations.push(...actualRes.explanations);
+      } else {
+        explanations.push(
+          `Khoảng tăng ca ${otStartStr}–${otEndStr} (${Number((actualRes.rawMinutes / 60).toFixed(2))} giờ): không phát sinh trừ giờ ăn ca.`
+        );
+      }
+      mealDeductionNote = actualRes.noteText;
+
+      const { roundedMinutes, wasRounded } = applyFloorRounding(actualRes.netMinutes);
+      if (wasRounded) {
+        explanations.push(
+          `Áp dụng làm tròn xuống theo ${roundingMinutes} phút: ${actualRes.netMinutes} phút → ${roundedMinutes} phút (${Number((roundedMinutes / 60).toFixed(2))} giờ).`
+        );
+      } else if (roundingMinutes > 0 && actualRes.netMinutes > 0) {
+        explanations.push(
+          `Số phút tăng ca thực tế (${actualRes.netMinutes} phút) chia hết cho bước làm tròn ${roundingMinutes} phút.`
+        );
+      }
+      return { finalMinutes: roundedMinutes, rawAfterBreaks: actualRes.netMinutes };
+    }
+
+    // Overnight fallback (rare in simulator)
+    const span = otEndMin - otStartMin;
+    if (span < minOtMinutes) {
+      explanations.push(
+        `Tổng thời gian làm thêm ${span} phút < ngưỡng tối thiểu ${minOtMinutes} phút: chưa tính làm thêm giờ.`
+      );
+      return { finalMinutes: 0, rawAfterBreaks: 0 };
+    }
+    const { roundedMinutes, wasRounded } = applyFloorRounding(span);
+    if (wasRounded) {
+      explanations.push(
+        `Áp dụng làm tròn xuống theo ${roundingMinutes} phút: ${span} phút → ${roundedMinutes} phút.`
+      );
+    }
+    return { finalMinutes: roundedMinutes, rawAfterBreaks: span };
+  };
+
+  if (dayType === 'holiday') {
+    otRatePercent = settings.holiday_rate;
+    symbol = 'L';
+    workdays = 0;
+    inShiftHours = 0;
+    explanations.push(
+      `Ngày lễ, tết: toàn bộ thời gian làm việc được tính tăng ca với đơn giá ${settings.holiday_rate}%.`
+    );
+    const otRes = computeOtFromWindow(s, e, true);
+    otMinutes = otRes.finalMinutes;
+    rawOtMinutes = otRes.rawAfterBreaks;
+  } else if (dayType === 'weekend') {
+    otRatePercent = settings.weekend_rate;
+    if (settings.weekend_is_ot_only) {
+      symbol = 'TC';
+      workdays = 0;
+      inShiftHours = 0;
+      explanations.push(
+        `Ngày nghỉ hằng tuần (áp dụng quy tắc chỉ tính làm thêm, không tính ngày công): hưởng ${settings.weekend_rate}%.`
+      );
+      const otRes = computeOtFromWindow(s, e, true);
+      otMinutes = otRes.finalMinutes;
+      rawOtMinutes = otRes.rawAfterBreaks;
+    } else {
+      // Count shift hours as regular workdays + excess as weekend OT
+      const workedInShiftRaw = calculateOverlapMinutes(s, e, shiftStartMin, effectiveShiftEndMin);
+      const brkInShift = hasShiftBreak
+        ? calculateOverlapMinutes(Math.max(s, shiftStartMin), Math.min(e, effectiveShiftEndMin), breakStartMin!, breakEndMin!)
+        : 0;
+      const inShiftMinutes = Math.max(0, workedInShiftRaw - brkInShift);
+      inShiftHours = Number((inShiftMinutes / 60).toFixed(2));
+      workdays =
+        standardInShiftMinutes > 0
+          ? Number(Math.min(1, inShiftMinutes / standardInShiftMinutes).toFixed(2))
+          : 0;
+      symbol = workdays >= 0.95 ? 'X' : workdays >= 0.45 ? 'X/2' : 'TC';
+      explanations.push(
+        `Ngày nghỉ hằng tuần tính công bình thường (${workdays} công, ${inShiftHours} giờ trong ca); phần sau giờ tan ca tính tăng ca ${settings.weekend_rate}%.`
+      );
+      if (e > effectiveShiftEndMin) {
+        const otRes = computeOtFromWindow(Math.max(s, effectiveShiftEndMin), e, true);
+        otMinutes = otRes.finalMinutes;
+        rawOtMinutes = otRes.rawAfterBreaks;
+      }
+    }
+  } else {
+    // Workday
+    otRatePercent = settings.weekday_rate;
+    const workedInShiftRaw = calculateOverlapMinutes(s, e, shiftStartMin, effectiveShiftEndMin);
+    const brkInShift = hasShiftBreak
+      ? calculateOverlapMinutes(Math.max(s, shiftStartMin), Math.min(e, effectiveShiftEndMin), breakStartMin!, breakEndMin!)
+      : 0;
+    const inShiftMinutes = Math.max(0, workedInShiftRaw - brkInShift);
+    inShiftHours = Number((inShiftMinutes / 60).toFixed(2));
+
+    const grace = Math.max(0, Number(shift.earlyMinutes || 0));
+    if (s > shiftStartMin + grace && s < effectiveShiftEndMin) {
+      lateMinutes = s - shiftStartMin;
+    }
+    if (e < effectiveShiftEndMin && e > shiftStartMin) {
+      earlyLeaveMinutes = effectiveShiftEndMin - e;
+    }
+
+    if (standardInShiftMinutes > 0) {
+      const ratio = inShiftMinutes / standardInShiftMinutes;
+      if (ratio >= 0.95) {
+        workdays = isMorningShiftDay ? 0.5 : 1;
+        symbol = isMorningShiftDay ? 'X/2' : 'X';
+      } else if (ratio >= 0.45) {
+        workdays = Number((ratio * (isMorningShiftDay ? 0.5 : 1)).toFixed(2));
+        symbol = 'X/2';
+      } else {
+        workdays = Number((ratio * (isMorningShiftDay ? 0.5 : 1)).toFixed(2));
+        symbol = inShiftMinutes > 0 ? 'X/2' : '-';
+      }
+    }
+
+    explanations.push(
+      `Ca ${shift.code} (${shiftStartStr}–${formatMinutesToHHMM(effectiveShiftEndMin)}${hasShiftBreak ? `, nghỉ giữa ca ${breakStartStr}–${breakEndStr}` : ''}): ghi nhận ${inShiftHours} giờ trong ca (${workdays} ngày công).`
+    );
+
+    if (e > effectiveShiftEndMin) {
+      const otStartMin = Math.max(s, effectiveShiftEndMin);
+      const otRes = computeOtFromWindow(otStartMin, e, false);
+      otMinutes = otRes.finalMinutes;
+      rawOtMinutes = otRes.rawAfterBreaks;
+    } else {
+      explanations.push(
+        `Giờ ra (${checkOut}) không vượt quá giờ tan ca (${formatMinutesToHHMM(effectiveShiftEndMin)}): không phát sinh làm thêm.`
+      );
+    }
+  }
+
+  if (nightHours > 0) {
+    explanations.push(
+      `Có ${nightHours} giờ nằm trong khung làm đêm (22:00–06:00).`
+    );
+  }
+
+  const effectiveOtMinutes = settings.auto_approve_ot ? otMinutes : 0;
+  const otHours = Number((effectiveOtMinutes / 60).toFixed(2));
+  const rawOtHours = Number((otMinutes / 60).toFixed(2));
+  const convertedSalaryHours = Number(
+    ((otHours * otRatePercent) / 100).toFixed(2)
+  );
+
+  if (!settings.auto_approve_ot && otMinutes > 0) {
+    explanations.push(
+      `Đang bật chế độ "Không mặc định tính": ${rawOtHours} giờ tăng ca chỉ được cộng lương (× ${otRatePercent}%) sau khi quản lý xác nhận.`
+    );
+  } else if (otHours > 0) {
+    explanations.push(
+      `Quy đổi lương làm thêm: ${otHours} giờ × ${otRatePercent}% = ${convertedSalaryHours} giờ lương.`
+    );
+  }
+
+  return {
+    symbol,
+    workdays,
+    inShiftHours,
+    lateMinutes,
+    earlyLeaveMinutes,
+    nightHours,
+    otHours,
+    rawOtHours: rawOtMinutes > 0 ? Number((rawOtMinutes / 60).toFixed(2)) : 0,
+    otRatePercent,
+    convertedSalaryHours,
+    requiresConfirmation: !settings.auto_approve_ot,
+    mealDeductionNote,
+    explanations,
+  };
+}
+
+

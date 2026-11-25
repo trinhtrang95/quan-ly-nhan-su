@@ -2,17 +2,20 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildMonthCalendarDays,
+  calculateActualOvertimeHours,
   calculateNetShiftHours,
   calculateOvertimeNetHours,
   calculateShiftMetrics,
   convertLunarToSolarIso,
   createDefaultAdminShift,
+  DEFAULT_OVERTIME_SETTINGS,
   evaluateOvertimeDaySchedule,
   generateCompanyHolidaysForYear,
   getLunarHolidayAnchorsForYear,
   getMondayFirstMonthOffset,
   getNextWeekdayMode,
   resolveWorkShiftForDepartment,
+  simulateAttendanceAndOvertime,
   type WorkShift,
 } from './workScheduleLogic';
 
@@ -383,5 +386,139 @@ describe('workScheduleLogic', () => {
     assert.equal(overlappingBreaks.deductedBreakHours, 0.75);
     assert.equal(overlappingBreaks.netHours, 2.25);
   });
+
+  it('applies factory meal-break rules accurately in calculateActualOvertimeHours', () => {
+    // 1. Continuous weekday OT ending at 19:10 -> 0 dinner deduction (16:10 - 19:10 = 3h)
+    const continuous1910 = calculateActualOvertimeHours(
+      '2026-11-23',
+      '16:10',
+      '19:10',
+      false,
+      DEFAULT_OVERTIME_SETTINGS
+    );
+    assert.equal(continuous1910.dinnerDeductedMinutes, 0);
+    assert.equal(continuous1910.lunchDeductedMinutes, 0);
+    assert.equal(continuous1910.netHours, 3);
+    assert.equal(continuous1910.noteText, '');
+
+    // 2. Weekday OT ending at 19:40 -> deducts 30m dinner (16:10 - 19:40 = 3.5h - 0.5h = 3h)
+    const dinner1940 = calculateActualOvertimeHours(
+      '2026-11-23',
+      '16:10',
+      '19:40',
+      false,
+      DEFAULT_OVERTIME_SETTINGS
+    );
+    assert.equal(dinner1940.dinnerDeductedMinutes, 30);
+    assert.equal(dinner1940.netHours, 3);
+    assert.equal(dinner1940.noteText, 'Đã trừ 30p ăn tối');
+
+    // 3. Weekday OT 16:10 - 20:10 -> deducts 30m dinner = 3.5h
+    const dinner2010 = calculateActualOvertimeHours(
+      '2026-11-23',
+      '16:10',
+      '20:10',
+      false,
+      DEFAULT_OVERTIME_SETTINGS
+    );
+    assert.equal(dinner2010.dinnerDeductedMinutes, 30);
+    assert.equal(dinner2010.netHours, 3.5);
+    assert.equal(dinner2010.noteText, 'Đã trừ 30p ăn tối');
+
+    // 4. Sunday OT 07:30 - 16:10 -> deducts 40m lunch only = 8h
+    const sundayDay = calculateActualOvertimeHours(
+      '2026-11-22',
+      '07:30',
+      '16:10',
+      true,
+      DEFAULT_OVERTIME_SETTINGS
+    );
+    assert.equal(sundayDay.lunchDeductedMinutes, 40);
+    assert.equal(sundayDay.dinnerDeductedMinutes, 0);
+    assert.equal(sundayDay.netHours, 8);
+    assert.equal(sundayDay.noteText, 'Đã trừ 40p ăn trưa');
+
+    // 5. Sunday OT 07:30 - 19:40 -> deducts 40m lunch + 30m dinner = 11h
+    const sundayNight = calculateActualOvertimeHours(
+      '2026-11-22',
+      '07:30',
+      '19:40',
+      true,
+      DEFAULT_OVERTIME_SETTINGS
+    );
+    assert.equal(sundayNight.lunchDeductedMinutes, 40);
+    assert.equal(sundayNight.dinnerDeductedMinutes, 30);
+    assert.equal(sundayNight.netHours, 11);
+    assert.equal(sundayNight.noteText, 'Đã trừ 40p ăn trưa + 30p ăn tối');
+  });
+
+  it('simulates attendance, overtime hours, rounding, and converted salary hours cleanly', () => {
+    const factoryShift: WorkShift = {
+      ...createDefaultAdminShift(),
+      startTime: '07:30',
+      endTime: '16:10',
+      breakStart: '12:00',
+      breakEnd: '12:40',
+      standardDailyHours: 8,
+      weeklyHours: 40,
+    };
+
+    // Workday 07:30 - 19:40 -> 1 workday, 8h in shift, 3h OT * 150% = 4.5 salary hours
+    const simWorkdayDinner = simulateAttendanceAndOvertime({
+      shift: factoryShift,
+      weekdayKey: 'wed',
+      dayType: 'workday',
+      checkIn: '07:30',
+      checkOut: '19:40',
+      settings: DEFAULT_OVERTIME_SETTINGS,
+    });
+    assert.equal(simWorkdayDinner.symbol, 'X');
+    assert.equal(simWorkdayDinner.workdays, 1);
+    assert.equal(simWorkdayDinner.inShiftHours, 8);
+    assert.equal(simWorkdayDinner.otHours, 3);
+    assert.equal(simWorkdayDinner.otRatePercent, 150);
+    assert.equal(simWorkdayDinner.convertedSalaryHours, 4.5);
+
+    // Workday 07:30 - 16:50 (40m < 60m min_ot_minutes) -> 0 OT
+    const simBelowThreshold = simulateAttendanceAndOvertime({
+      shift: factoryShift,
+      weekdayKey: 'wed',
+      dayType: 'workday',
+      checkIn: '07:30',
+      checkOut: '16:50',
+      settings: DEFAULT_OVERTIME_SETTINGS,
+    });
+    assert.equal(simBelowThreshold.otHours, 0);
+
+    // Sunday 07:30 - 16:10 with weekend_is_ot_only=true -> symbol TC, 0 workdays, 8h OT * 200% = 16
+    const simSunday = simulateAttendanceAndOvertime({
+      shift: factoryShift,
+      weekdayKey: 'sun',
+      dayType: 'weekend',
+      checkIn: '07:30',
+      checkOut: '16:10',
+      settings: DEFAULT_OVERTIME_SETTINGS,
+    });
+    assert.equal(simSunday.symbol, 'TC');
+    assert.equal(simSunday.workdays, 0);
+    assert.equal(simSunday.otHours, 8);
+    assert.equal(simSunday.otRatePercent, 200);
+    assert.equal(simSunday.convertedSalaryHours, 16);
+
+    // Holiday 07:30 - 16:10 -> symbol L, 8h OT * 300% = 24
+    const simHoliday = simulateAttendanceAndOvertime({
+      shift: factoryShift,
+      weekdayKey: 'thu',
+      dayType: 'holiday',
+      checkIn: '07:30',
+      checkOut: '16:10',
+      settings: DEFAULT_OVERTIME_SETTINGS,
+    });
+    assert.equal(simHoliday.symbol, 'L');
+    assert.equal(simHoliday.otHours, 8);
+    assert.equal(simHoliday.otRatePercent, 300);
+    assert.equal(simHoliday.convertedSalaryHours, 24);
+  });
 });
+
 

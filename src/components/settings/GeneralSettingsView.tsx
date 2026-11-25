@@ -6,16 +6,19 @@ import {
   Clock,
   Copy,
   Database,
+  Timer,
   X,
 } from 'lucide-react';
-import { DepartmentGroup } from '../../types/hr';
+import { DepartmentGroup, Employee } from '../../types/hr';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   CompanyHoliday,
   createDefaultAdminShift,
+  DEFAULT_OVERTIME_SETTINGS,
   generateCompanyHolidaysForYear,
   HolidayGenerationPlan,
   HolidayType,
+  OvertimeSettings,
   WorkShift,
 } from '../../utils/workScheduleLogic';
 import {
@@ -25,29 +28,36 @@ import {
   deleteCompanyHoliday,
   deleteWorkShift,
   fetchCompanyHolidays,
+  fetchOvertimeSettings,
   fetchWorkShifts,
   loadHolidayPlanForYear,
+  mapSupabaseRowToOvertimeSettings,
   replaceGeneratedCompanyHolidays,
   saveHolidayPlanForYear,
+  saveOvertimeSettings,
   saveWorkShift,
   setDefaultWorkShift,
   subscribeToCompanyHolidaysRealtime,
+  subscribeToOvertimeSettingsRealtime,
   subscribeToWorkShiftsRealtime,
   SUPABASE_GENERAL_SETTINGS_SQL,
 } from '../../utils/workScheduleSupabase';
 import { CompanyHolidaysTab } from './CompanyHolidaysTab';
+import { OvertimeSettingsTab } from './OvertimeSettingsTab';
 import { WorkShiftsTab } from './WorkShiftsTab';
 
-export type GeneralSettingsSubTab = 'shifts' | 'holidays';
+export type GeneralSettingsSubTab = 'shifts' | 'holidays' | 'overtime';
 
 export interface GeneralSettingsViewProps {
   groups: DepartmentGroup[];
+  employees?: Employee[];
   activeCompanyId?: string | null;
   onShowToast?: (message: string) => void;
 }
 
 export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
   groups,
+  employees = [],
   activeCompanyId = null,
   onShowToast,
 }) => {
@@ -63,6 +73,14 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [isLoadingHolidays, setIsLoadingHolidays] = useState<boolean>(true);
   const [isSavingHoliday, setIsSavingHoliday] = useState<boolean>(false);
+
+  const [overtimeSettings, setOvertimeSettings] = useState<OvertimeSettings>(
+    () => ({ ...DEFAULT_OVERTIME_SETTINGS })
+  );
+  const [isLoadingOvertimeSettings, setIsLoadingOvertimeSettings] =
+    useState<boolean>(true);
+  const [isSavingOvertimeSettings, setIsSavingOvertimeSettings] =
+    useState<boolean>(false);
 
   const [plan, setPlan] = useState<HolidayGenerationPlan>(() =>
     loadHolidayPlanForYear(currentYear, activeCompanyId)
@@ -149,6 +167,37 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
       unsubscribe();
     };
   }, [loadHolidays, selectedYear, activeCompanyId]);
+
+  const loadOvertimeSettings = useCallback(async (silent = false) => {
+    if (!silent) setIsLoadingOvertimeSettings(true);
+    try {
+      const res = await fetchOvertimeSettings();
+      setOvertimeSettings(res.settings);
+      if (res.schemaNeedsMigration) {
+        setSchemaNeedsMigration(true);
+      }
+    } finally {
+      if (!silent) setIsLoadingOvertimeSettings(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOvertimeSettings(false);
+
+    const unsubscribe = subscribeToOvertimeSettingsRealtime((event) => {
+      if (event.eventType !== 'DELETE' && event.newRow) {
+        const rowId =
+          typeof event.newRow.id === 'string' ? event.newRow.id : 'default';
+        if (rowId === 'default') {
+          setOvertimeSettings(mapSupabaseRowToOvertimeSettings(event.newRow));
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [loadOvertimeSettings]);
 
   const defaultShift = useMemo(
     () =>
@@ -303,6 +352,26 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
     }
   };
 
+  const handleSaveOvertimeSettings = async (nextSettings: OvertimeSettings) => {
+    setIsSavingOvertimeSettings(true);
+    try {
+      const res = await saveOvertimeSettings(nextSettings);
+      setOvertimeSettings(res.settings);
+      if (res.schemaNeedsMigration) {
+        setSchemaNeedsMigration(true);
+      }
+      onShowToast?.(
+        res.source === 'supabase'
+          ? 'Đã lưu thiết lập làm thêm giờ lên Cloud.'
+          : 'Đã lưu thiết lập làm thêm giờ (chế độ cục bộ).'
+      );
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setIsSavingOvertimeSettings(false);
+    }
+  };
+
   const handleCopySql = async () => {
     try {
       await navigator.clipboard.writeText(SUPABASE_GENERAL_SETTINGS_SQL);
@@ -353,6 +422,19 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             <CalendarDays className="w-3.5 h-3.5 shrink-0" />
             <span>Lịch nghỉ lễ, tết</span>
           </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSubTab === 'overtime'}
+            onClick={() => setActiveSubTab('overtime')}
+            className={`${tabBaseClass} ${
+              activeSubTab === 'overtime' ? tabActiveClass : tabInactiveClass
+            }`}
+          >
+            <Timer className="w-3.5 h-3.5 shrink-0" />
+            <span>Làm thêm giờ</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -402,7 +484,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             onSetDefaultShift={handleSetDefaultShift}
             onDeleteShift={handleDeleteShift}
           />
-        ) : (
+        ) : activeSubTab === 'holidays' ? (
           <CompanyHolidaysTab
             year={selectedYear}
             availableYears={availableYears}
@@ -416,6 +498,15 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             onRegenerateByPlan={handleRegenerateByPlan}
             onAddManualHoliday={handleAddManualHoliday}
             onDeleteHoliday={handleDeleteHoliday}
+          />
+        ) : (
+          <OvertimeSettingsTab
+            settings={overtimeSettings}
+            shifts={shifts}
+            employees={employees}
+            isLoading={isLoadingOvertimeSettings}
+            isSaving={isSavingOvertimeSettings}
+            onSaveSettings={handleSaveOvertimeSettings}
           />
         )}
       </div>
@@ -481,6 +572,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                   await Promise.all([
                     loadShifts(false),
                     loadHolidays(selectedYear, false),
+                    loadOvertimeSettings(false),
                   ]);
                 }}
                 className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer"

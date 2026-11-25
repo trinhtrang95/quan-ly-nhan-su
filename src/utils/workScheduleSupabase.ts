@@ -8,10 +8,14 @@ import {
   CompanyHoliday,
   createDefaultAdminShift,
   DayOverridesMap,
+  DEFAULT_OVERTIME_SETTINGS,
   DEFAULT_WORKING_DAYS,
+  DinnerBreakRule,
   HolidayGenerationPlan,
   HolidayType,
   NationalDayPlanOption,
+  OvertimeSettings,
+  SundayLunchRule,
   TetPlanOption,
   WEEKDAY_ORDER,
   WeekdayKey,
@@ -23,6 +27,7 @@ import {
 const WORK_SHIFTS_STORAGE_KEY = 'hr_pro_work_shifts_v1';
 const COMPANY_HOLIDAYS_STORAGE_KEY = 'hr_pro_company_holidays_v1';
 const HOLIDAY_PLAN_STORAGE_KEY = 'hr_pro_holiday_plans_v1';
+const OVERTIME_SETTINGS_STORAGE_KEY = 'hr_pro_overtime_settings_v1';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -109,6 +114,55 @@ BEGIN
     WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'company_holidays'
   ) THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.company_holidays;
+  END IF;
+END $$;
+
+-- 5. Tạo bảng Thiết lập làm thêm giờ (overtime_settings)
+CREATE TABLE IF NOT EXISTS public.overtime_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  weekday_rate NUMERIC NOT NULL DEFAULT 150,
+  weekend_rate NUMERIC NOT NULL DEFAULT 200,
+  holiday_rate NUMERIC NOT NULL DEFAULT 300,
+  min_ot_minutes INTEGER NOT NULL DEFAULT 60,
+  rounding_minutes INTEGER NOT NULL DEFAULT 30,
+  auto_approve_ot BOOLEAN NOT NULL DEFAULT TRUE,
+  weekend_is_ot_only BOOLEAN NOT NULL DEFAULT TRUE,
+  dinner_break_rule JSONB NOT NULL DEFAULT '{"enabled":true,"break_start":"18:10","break_end":"18:40","deduct_minutes":30,"threshold_end_time":"19:40","continuous_cutoff_time":"19:10"}'::jsonb,
+  sunday_lunch_rule JSONB NOT NULL DEFAULT '{"enabled":true,"break_start":"12:00","break_end":"12:40","deduct_minutes":40}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.overtime_settings ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  pol RECORD;
+BEGIN
+  FOR pol IN
+    SELECT policyname
+    FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'overtime_settings'
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.overtime_settings', pol.policyname);
+  END LOOP;
+END $$;
+
+CREATE POLICY "Allow public full access on overtime_settings"
+  ON public.overtime_settings
+  FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE public.overtime_settings REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'overtime_settings'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.overtime_settings;
   END IF;
 END $$;
 
@@ -1112,3 +1166,292 @@ export function subscribeToCompanyHolidaysRealtime(
     void client.removeChannel(channel);
   };
 }
+
+// ============================================================================
+// Overtime Settings CRUD + Realtime (`overtime_settings`)
+// ============================================================================
+
+export interface SupabaseOvertimeSettingsRow {
+  id: string;
+  weekday_rate?: number | null;
+  weekend_rate?: number | null;
+  holiday_rate?: number | null;
+  min_ot_minutes?: number | null;
+  rounding_minutes?: number | null;
+  auto_approve_ot?: boolean | null;
+  weekend_is_ot_only?: boolean | null;
+  dinner_break_rule?: unknown;
+  sunday_lunch_rule?: unknown;
+  updated_at?: string | null;
+}
+
+function normalizeDinnerBreakRule(raw: unknown): DinnerBreakRule {
+  const parsed = parseJsonSafe<Partial<DinnerBreakRule>>(raw, {});
+  const defaults = DEFAULT_OVERTIME_SETTINGS.dinner_break_rule;
+  return {
+    enabled: parsed.enabled !== undefined ? Boolean(parsed.enabled) : defaults.enabled,
+    break_start:
+      typeof parsed.break_start === 'string' && parsed.break_start.trim()
+        ? parsed.break_start.trim().slice(0, 5)
+        : defaults.break_start,
+    break_end:
+      typeof parsed.break_end === 'string' && parsed.break_end.trim()
+        ? parsed.break_end.trim().slice(0, 5)
+        : defaults.break_end,
+    deduct_minutes:
+      parsed.deduct_minutes !== undefined && Number.isFinite(Number(parsed.deduct_minutes))
+        ? Math.max(0, Math.round(Number(parsed.deduct_minutes)))
+        : defaults.deduct_minutes,
+    threshold_end_time:
+      typeof parsed.threshold_end_time === 'string' && parsed.threshold_end_time.trim()
+        ? parsed.threshold_end_time.trim().slice(0, 5)
+        : defaults.threshold_end_time,
+    continuous_cutoff_time:
+      typeof parsed.continuous_cutoff_time === 'string' &&
+      parsed.continuous_cutoff_time.trim()
+        ? parsed.continuous_cutoff_time.trim().slice(0, 5)
+        : defaults.continuous_cutoff_time,
+  };
+}
+
+function normalizeSundayLunchRule(raw: unknown): SundayLunchRule {
+  const parsed = parseJsonSafe<Partial<SundayLunchRule>>(raw, {});
+  const defaults = DEFAULT_OVERTIME_SETTINGS.sunday_lunch_rule;
+  return {
+    enabled: parsed.enabled !== undefined ? Boolean(parsed.enabled) : defaults.enabled,
+    break_start:
+      typeof parsed.break_start === 'string' && parsed.break_start.trim()
+        ? parsed.break_start.trim().slice(0, 5)
+        : defaults.break_start,
+    break_end:
+      typeof parsed.break_end === 'string' && parsed.break_end.trim()
+        ? parsed.break_end.trim().slice(0, 5)
+        : defaults.break_end,
+    deduct_minutes:
+      parsed.deduct_minutes !== undefined && Number.isFinite(Number(parsed.deduct_minutes))
+        ? Math.max(0, Math.round(Number(parsed.deduct_minutes)))
+        : defaults.deduct_minutes,
+  };
+}
+
+export function mapSupabaseRowToOvertimeSettings(
+  row?: Partial<SupabaseOvertimeSettingsRow> | null
+): OvertimeSettings {
+  if (!row) return { ...DEFAULT_OVERTIME_SETTINGS };
+  return {
+    id: (row.id || 'default').trim() || 'default',
+    weekday_rate: Number(row.weekday_rate ?? DEFAULT_OVERTIME_SETTINGS.weekday_rate),
+    weekend_rate: Number(row.weekend_rate ?? DEFAULT_OVERTIME_SETTINGS.weekend_rate),
+    holiday_rate: Number(row.holiday_rate ?? DEFAULT_OVERTIME_SETTINGS.holiday_rate),
+    min_ot_minutes: Math.max(
+      0,
+      Math.round(Number(row.min_ot_minutes ?? DEFAULT_OVERTIME_SETTINGS.min_ot_minutes))
+    ),
+    rounding_minutes: Math.max(
+      0,
+      Math.round(
+        Number(row.rounding_minutes ?? DEFAULT_OVERTIME_SETTINGS.rounding_minutes)
+      )
+    ),
+    auto_approve_ot:
+      row.auto_approve_ot !== undefined && row.auto_approve_ot !== null
+        ? Boolean(row.auto_approve_ot)
+        : DEFAULT_OVERTIME_SETTINGS.auto_approve_ot,
+    weekend_is_ot_only:
+      row.weekend_is_ot_only !== undefined && row.weekend_is_ot_only !== null
+        ? Boolean(row.weekend_is_ot_only)
+        : DEFAULT_OVERTIME_SETTINGS.weekend_is_ot_only,
+    dinner_break_rule: normalizeDinnerBreakRule(row.dinner_break_rule),
+    sunday_lunch_rule: normalizeSundayLunchRule(row.sunday_lunch_rule),
+    updated_at: row.updated_at || undefined,
+  };
+}
+
+function readLocalOvertimeSettings(): OvertimeSettings {
+  if (typeof window === 'undefined') {
+    return { ...DEFAULT_OVERTIME_SETTINGS };
+  }
+  try {
+    const raw = localStorage.getItem(OVERTIME_SETTINGS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_OVERTIME_SETTINGS };
+    const parsed = JSON.parse(raw) as Partial<SupabaseOvertimeSettingsRow>;
+    return mapSupabaseRowToOvertimeSettings(parsed);
+  } catch {
+    return { ...DEFAULT_OVERTIME_SETTINGS };
+  }
+}
+
+function writeLocalOvertimeSettings(settings: OvertimeSettings): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(OVERTIME_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage quota error
+  }
+}
+
+function toSupabaseOvertimeSettingsPayload(settings: OvertimeSettings) {
+  return {
+    id: (settings.id || 'default').trim() || 'default',
+    weekday_rate: Number(settings.weekday_rate ?? 150),
+    weekend_rate: Number(settings.weekend_rate ?? 200),
+    holiday_rate: Number(settings.holiday_rate ?? 300),
+    min_ot_minutes: Math.max(0, Math.round(Number(settings.min_ot_minutes ?? 60))),
+    rounding_minutes: Math.max(0, Math.round(Number(settings.rounding_minutes ?? 30))),
+    auto_approve_ot: Boolean(settings.auto_approve_ot),
+    weekend_is_ot_only: Boolean(settings.weekend_is_ot_only),
+    dinner_break_rule: settings.dinner_break_rule,
+    sunday_lunch_rule: settings.sunday_lunch_rule,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function fetchOvertimeSettings(): Promise<{
+  settings: OvertimeSettings;
+  source: 'supabase' | 'local';
+  schemaNeedsMigration: boolean;
+}> {
+  try {
+    const rows = await overtimeSupabase.request<SupabaseOvertimeSettingsRow[]>(
+      'overtime_settings?id=eq.default&select=*&limit=1'
+    );
+
+    if (Array.isArray(rows) && rows.length > 0) {
+      const mapped = mapSupabaseRowToOvertimeSettings(rows[0]);
+      writeLocalOvertimeSettings(mapped);
+      return {
+        settings: mapped,
+        source: 'supabase',
+        schemaNeedsMigration: false,
+      };
+    }
+
+    // Seed default row if table exists but empty
+    const seededPayload = toSupabaseOvertimeSettingsPayload(DEFAULT_OVERTIME_SETTINGS);
+    const inserted = await overtimeSupabase.request<SupabaseOvertimeSettingsRow[]>(
+      'overtime_settings?on_conflict=id&select=*',
+      {
+        method: 'POST',
+        headers: {
+          Prefer: 'return=representation,resolution=merge-duplicates',
+        },
+        body: JSON.stringify(seededPayload),
+      }
+    );
+    const mapped = mapSupabaseRowToOvertimeSettings(
+      Array.isArray(inserted) && inserted[0] ? inserted[0] : seededPayload
+    );
+    writeLocalOvertimeSettings(mapped);
+    return {
+      settings: mapped,
+      source: 'supabase',
+      schemaNeedsMigration: false,
+    };
+  } catch (err) {
+    return {
+      settings: readLocalOvertimeSettings(),
+      source: 'local',
+      schemaNeedsMigration: isMissingTableOrSchemaError(err),
+    };
+  }
+}
+
+export async function saveOvertimeSettings(
+  settings: OvertimeSettings
+): Promise<{
+  settings: OvertimeSettings;
+  source: 'supabase' | 'local';
+  schemaNeedsMigration: boolean;
+}> {
+  const normalized: OvertimeSettings = mapSupabaseRowToOvertimeSettings(
+    toSupabaseOvertimeSettingsPayload(settings)
+  );
+  const payload = toSupabaseOvertimeSettingsPayload(normalized);
+
+  try {
+    const rows = await overtimeSupabase.request<SupabaseOvertimeSettingsRow[]>(
+      'overtime_settings?on_conflict=id&select=*',
+      {
+        method: 'POST',
+        headers: {
+          Prefer: 'return=representation,resolution=merge-duplicates',
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    const saved = mapSupabaseRowToOvertimeSettings(
+      Array.isArray(rows) && rows[0] ? rows[0] : payload
+    );
+    writeLocalOvertimeSettings(saved);
+    return {
+      settings: saved,
+      source: 'supabase',
+      schemaNeedsMigration: false,
+    };
+  } catch (err) {
+    writeLocalOvertimeSettings(normalized);
+    return {
+      settings: normalized,
+      source: 'local',
+      schemaNeedsMigration: isMissingTableOrSchemaError(err),
+    };
+  }
+}
+
+export interface OvertimeSettingsRealtimeEvent {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  newRow: Record<string, unknown> | null;
+  oldRow: Record<string, unknown> | null;
+}
+
+export function subscribeToOvertimeSettingsRealtime(
+  onChange: (event: OvertimeSettingsRealtimeEvent) => void,
+  onStatusChange?: (status: string) => void
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const client = getOvertimeSupabaseClient();
+  const channelName = `overtime-settings-realtime-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+
+  const channel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'overtime_settings' },
+      (payload) =>
+        onChange({
+          eventType: 'INSERT',
+          newRow: (payload.new as Record<string, unknown>) || null,
+          oldRow: (payload.old as Record<string, unknown>) || null,
+        })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'overtime_settings' },
+      (payload) =>
+        onChange({
+          eventType: 'UPDATE',
+          newRow: (payload.new as Record<string, unknown>) || null,
+          oldRow: (payload.old as Record<string, unknown>) || null,
+        })
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'overtime_settings' },
+      (payload) =>
+        onChange({
+          eventType: 'DELETE',
+          newRow: (payload.new as Record<string, unknown>) || null,
+          oldRow: (payload.old as Record<string, unknown>) || null,
+        })
+    )
+    .subscribe((status) => {
+      onStatusChange?.(status);
+    });
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}
+
