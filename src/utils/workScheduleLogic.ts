@@ -177,7 +177,7 @@ export function getNextWeekdayMode(current: WeekdayWorkMode): WeekdayWorkMode {
 
 export function parseTimeToMinutes(timeStr?: string | null): number | null {
   if (!timeStr) return null;
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
   if (!match) return null;
   const hh = Number(match[1]);
   const mm = Number(match[2]);
@@ -185,6 +185,52 @@ export function parseTimeToMinutes(timeStr?: string | null): number | null {
     return null;
   }
   return hh * 60 + mm;
+}
+
+/**
+ * Formats partial user typing into a clean 24-hour `HH:mm` string while allowing
+ * intermediate deletion/backspacing (e.g. `"1940"` -> `"19:40"`, `"073"` -> `"07:3"`).
+ */
+export function sanitize24hTimeInput(raw: string): string {
+  const cleaned = (raw || '').replace(/[^\d:]/g, '');
+  const colonIdx = cleaned.indexOf(':');
+  if (colonIdx !== -1) {
+    const before = cleaned.slice(0, colonIdx).slice(0, 2);
+    const after = cleaned.slice(colonIdx + 1).replace(/:/g, '').slice(0, 2);
+    return `${before}:${after}`;
+  }
+  const digitsOnly = cleaned.slice(0, 4);
+  if (digitsOnly.length >= 3) {
+    return `${digitsOnly.slice(0, 2)}:${digitsOnly.slice(2)}`;
+  }
+  return digitsOnly;
+}
+
+/**
+ * Normalizes any valid or partial 24-hour time string into strict `HH:mm` (`00:00`..`23:59`),
+ * falling back to `fallback` when empty or unparseable.
+ */
+export function normalize24hTime(raw: string, fallback: string): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return fallback;
+  const match = trimmed.match(/^(\d{1,2}):?(\d{0,2})(?::\d{1,2})?$/);
+  if (!match) return fallback;
+  const rawHours = parseInt(match[1], 10);
+  const rawMinutes = match[2] ? parseInt(match[2].padEnd(2, '0'), 10) : 0;
+  if (Number.isNaN(rawHours) || Number.isNaN(rawMinutes)) return fallback;
+  const clampedHours = Math.min(23, Math.max(0, rawHours));
+  const clampedMinutes = Math.min(59, Math.max(0, rawMinutes));
+  return `${String(clampedHours).padStart(2, '0')}:${String(clampedMinutes).padStart(2, '0')}`;
+}
+
+/**
+ * Normalizes optional 24-hour time inputs (like break windows or per-day overrides),
+ * returning `""` when cleared or strict `HH:mm` when a value is entered.
+ */
+export function normalizeOptional24hTime(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return '';
+  return normalize24hTime(trimmed, '');
 }
 
 /**

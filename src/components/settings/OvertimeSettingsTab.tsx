@@ -13,8 +13,10 @@ import { formatNumberVN } from '../../utils/errorAndSecurityService';
 import {
   createDefaultAdminShift,
   DEFAULT_OVERTIME_SETTINGS,
+  normalize24hTime,
   OvertimeSettings,
   resolveWorkShiftForDepartment,
+  sanitize24hTimeInput,
   simulateAttendanceAndOvertime,
   SimulatorDayType,
   WEEKDAY_ORDER,
@@ -37,16 +39,6 @@ const ROUNDING_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 30, label: '30 phút' },
   { value: 60, label: '60 phút' },
 ];
-
-function sanitizeTimeValue(raw: string, fallback: string): string {
-  const cleaned = raw.trim();
-  const match = cleaned.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return fallback;
-  const hh = Math.min(23, Math.max(0, Number(match[1])));
-  const mm = Math.min(59, Math.max(0, Number(match[2])));
-  if (Number.isNaN(hh) || Number.isNaN(mm)) return fallback;
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-}
 
 export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
   settings,
@@ -77,8 +69,8 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
   const [simShiftId, setSimShiftId] = useState<string>(() => defaultShift.id);
   const [simWeekday, setSimWeekday] = useState<WeekdayKey>('wed');
   const [simDayType, setSimDayType] = useState<SimulatorDayType>('workday');
-  const [simCheckIn, setSimCheckIn] = useState<string>(
-    () => defaultShift.startTime || '07:30'
+  const [simCheckIn, setSimCheckIn] = useState<string>(() =>
+    normalize24hTime(defaultShift.startTime || '07:30', '07:30')
   );
   const [simCheckOut, setSimCheckOut] = useState<string>('19:40');
 
@@ -86,7 +78,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
   useEffect(() => {
     if (!effectiveShifts.some((s) => s.id === simShiftId)) {
       setSimShiftId(defaultShift.id);
-      setSimCheckIn(defaultShift.startTime || '07:30');
+      setSimCheckIn(normalize24hTime(defaultShift.startTime || '07:30', '07:30'));
     }
   }, [effectiveShifts, simShiftId, defaultShift]);
 
@@ -103,7 +95,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
       if (emp?.department) {
         const matched = resolveWorkShiftForDepartment(effectiveShifts, emp.department);
         setSimShiftId(matched.id);
-        setSimCheckIn(matched.startTime || '07:30');
+        setSimCheckIn(normalize24hTime(matched.startTime || '07:30', '07:30'));
       }
     }
   };
@@ -459,14 +451,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                   <input
                     id="ot-dinner-cutoff"
                     type="text"
+                    inputMode="numeric"
                     maxLength={5}
+                    placeholder="19:10"
                     value={draft.dinner_break_rule.continuous_cutoff_time}
                     onChange={(e) =>
                       setDraft((prev) => ({
                         ...prev,
                         dinner_break_rule: {
                           ...prev.dinner_break_rule,
-                          continuous_cutoff_time: e.target.value,
+                          continuous_cutoff_time: sanitize24hTimeInput(e.target.value),
                         },
                       }))
                     }
@@ -475,7 +469,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                         ...prev,
                         dinner_break_rule: {
                           ...prev.dinner_break_rule,
-                          continuous_cutoff_time: sanitizeTimeValue(
+                          continuous_cutoff_time: normalize24hTime(
                             prev.dinner_break_rule.continuous_cutoff_time,
                             '19:10'
                           ),
@@ -529,14 +523,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                     <input
                       id="ot-dinner-threshold"
                       type="text"
+                      inputMode="numeric"
                       maxLength={5}
+                      placeholder="19:40"
                       value={draft.dinner_break_rule.threshold_end_time}
                       onChange={(e) =>
                         setDraft((prev) => ({
                           ...prev,
                           dinner_break_rule: {
                             ...prev.dinner_break_rule,
-                            threshold_end_time: e.target.value,
+                            threshold_end_time: sanitize24hTimeInput(e.target.value),
                           },
                         }))
                       }
@@ -545,7 +541,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                           ...prev,
                           dinner_break_rule: {
                             ...prev.dinner_break_rule,
-                            threshold_end_time: sanitizeTimeValue(
+                            threshold_end_time: normalize24hTime(
                               prev.dinner_break_rule.threshold_end_time,
                               '19:40'
                             ),
@@ -586,14 +582,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                       <input
                         aria-label="Khung ăn tối từ"
                         type="text"
+                        inputMode="numeric"
                         maxLength={5}
+                        placeholder="18:10"
                         value={draft.dinner_break_rule.break_start}
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
                             dinner_break_rule: {
                               ...prev.dinner_break_rule,
-                              break_start: e.target.value,
+                              break_start: sanitize24hTimeInput(e.target.value),
                             },
                           }))
                         }
@@ -602,7 +600,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                             ...prev,
                             dinner_break_rule: {
                               ...prev.dinner_break_rule,
-                              break_start: sanitizeTimeValue(
+                              break_start: normalize24hTime(
                                 prev.dinner_break_rule.break_start,
                                 '18:10'
                               ),
@@ -615,14 +613,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                       <input
                         aria-label="Khung ăn tối đến"
                         type="text"
+                        inputMode="numeric"
                         maxLength={5}
+                        placeholder="18:40"
                         value={draft.dinner_break_rule.break_end}
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
                             dinner_break_rule: {
                               ...prev.dinner_break_rule,
-                              break_end: e.target.value,
+                              break_end: sanitize24hTimeInput(e.target.value),
                             },
                           }))
                         }
@@ -631,7 +631,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                             ...prev,
                             dinner_break_rule: {
                               ...prev.dinner_break_rule,
-                              break_end: sanitizeTimeValue(
+                              break_end: normalize24hTime(
                                 prev.dinner_break_rule.break_end,
                                 '18:40'
                               ),
@@ -714,14 +714,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                       <input
                         aria-label="Khung ăn trưa từ"
                         type="text"
+                        inputMode="numeric"
                         maxLength={5}
+                        placeholder="12:00"
                         value={draft.sunday_lunch_rule.break_start}
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
                             sunday_lunch_rule: {
                               ...prev.sunday_lunch_rule,
-                              break_start: e.target.value,
+                              break_start: sanitize24hTimeInput(e.target.value),
                             },
                           }))
                         }
@@ -730,7 +732,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                             ...prev,
                             sunday_lunch_rule: {
                               ...prev.sunday_lunch_rule,
-                              break_start: sanitizeTimeValue(
+                              break_start: normalize24hTime(
                                 prev.sunday_lunch_rule.break_start,
                                 '12:00'
                               ),
@@ -743,14 +745,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                       <input
                         aria-label="Khung ăn trưa đến"
                         type="text"
+                        inputMode="numeric"
                         maxLength={5}
+                        placeholder="12:40"
                         value={draft.sunday_lunch_rule.break_end}
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
                             sunday_lunch_rule: {
                               ...prev.sunday_lunch_rule,
-                              break_end: e.target.value,
+                              break_end: sanitize24hTimeInput(e.target.value),
                             },
                           }))
                         }
@@ -759,7 +763,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                             ...prev,
                             sunday_lunch_rule: {
                               ...prev.sunday_lunch_rule,
-                              break_end: sanitizeTimeValue(
+                              break_end: normalize24hTime(
                                 prev.sunday_lunch_rule.break_end,
                                 '12:40'
                               ),
@@ -802,7 +806,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                 handleApplyPreset({
                   weekday: 'wed',
                   dayType: 'workday',
-                  checkIn: selectedSimShift.startTime || '07:30',
+                  checkIn: normalize24hTime(selectedSimShift.startTime || '07:30', '07:30'),
                   checkOut: '19:10',
                 })
               }
@@ -816,7 +820,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                 handleApplyPreset({
                   weekday: 'wed',
                   dayType: 'workday',
-                  checkIn: selectedSimShift.startTime || '07:30',
+                  checkIn: normalize24hTime(selectedSimShift.startTime || '07:30', '07:30'),
                   checkOut: '19:40',
                 })
               }
@@ -830,8 +834,8 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                 handleApplyPreset({
                   weekday: 'sun',
                   dayType: 'weekend',
-                  checkIn: selectedSimShift.startTime || '07:30',
-                  checkOut: selectedSimShift.endTime || '16:10',
+                  checkIn: normalize24hTime(selectedSimShift.startTime || '07:30', '07:30'),
+                  checkOut: '18:10',
                 })
               }
               className="h-7 px-2.5 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] hover:text-[#14539E] text-[11px] font-semibold text-slate-700 cursor-pointer whitespace-nowrap"
@@ -844,7 +848,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                 handleApplyPreset({
                   weekday: 'sun',
                   dayType: 'weekend',
-                  checkIn: selectedSimShift.startTime || '07:30',
+                  checkIn: normalize24hTime(selectedSimShift.startTime || '07:30', '07:30'),
                   checkOut: '19:40',
                 })
               }
@@ -895,7 +899,7 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                   const found = effectiveShifts.find((s) => s.id === e.target.value);
                   setSimShiftId(e.target.value);
                   if (found) {
-                    setSimCheckIn(found.startTime);
+                    setSimCheckIn(normalize24hTime(found.startTime, '07:30'));
                   }
                 }}
                 className="w-full h-9 px-2.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
@@ -961,10 +965,21 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                 <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   id="ot-sim-checkin"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="07:30"
                   value={simCheckIn}
-                  onChange={(e) => setSimCheckIn(e.target.value)}
-                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-semibold text-slate-900 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#14539E]"
+                  onChange={(e) => setSimCheckIn(sanitize24hTimeInput(e.target.value))}
+                  onBlur={() =>
+                    setSimCheckIn((prev) =>
+                      normalize24hTime(
+                        prev,
+                        normalize24hTime(selectedSimShift.startTime || '07:30', '07:30')
+                      )
+                    )
+                  }
+                  className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-900 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#14539E]"
                 />
               </div>
             </div>
@@ -980,10 +995,16 @@ export const OvertimeSettingsTab: React.FC<OvertimeSettingsTabProps> = ({
                 <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   id="ot-sim-checkout"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="19:40"
                   value={simCheckOut}
-                  onChange={(e) => setSimCheckOut(e.target.value)}
-                  className="w-full h-9 pl-8 pr-2 text-xs font-mono font-semibold text-slate-900 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#14539E]"
+                  onChange={(e) => setSimCheckOut(sanitize24hTimeInput(e.target.value))}
+                  onBlur={() =>
+                    setSimCheckOut((prev) => normalize24hTime(prev, '19:40'))
+                  }
+                  className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-900 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-[#14539E]"
                 />
               </div>
             </div>

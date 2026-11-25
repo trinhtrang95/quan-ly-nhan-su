@@ -15,6 +15,10 @@ import {
   DayOverridesMap,
   DEFAULT_WORKING_DAYS,
   getNextWeekdayMode,
+  normalize24hTime,
+  normalizeOptional24hTime,
+  parseTimeToMinutes,
+  sanitize24hTimeInput,
   SHIFT_COLOR_OPTIONS,
   WEEKDAY_MODE_LABELS,
   WEEKDAY_ORDER,
@@ -85,14 +89,30 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
     if (editingShift) {
       setCode(editingShift.code);
       setName(editingShift.name);
-      setStartTime(editingShift.startTime || '08:00');
-      setEndTime(editingShift.endTime || '17:00');
-      setBreakStart(editingShift.breakStart || '');
-      setBreakEnd(editingShift.breakEnd || '');
+      setStartTime(normalize24hTime(editingShift.startTime || '08:00', '08:00'));
+      setEndTime(normalize24hTime(editingShift.endTime || '17:00', '17:00'));
+      setBreakStart(normalizeOptional24hTime(editingShift.breakStart || ''));
+      setBreakEnd(normalizeOptional24hTime(editingShift.breakEnd || ''));
       setWorkingDays({ ...DEFAULT_WORKING_DAYS, ...editingShift.workingDays });
-      setDayOverrides(
-        editingShift.dayOverrides ? { ...editingShift.dayOverrides } : {}
-      );
+      const normalizedOverrides: DayOverridesMap = {};
+      if (editingShift.dayOverrides) {
+        for (const [k, ov] of Object.entries(editingShift.dayOverrides)) {
+          if (!ov) continue;
+          const st = normalizeOptional24hTime(ov.startTime || '');
+          const et = normalizeOptional24hTime(ov.endTime || '');
+          const bs = normalizeOptional24hTime(ov.breakStart || '');
+          const be = normalizeOptional24hTime(ov.breakEnd || '');
+          if (st || et || bs || be) {
+            normalizedOverrides[k as WeekdayKey] = {
+              ...(st ? { startTime: st } : {}),
+              ...(et ? { endTime: et } : {}),
+              ...(bs ? { breakStart: bs } : {}),
+              ...(be ? { breakEnd: be } : {}),
+            };
+          }
+        }
+      }
+      setDayOverrides(normalizedOverrides);
       setEarlyMinutes(editingShift.earlyMinutes ?? 0);
       setColor(editingShift.color || '#14539E');
       setHourlyRatePercent(editingShift.hourlyRatePercent ?? 100);
@@ -219,10 +239,36 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
       setErrorMsg('Vui lòng nhập Tên ca.');
       return;
     }
-    if (!startTime || !endTime) {
-      setErrorMsg('Vui lòng nhập đầy đủ Giờ vào và Giờ ra.');
+    const cleanStartTime = normalize24hTime(startTime, '');
+    const cleanEndTime = normalize24hTime(endTime, '');
+    const cleanBreakStart = normalizeOptional24hTime(breakStart);
+    const cleanBreakEnd = normalizeOptional24hTime(breakEnd);
+
+    if (
+      parseTimeToMinutes(cleanStartTime) === null ||
+      parseTimeToMinutes(cleanEndTime) === null
+    ) {
+      setErrorMsg('Vui lòng nhập đầy đủ Giờ vào và Giờ ra theo chuẩn 24 giờ (HH:mm).');
       return;
     }
+
+    const cleanOverrides: DayOverridesMap = {};
+    for (const [k, ov] of Object.entries(dayOverrides)) {
+      if (!ov) continue;
+      const st = normalizeOptional24hTime(ov.startTime || '');
+      const et = normalizeOptional24hTime(ov.endTime || '');
+      const bs = normalizeOptional24hTime(ov.breakStart || '');
+      const be = normalizeOptional24hTime(ov.breakEnd || '');
+      if (st || et || bs || be) {
+        cleanOverrides[k as WeekdayKey] = {
+          ...(st ? { startTime: st } : {}),
+          ...(et ? { endTime: et } : {}),
+          ...(bs ? { breakStart: bs } : {}),
+          ...(be ? { breakEnd: be } : {}),
+        };
+      }
+    }
+
     const dup = existingShifts.find(
       (s) =>
         s.id !== editingShift?.id &&
@@ -239,12 +285,12 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
       companyId: editingShift?.companyId ?? null,
       code: cleanCode,
       name: cleanName,
-      startTime,
-      endTime,
-      breakStart: breakStart.trim(),
-      breakEnd: breakEnd.trim(),
+      startTime: cleanStartTime,
+      endTime: cleanEndTime,
+      breakStart: cleanBreakStart,
+      breakEnd: cleanBreakEnd,
       workingDays,
-      dayOverrides,
+      dayOverrides: cleanOverrides,
       earlyMinutes: Math.max(0, Math.round(Number(earlyMinutes || 0))),
       color: color || '#14539E',
       hourlyRatePercent: Math.max(0, Number(hourlyRatePercent || 100)),
@@ -371,14 +417,21 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
               >
                 Giờ vào <span className="text-red-500">*</span>
               </label>
-              <input
-                id="shift-start-time"
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                required
-                className="w-full h-9 px-2.5 text-xs font-mono text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
+              <div className="relative">
+                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="shift-start-time"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="08:00"
+                  value={startTime}
+                  onChange={(e) => setStartTime(sanitize24hTimeInput(e.target.value))}
+                  onBlur={() => setStartTime((prev) => normalize24hTime(prev, '08:00'))}
+                  required
+                  className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                />
+              </div>
             </div>
 
             <div className="sm:col-span-3">
@@ -388,14 +441,21 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
               >
                 Giờ ra <span className="text-red-500">*</span>
               </label>
-              <input
-                id="shift-end-time"
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                required
-                className="w-full h-9 px-2.5 text-xs font-mono text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
+              <div className="relative">
+                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="shift-end-time"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="17:00"
+                  value={endTime}
+                  onChange={(e) => setEndTime(sanitize24hTimeInput(e.target.value))}
+                  onBlur={() => setEndTime((prev) => normalize24hTime(prev, '17:00'))}
+                  required
+                  className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                />
+              </div>
             </div>
 
             <div className="sm:col-span-6">
@@ -404,18 +464,26 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
               </span>
               <div className="grid grid-cols-2 gap-2">
                 <input
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="12:00"
                   value={breakStart}
-                  onChange={(e) => setBreakStart(e.target.value)}
+                  onChange={(e) => setBreakStart(sanitize24hTimeInput(e.target.value))}
+                  onBlur={() => setBreakStart((prev) => normalizeOptional24hTime(prev))}
                   aria-label="Nghỉ giữa ca từ"
-                  className="w-full h-9 px-2.5 text-xs font-mono text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                  className="w-full h-9 px-2.5 text-xs font-mono font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
                 />
                 <input
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="13:00"
                   value={breakEnd}
-                  onChange={(e) => setBreakEnd(e.target.value)}
+                  onChange={(e) => setBreakEnd(sanitize24hTimeInput(e.target.value))}
+                  onBlur={() => setBreakEnd((prev) => normalizeOptional24hTime(prev))}
                   aria-label="Nghỉ giữa ca đến"
-                  className="w-full h-9 px-2.5 text-xs font-mono text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                  className="w-full h-9 px-2.5 text-xs font-mono font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
                 />
               </div>
             </div>
@@ -498,62 +566,102 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
                           </td>
                           <td className="py-1.5 px-2">
                             <input
-                              type="time"
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={5}
+                              placeholder={startTime || '08:00'}
                               value={ov.startTime || ''}
                               onChange={(e) =>
                                 handleOverrideChange(
                                   day.key,
                                   'startTime',
-                                  e.target.value
+                                  sanitize24hTimeInput(e.target.value)
+                                )
+                              }
+                              onBlur={(e) =>
+                                handleOverrideChange(
+                                  day.key,
+                                  'startTime',
+                                  normalizeOptional24hTime(e.target.value)
                                 )
                               }
                               aria-label={`Giờ vào riêng ${day.fullLabel}`}
-                              className="h-7 px-2 text-xs font-mono rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
+                              className="w-20 h-7 px-2 text-xs font-mono text-center rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
                             />
                           </td>
                           <td className="py-1.5 px-2">
                             <input
-                              type="time"
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={5}
+                              placeholder={endTime || '17:00'}
                               value={ov.endTime || ''}
                               onChange={(e) =>
                                 handleOverrideChange(
                                   day.key,
                                   'endTime',
-                                  e.target.value
+                                  sanitize24hTimeInput(e.target.value)
+                                )
+                              }
+                              onBlur={(e) =>
+                                handleOverrideChange(
+                                  day.key,
+                                  'endTime',
+                                  normalizeOptional24hTime(e.target.value)
                                 )
                               }
                               aria-label={`Giờ ra riêng ${day.fullLabel}`}
-                              className="h-7 px-2 text-xs font-mono rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
+                              className="w-20 h-7 px-2 text-xs font-mono text-center rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
                             />
                           </td>
                           <td className="py-1.5 px-2">
                             <input
-                              type="time"
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={5}
+                              placeholder={breakStart || '--:--'}
                               value={ov.breakStart || ''}
                               onChange={(e) =>
                                 handleOverrideChange(
                                   day.key,
                                   'breakStart',
-                                  e.target.value
+                                  sanitize24hTimeInput(e.target.value)
+                                )
+                              }
+                              onBlur={(e) =>
+                                handleOverrideChange(
+                                  day.key,
+                                  'breakStart',
+                                  normalizeOptional24hTime(e.target.value)
                                 )
                               }
                               aria-label={`Nghỉ từ riêng ${day.fullLabel}`}
-                              className="h-7 px-2 text-xs font-mono rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
+                              className="w-20 h-7 px-2 text-xs font-mono text-center rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
                             />
                           </td>
                           <td className="py-1.5 px-2">
                             <input
-                              type="time"
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={5}
+                              placeholder={breakEnd || '--:--'}
                               value={ov.breakEnd || ''}
                               onChange={(e) =>
                                 handleOverrideChange(
                                   day.key,
                                   'breakEnd',
-                                  e.target.value
+                                  sanitize24hTimeInput(e.target.value)
+                                )
+                              }
+                              onBlur={(e) =>
+                                handleOverrideChange(
+                                  day.key,
+                                  'breakEnd',
+                                  normalizeOptional24hTime(e.target.value)
                                 )
                               }
                               aria-label={`Nghỉ đến riêng ${day.fullLabel}`}
-                              className="h-7 px-2 text-xs font-mono rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
+                              className="w-20 h-7 px-2 text-xs font-mono text-center rounded border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none"
                             />
                           </td>
                           <td className="py-1.5 px-2 text-center">

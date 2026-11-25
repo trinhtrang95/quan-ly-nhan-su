@@ -14,7 +14,10 @@ import {
   getLunarHolidayAnchorsForYear,
   getMondayFirstMonthOffset,
   getNextWeekdayMode,
+  normalize24hTime,
+  normalizeOptional24hTime,
   resolveWorkShiftForDepartment,
+  sanitize24hTimeInput,
   simulateAttendanceAndOvertime,
   type WorkShift,
 } from './workScheduleLogic';
@@ -531,6 +534,26 @@ describe('workScheduleLogic', () => {
     assert.equal(simHoliday.otHours, 8);
     assert.equal(simHoliday.otRatePercent, 300);
     assert.equal(simHoliday.convertedSalaryHours, 24);
+  });
+
+  it('formats and normalizes 24-hour HH:mm inputs without 12-hour AM/PM ambiguity', () => {
+    assert.equal(sanitize24hTimeInput('0730'), '07:30');
+    assert.equal(sanitize24hTimeInput('1910'), '19:10');
+    assert.equal(sanitize24hTimeInput('19:4a0'), '19:40');
+    assert.equal(sanitize24hTimeInput('19:'), '19:');
+    assert.equal(sanitize24hTimeInput('19'), '19');
+
+    assert.equal(normalize24hTime('7:3', '07:30'), '07:30');
+    assert.equal(normalize24hTime('1810', '17:00'), '18:10');
+    assert.equal(normalize24hTime('19:40:00', '17:00'), '19:40');
+    assert.equal(normalize24hTime('25:99', '17:00'), '23:59');
+    assert.equal(normalize24hTime('', '07:30'), '07:30');
+    assert.equal(normalize24hTime('abc', '19:10'), '19:10');
+
+    assert.equal(normalizeOptional24hTime(''), '');
+    assert.equal(normalizeOptional24hTime('   '), '');
+    assert.equal(normalizeOptional24hTime('1230'), '12:30');
+    assert.equal(normalizeOptional24hTime('12:40:00'), '12:40');
   });
 });
 

@@ -64,8 +64,10 @@ import {
   DEFAULT_OVERTIME_SETTINGS,
   evaluateOvertimeDaySchedule,
   getWeekdayKeyFromIsoDate,
+  normalize24hTime,
   type OvertimeDayEvaluation,
   type OvertimeSettings,
+  sanitize24hTimeInput,
   type WorkShift,
 } from '../../utils/workScheduleLogic';
 
@@ -142,31 +144,11 @@ class OvertimeFormService {
   }
 
   static sanitize24hTimeInput(raw: string): string {
-    const cleaned = raw.replace(/[^\d:]/g, '');
-    const colonIdx = cleaned.indexOf(':');
-    if (colonIdx !== -1) {
-      const before = cleaned.slice(0, colonIdx).slice(0, 2);
-      const after = cleaned.slice(colonIdx + 1).replace(/:/g, '').slice(0, 2);
-      return `${before}:${after}`;
-    }
-    const digitsOnly = cleaned.slice(0, 4);
-    if (digitsOnly.length >= 3) {
-      return `${digitsOnly.slice(0, 2)}:${digitsOnly.slice(2)}`;
-    }
-    return digitsOnly;
+    return sanitize24hTimeInput(raw);
   }
 
   static normalize24hTime(raw: string, fallback: string): string {
-    const trimmed = raw.trim();
-    if (!trimmed) return fallback;
-    const match = trimmed.match(/^(\d{1,2}):?(\d{0,2})$/);
-    if (!match) return fallback;
-    const rawHours = parseInt(match[1], 10);
-    const rawMinutes = match[2] ? parseInt(match[2].padEnd(2, '0'), 10) : 0;
-    if (Number.isNaN(rawHours) || Number.isNaN(rawMinutes)) return fallback;
-    const clampedHours = Math.min(23, Math.max(0, rawHours));
-    const clampedMinutes = Math.min(59, Math.max(0, rawMinutes));
-    return `${String(clampedHours).padStart(2, '0')}:${String(clampedMinutes).padStart(2, '0')}`;
+    return normalize24hTime(raw, fallback);
   }
 }
 
