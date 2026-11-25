@@ -66,6 +66,13 @@ export class HRRouteManager {
         reportSubTab: 'monthly_summary',
       };
     }
+    if (clean === '/thiet-lap-chung') {
+      return {
+        module: 'general_settings',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+      };
+    }
     if (clean === '/cai-dat' || clean === '/he-thong') {
       return {
         module: 'settings',
@@ -94,6 +101,7 @@ export class HRRouteManager {
       return '/bao-cao-tong-hop';
     }
     if (module === 'overtime') return '/tang-ca';
+    if (module === 'general_settings') return '/thiet-lap-chung';
     if (module === 'settings') return '/cai-dat';
     return '/';
   }

@@ -20,6 +20,7 @@ const MODULE_TITLES: Record<ActiveModule, string> = {
   employees: 'Nhân sự',
   leave_logs: 'Nhật ký Nghỉ phép & Đi muộn',
   annual_report: 'Báo cáo tổng hợp',
+  general_settings: 'Thiết lập chung',
   settings: 'Cài đặt Đơn vị & Hệ thống',
 };
 

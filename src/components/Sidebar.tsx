@@ -14,6 +14,7 @@ import {
   CalendarRange,
   FileText,
   Clock,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { ActiveModule as BaseActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
@@ -30,7 +31,8 @@ export type HrChildMenuId =
   | 'employees_list'
   | 'leave_requests'
   | 'overtime'
-  | 'summary_report';
+  | 'summary_report'
+  | 'general_settings';
 
 export interface NavChildItem {
   id: HrChildMenuId;
@@ -97,6 +99,14 @@ export const NAVIGATION_DATA: NavParentItem[] = [
         icon: CalendarRange,
         testId: 'sidebar-subnav-summary-report',
       },
+      {
+        id: 'general_settings',
+        label: 'Thiết lập chung',
+        shortLabel: 'Thiết lập',
+        path: '/thiet-lap-chung',
+        icon: SlidersHorizontal,
+        testId: 'sidebar-subnav-general-settings',
+      },
     ],
   },
   {
@@ -161,7 +171,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeModule === 'employees' ||
     activeModule === 'leave_logs' ||
     activeModule === 'overtime' ||
-    activeModule === 'annual_report';
+    activeModule === 'annual_report' ||
+    activeModule === 'general_settings';
 
   // Global state quản lý trạng thái đóng/mở chung của tất cả các Menu cha
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(true);
@@ -222,6 +233,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return activeModule === 'overtime';
       case 'summary_report':
         return activeModule === 'annual_report';
+      case 'general_settings':
+        return activeModule === 'general_settings';
       default:
         return false;
     }
@@ -249,6 +262,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       case 'summary_report':
         onSelectModule('annual_report');
         onSelectReportSubTab?.(reportSubTab);
+        break;
+      case 'general_settings':
+        onSelectModule('general_settings');
         break;
     }
   };
