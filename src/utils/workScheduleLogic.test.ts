@@ -388,6 +388,19 @@ describe('workScheduleLogic', () => {
   });
 
   it('applies factory meal-break rules accurately in calculateActualOvertimeHours', () => {
+    // 0. Continuous weekday OT 16:10 -> 18:10 => 2.0h (no break deduction)
+    const continuous1810 = calculateActualOvertimeHours(
+      '2026-11-23',
+      '16:10',
+      '18:10',
+      false,
+      DEFAULT_OVERTIME_SETTINGS
+    );
+    assert.equal(continuous1810.dinnerDeductedMinutes, 0);
+    assert.equal(continuous1810.lunchDeductedMinutes, 0);
+    assert.equal(continuous1810.netHours, 2);
+    assert.equal(continuous1810.noteText, '');
+
     // 1. Continuous weekday OT ending at 19:10 -> 0 dinner deduction (16:10 - 19:10 = 3h)
     const continuous1910 = calculateActualOvertimeHours(
       '2026-11-23',

@@ -10,6 +10,10 @@ import {
   SUPABASE_URL,
   SupabaseLeaveLogRow,
 } from './supabaseService';
+import {
+  calculateActualOvertimeHours,
+  DEFAULT_OVERTIME_SETTINGS,
+} from './workScheduleLogic';
 
 function formatDateToFormStyleLocal(isoDate: string): string {
   if (!isoDate) return '';
@@ -672,10 +676,18 @@ function mapSupabaseItemRow(
 ): OvertimeFormItemRecord {
   const startTime = row.start_time || '16:10';
   const endTime = row.end_time || '20:10';
+  const overtimeDate = row.overtime_date || '';
+  const totalHours = calculateActualOvertimeHours(
+    overtimeDate,
+    startTime,
+    endTime,
+    false,
+    DEFAULT_OVERTIME_SETTINGS
+  ).netHours;
   return {
     id: row.id,
     form_id: row.form_id,
-    overtime_date: row.overtime_date || '',
+    overtime_date: overtimeDate,
     block_order: Number(row.block_order ?? 0),
     item_order: Number(row.item_order ?? 0),
     block_id: row.block_id || null,
@@ -686,7 +698,7 @@ function mapSupabaseItemRow(
     reason_kr: row.reason_kr || '',
     start_time: startTime,
     end_time: endTime,
-    total_hours: calculateHoursBetween(startTime, endTime),
+    total_hours: totalHours,
     deleted_at: row.deleted_at ?? null,
   };
 }

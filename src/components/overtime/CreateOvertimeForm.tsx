@@ -380,25 +380,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     (Boolean(isoDate && /^\d{4}-\d{2}-\d{2}$/.test(isoDate)) &&
       getWeekdayKeyFromIsoDate(isoDate) === 'sun');
 
-  const draftActualHoursResult = useMemo(() => {
-    const resolvedDate =
-      blockOvertimeDate || shellOvertimeDate || getLocalTodayIsoDate();
-    return calculateActualOvertimeHours(
-      resolvedDate,
-      currentStartTime,
-      currentEndTime,
-      isSundayOrWeekendSchedule(dayEvaluation, resolvedDate),
-      overtimeSettings
-    );
-  }, [
-    blockOvertimeDate,
-    shellOvertimeDate,
-    currentStartTime,
-    currentEndTime,
-    dayEvaluation,
-    overtimeSettings,
-  ]);
-
   // MỚI: Chỉ hiển thị các lý do Đã duyệt, ưu tiên theo Nhóm/Phòng ban đang chọn hoặc nhân sự đang tick
   const filteredGlossary = useMemo(
     () =>
@@ -1681,35 +1662,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             )}
           </div>
 
-          {/* HÀNG 3: GIỜ BẮT ĐẦU / KẾT THÚC & TÍNH GIỜ THỰC TẾ */}
-          <div className="space-y-2 mt-3">
-            <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
-              <span>
-                Ca áp dụng:{' '}
-                <strong className="font-mono text-[#14539E]">
-                  {dayEvaluation.shift.code}
-                </strong>{' '}
-                ({dayEvaluation.daySchedule.startTime}–{dayEvaluation.daySchedule.endTime}
-                {dayEvaluation.daySchedule.breakStart &&
-                dayEvaluation.daySchedule.breakEnd
-                  ? ` · Nghỉ ${dayEvaluation.daySchedule.breakStart}–${dayEvaluation.daySchedule.breakEnd}`
-                  : ''}
-                )
-              </span>
-              {(isStartTimeManuallyEdited || isEndTimeManuallyEdited) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsStartTimeManuallyEdited(false);
-                    setIsEndTimeManuallyEdited(false);
-                  }}
-                  className="text-[10px] font-semibold text-[#14539E] hover:underline cursor-pointer shrink-0"
-                >
-                  Theo giờ ca
-                </button>
-              )}
-            </div>
-
+          {/* HÀNG 3: GIỜ BẮT ĐẦU / KẾT THÚC */}
+          <div className="mt-3">
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label
@@ -1777,7 +1731,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  {dayEvaluation.quickEndSuggestions.map((time) => (
+                  {(['18:10', '19:10', '20:10'] as const).map((time) => (
                     <button
                       key={time}
                       type="button"
@@ -1796,55 +1750,6 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                   ))}
                 </div>
               </div>
-            </div>
-
-            {/* Khung giờ công thực tế theo quy định ăn ca */}
-            <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-2 space-y-1.5">
-              <div className="flex items-start justify-between gap-2 text-[11px]">
-                <span className="text-slate-600 font-medium pt-0.5">
-                  Giờ tăng ca thực tế:
-                </span>
-                <div className="text-right">
-                  <div
-                    data-testid="overtime-net-hours-preview"
-                    className="font-mono font-bold text-[#14539E] tabular-nums"
-                  >
-                    {formatNumberVN(draftActualHoursResult.netHours)} giờ
-                    {draftActualHoursResult.deductedBreakHours > 0 && (
-                      <span className="font-sans font-normal text-[10px] text-slate-500 ml-1">
-                        (Tổng {formatNumberVN(draftActualHoursResult.rawHours)}g)
-                      </span>
-                    )}
-                  </div>
-                  {draftActualHoursResult.noteText ? (
-                    <div
-                      data-testid="overtime-meal-deduction-note"
-                      className="text-[10px] font-medium text-amber-700 mt-0.5 tabular-nums"
-                    >
-                      {draftActualHoursResult.noteText}
-                    </div>
-                  ) : (
-                    overtimeSettings.dinner_break_rule.enabled &&
-                    draftActualHoursResult.explanations.length > 0 && (
-                      <div
-                        data-testid="overtime-meal-deduction-note"
-                        className="text-[10px] text-emerald-700 mt-0.5 tabular-nums"
-                      >
-                        Không trừ giờ ăn tối (liên tục đến ≤{' '}
-                        {overtimeSettings.dinner_break_rule.continuous_cutoff_time})
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-
-              {draftActualHoursResult.explanations.length > 0 && (
-                <div className="pt-1 border-t border-slate-200/70 space-y-0.5 text-[10px] text-slate-500 leading-snug">
-                  {draftActualHoursResult.explanations.map((line, idx) => (
-                    <div key={idx}>• {line}</div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
 
