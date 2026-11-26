@@ -256,7 +256,7 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
           <div className="flex items-center gap-2.5 min-w-0">
             <span
               className={`rounded-lg bg-blue-50 border border-blue-200/80 text-[#14539E] flex items-center justify-center shrink-0 ${
-                activeTab === 'new_products' ? 'w-9 h-9' : 'w-8 h-8'
+                activeTab === 'new_products' ? 'w-10 h-10' : 'w-8 h-8'
               }`}
             >
               <HeaderIcon
@@ -265,10 +265,10 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
             </span>
             <div className="min-w-0">
               <h1
-                className={`font-bold text-slate-900 tracking-tight truncate ${
+                className={`tracking-tight truncate ${
                   activeTab === 'new_products'
-                    ? 'text-2xl leading-tight'
-                    : 'text-sm sm:text-base'
+                    ? 'text-3xl font-extrabold text-slate-900 leading-tight'
+                    : 'text-sm sm:text-base font-bold text-slate-900'
                 }`}
               >
                 {currentMeta.title}

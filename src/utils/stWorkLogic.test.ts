@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   applyRealtimeStRow,
   calculateCompletionDays,
+  computeNewProductStatusCounts,
   computeStagesProgress,
   computeStOverviewMetrics,
   computeStReportComparison,
@@ -720,6 +721,21 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
     const merged = mergeProductsWithStatus(products, statuses);
 
     assert.deepEqual(extractAvailableYearsFromNewProducts(merged), [2026, 2025]);
+    assert.deepEqual(extractAvailableYearsFromNewProducts(merged, 2027), [
+      2027,
+      2026,
+      2025,
+    ]);
+
+    const preStatus2026 = filterNewProductsList(merged, {
+      yearFilter: '2026',
+      monthFilter: 'ALL',
+    });
+    assert.deepEqual(computeNewProductStatusCounts(preStatus2026), {
+      total: 2,
+      completed: 0,
+      inProgress: 2,
+    });
 
     assert.deepEqual(
       filterNewProductsList(merged, { yearFilter: '2026', monthFilter: '8' }).map(

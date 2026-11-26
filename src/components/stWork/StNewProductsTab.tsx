@@ -18,6 +18,7 @@ import {
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   calculateCompletionDays,
+  computeNewProductStatusCounts,
   computeStagesProgress,
   extractAvailableYearsFromNewProducts,
   filterNewProductsList,
@@ -122,8 +123,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [lineFilter, setLineFilter] = useState<string>('ALL');
   const [customerFilter, setCustomerFilter] = useState<string>('ALL');
-  const [yearFilter, setYearFilter] = useState<string>('ALL');
-  const [monthFilter, setMonthFilter] = useState<string>('ALL');
+  const [yearFilter, setYearFilter] = useState<string>(() =>
+    new Date().getFullYear().toString()
+  );
+  const [monthFilter, setMonthFilter] = useState<string>(() =>
+    (new Date().getMonth() + 1).toString()
+  );
   const [statusFilter, setStatusFilter] = useState<StatusFilterMode>('all');
   const [sortMode, setSortMode] =
     useState<StNewProductSortMode>('process_erp_desc');
@@ -194,9 +199,11 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     return Array.from(set);
   }, [customers, productsWithStatus]);
 
+  const currentYearNum = new Date().getFullYear();
+
   const availableYears = useMemo(
-    () => extractAvailableYearsFromNewProducts(productsWithStatus),
-    [productsWithStatus]
+    () => extractAvailableYearsFromNewProducts(productsWithStatus, currentYearNum),
+    [productsWithStatus, currentYearNum]
   );
 
   const existingProductCodes = useMemo(
@@ -209,33 +216,33 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     [productsWithStatus]
   );
 
-  const summaryCounts = useMemo(() => {
-    const total = productsWithStatus.length;
-    const completed = productsWithStatus.filter((i) => i.isCompleted).length;
-    const inProgress = total - completed;
-    return { total, completed, inProgress };
-  }, [productsWithStatus]);
+  const preStatusFilteredItems = useMemo(
+    () =>
+      filterNewProductsList(productsWithStatus, {
+        searchQuery,
+        lineFilter,
+        customerFilter,
+        yearFilter,
+        monthFilter,
+        statusFilter: 'all',
+      }),
+    [productsWithStatus, searchQuery, lineFilter, customerFilter, yearFilter, monthFilter]
+  );
+
+  const summaryCounts = useMemo(
+    () => computeNewProductStatusCounts(preStatusFilteredItems),
+    [preStatusFilteredItems]
+  );
 
   const filteredItems = useMemo(() => {
-    const filtered = filterNewProductsList(productsWithStatus, {
-      searchQuery,
-      lineFilter,
-      customerFilter,
-      statusFilter,
-      yearFilter,
-      monthFilter,
-    });
-    return sortNewProductsList(filtered, sortMode);
-  }, [
-    productsWithStatus,
-    searchQuery,
-    lineFilter,
-    customerFilter,
-    statusFilter,
-    yearFilter,
-    monthFilter,
-    sortMode,
-  ]);
+    const statusMatched =
+      statusFilter === 'all'
+        ? preStatusFilteredItems
+        : preStatusFilteredItems.filter((item) =>
+            statusFilter === 'completed' ? item.isCompleted : !item.isCompleted
+          );
+    return sortNewProductsList(statusMatched, sortMode);
+  }, [preStatusFilteredItems, statusFilter, sortMode]);
 
   // Live preview inside Mini Progress Modal
   const miniLivePreview = useMemo(() => {
@@ -339,211 +346,212 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   );
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden">
-      {/* 1. Filter Strip & Action Buttons */}
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2 shrink-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full sm:w-52 lg:w-56">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm mã hàng, tên hàng, quy cách..."
-              aria-label="Tìm kiếm đơn giá mới"
-              className="w-full h-8 pl-8 pr-7 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Xóa từ khóa tìm kiếm"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <select
-            value={lineFilter}
-            onChange={(e) => setLineFilter(e.target.value)}
-            aria-label="Lọc theo Line"
-            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Line</option>
-            {lineNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={customerFilter}
-            onChange={(e) => setCustomerFilter(e.target.value)}
-            aria-label="Lọc theo Khách hàng"
-            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Khách hàng</option>
-            {customerNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            data-testid="st-new-products-year-filter"
-            value={yearFilter}
-            onChange={(e) => setYearFilter(e.target.value)}
-            aria-label="Lọc theo Năm"
-            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Năm</option>
-            {availableYears.map((yr) => (
-              <option key={yr} value={String(yr)}>
-                Năm {yr}
-              </option>
-            ))}
-          </select>
-
-          <select
-            data-testid="st-new-products-month-filter"
-            value={monthFilter}
-            onChange={(e) => setMonthFilter(e.target.value)}
-            aria-label="Lọc theo Tháng"
-            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Tháng</option>
-            {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
-              <option key={m} value={String(m)}>
-                Tháng {m}
-              </option>
-            ))}
-          </select>
-
-          <div className="inline-flex items-center gap-1 p-0.5 bg-white border border-slate-300 rounded-lg">
+    <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl">
+      {/* 1. Standalone Search Bar Row directly under page title */}
+      <div className="px-4 py-2 border-b border-slate-200 bg-white rounded-t-xl shrink-0">
+        <div className="relative w-full max-w-xl">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Tìm mã hàng, tên hàng, quy cách..."
+            aria-label="Tìm kiếm đơn giá mới"
+            className="w-full h-9 pl-9 pr-8 text-xs bg-slate-50/70 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:border-[#14539E]"
+          />
+          {searchQuery && (
             <button
               type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'all'
-                  ? 'bg-[#14539E] text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setSearchQuery('')}
+              aria-label="Xóa từ khóa tìm kiếm"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
             >
-              Tất cả ({formatNumberVN(summaryCounts.total)})
+              <X className="w-3.5 h-3.5" />
             </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('completed')}
-              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'completed'
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Hoàn thành ({formatNumberVN(summaryCounts.completed)})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('in_progress')}
-              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'in_progress'
-                  ? 'bg-amber-600 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Đang làm ({formatNumberVN(summaryCounts.inProgress)})
-            </button>
-          </div>
-        </div>
-
-        {/* Right Action Cluster: Sắp xếp theo -> Nhập từ file -> + Thêm mã hàng mới */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <div className="relative" ref={sortMenuRef}>
-            <button
-              type="button"
-              data-testid="st-new-products-sort-btn"
-              onClick={() => setIsSortMenuOpen((prev) => !prev)}
-              aria-haspopup="menu"
-              aria-expanded={isSortMenuOpen}
-              title={`Đang sắp xếp: ${activeSortOption.label}`}
-              className="h-8 px-3 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span>Sắp xếp theo</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform ${
-                  isSortMenuOpen ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
-
-            {isSortMenuOpen && (
-              <div
-                role="menu"
-                data-testid="st-new-products-sort-menu"
-                className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30"
-              >
-                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Sắp xếp danh sách
-                </div>
-                {ST_NEW_PRODUCT_SORT_OPTIONS.map((opt) => {
-                  const active = sortMode === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      data-testid={`st-sort-option-${opt.value}`}
-                      onClick={() => {
-                        setSortMode(opt.value);
-                        setIsSortMenuOpen(false);
-                      }}
-                      className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                        active
-                          ? 'bg-blue-50/80 text-[#14539E] font-semibold'
-                          : 'text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span>{opt.label}</span>
-                      {active && <Check className="w-3.5 h-3.5 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            data-testid="st-new-products-import-btn"
-            onClick={() => setIsProgressImportOpen(true)}
-            className="h-8 px-3 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Nhập từ file</span>
-          </button>
-
-          <button
-            type="button"
-            data-testid="st-new-products-add-btn"
-            onClick={() => setIsQuickCreateOpen(true)}
-            className="h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Thêm mã hàng mới</span>
-          </button>
+          )}
         </div>
       </div>
 
-      {/* 2. Read-Only 10-Column Table (`st_new_product_status` joined with `st_products`) */}
+      {/* 2. Single Horizontal Filter & Action Bar: Năm -> Tháng -> Line -> Khách hàng -> Hiện trạng -> + Thêm mã hàng mới -> Nhập từ file -> Sắp xếp theo */}
+      <div className="px-3 py-2 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center gap-1.5 shrink-0">
+        <select
+          data-testid="st-new-products-year-filter"
+          value={yearFilter}
+          onChange={(e) => setYearFilter(e.target.value)}
+          aria-label="Lọc theo Năm"
+          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+        >
+          <option value="ALL">Tất cả Năm</option>
+          {availableYears.map((yr) => (
+            <option key={yr} value={String(yr)}>
+              Năm {yr}
+            </option>
+          ))}
+        </select>
+
+        <select
+          data-testid="st-new-products-month-filter"
+          value={monthFilter}
+          onChange={(e) => setMonthFilter(e.target.value)}
+          aria-label="Lọc theo Tháng"
+          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+        >
+          <option value="ALL">Tất cả Tháng</option>
+          {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
+            <option key={m} value={String(m)}>
+              Tháng {m}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={lineFilter}
+          onChange={(e) => setLineFilter(e.target.value)}
+          aria-label="Lọc theo Line"
+          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+        >
+          <option value="ALL">Tất cả Line</option>
+          {lineNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={customerFilter}
+          onChange={(e) => setCustomerFilter(e.target.value)}
+          aria-label="Lọc theo Khách hàng"
+          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer max-w-[122px]"
+        >
+          <option value="ALL">Tất cả Khách hàng</option>
+          {customerNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+
+        <div className="inline-flex items-center gap-0.5 p-0.5 bg-white border border-slate-300 rounded-lg shrink-0">
+          <button
+            type="button"
+            data-testid="st-status-filter-all"
+            onClick={() => setStatusFilter('all')}
+            className={`h-7 px-1.5 rounded-md text-[11.5px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'all'
+                ? 'bg-[#14539E] text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Tất cả ({formatNumberVN(summaryCounts.total)})
+          </button>
+          <button
+            type="button"
+            data-testid="st-status-filter-completed"
+            onClick={() => setStatusFilter('completed')}
+            className={`h-7 px-1.5 rounded-md text-[11.5px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'completed'
+                ? 'bg-emerald-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Hoàn thành ({formatNumberVN(summaryCounts.completed)})
+          </button>
+          <button
+            type="button"
+            data-testid="st-status-filter-in_progress"
+            onClick={() => setStatusFilter('in_progress')}
+            className={`h-7 px-1.5 rounded-md text-[11.5px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'in_progress'
+                ? 'bg-amber-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Đang làm ({formatNumberVN(summaryCounts.inProgress)})
+          </button>
+        </div>
+
+        <button
+          type="button"
+          data-testid="st-new-products-add-btn"
+          onClick={() => setIsQuickCreateOpen(true)}
+          className="h-8 px-2.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-[11.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Thêm mã hàng mới</span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="st-new-products-import-btn"
+          onClick={() => setIsProgressImportOpen(true)}
+          className="h-8 px-2 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-[11.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" />
+          <span>Nhập từ file</span>
+        </button>
+
+        <div className="relative shrink-0" ref={sortMenuRef}>
+          <button
+            type="button"
+            data-testid="st-new-products-sort-btn"
+            onClick={() => setIsSortMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={isSortMenuOpen}
+            title={`Đang sắp xếp: ${activeSortOption.label}`}
+            className="h-8 px-2 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E] text-[11.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+            <span>Sắp xếp theo</span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform ${
+                isSortMenuOpen ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+
+          {isSortMenuOpen && (
+            <div
+              role="menu"
+              data-testid="st-new-products-sort-menu"
+              className="absolute left-0 xl:left-auto xl:right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30"
+            >
+              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Sắp xếp danh sách
+              </div>
+              {ST_NEW_PRODUCT_SORT_OPTIONS.map((opt) => {
+                const active = sortMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    data-testid={`st-sort-option-${opt.value}`}
+                    onClick={() => {
+                      setSortMode(opt.value);
+                      setIsSortMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-blue-50/80 text-[#14539E] font-semibold'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Read-Only 12-Column Table (`st_new_product_status` joined with `st_products`) */}
       <div
         data-testid="st-new-products-table-wrapper"
-        className="flex-1 min-h-0 overflow-auto"
+        className="flex-1 min-h-0 overflow-auto rounded-b-xl"
       >
         {isLoading && productsWithStatus.length === 0 ? (
           <div className="p-10 flex items-center justify-center gap-2 text-xs text-slate-500">
@@ -588,42 +596,48 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             data-testid="st-new-products-table"
             className="w-full border-collapse text-left"
           >
-            <thead className="sticky top-0 z-10 bg-slate-100 text-[10.5px] font-bold text-slate-600 uppercase tracking-tight shadow-[0_1px_0_0_rgba(203,213,225,1)]">
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] font-bold text-slate-600 uppercase tracking-tight shadow-[0_1px_0_0_rgba(203,213,225,1)]">
               <tr>
-                <th className="sticky left-0 z-20 bg-slate-100 px-2.5 py-2.5 min-w-[92px] border-r border-b border-slate-200 whitespace-nowrap">
+                <th className="sticky left-0 z-20 bg-slate-100 px-1 py-2.5 w-[34px] min-w-[34px] text-center border-r border-b border-slate-200 whitespace-nowrap">
+                  STT
+                </th>
+                <th className="sticky left-[34px] z-20 bg-slate-100 px-1.5 py-2.5 w-[46px] min-w-[46px] border-r border-b border-slate-200 whitespace-nowrap">
+                  LINE
+                </th>
+                <th className="sticky left-[80px] z-20 bg-slate-100 px-1.5 py-2.5 min-w-[82px] border-r border-b border-slate-200 whitespace-nowrap">
                   MÃ HÀNG
                 </th>
-                <th className="px-2 py-2.5 w-[115px] max-w-[125px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1.5 py-2.5 w-[86px] max-w-[92px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   QUY CÁCH
                 </th>
-                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   QUY TRÌNH ERP
                 </th>
-                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   NGÀY TẠO QT
                 </th>
-                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   CÔNG ĐOẠN
                 </th>
-                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   TỶ LỆ %
                 </th>
                 <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   ST
                 </th>
-                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   NGÀY ÁP DỤNG
                 </th>
-                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   HIỆN TRẠNG
                 </th>
-                <th className="px-1.5 py-2.5 w-[58px] text-center border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2.5 w-[48px] text-center border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   THAO TÁC
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-xs">
-              {filteredItems.map((item) => {
+              {filteredItems.map((item, rowIdx) => {
                 const p = item.product;
                 const st = item.status;
                 const hasProcessErp = Boolean(st?.has_process_erp);
@@ -644,31 +658,46 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         : 'bg-white hover:bg-[#F3F8FF]'
                     }`}
                   >
-                    {/* 1. Mã hàng (từ st_products, link xanh đậm -> Full Product Detail Modal) */}
+                    {/* 1. STT */}
                     <td
-                      className={`sticky left-0 z-[5] px-2.5 py-2.5 border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                      className={`sticky left-0 z-[5] px-1 py-2 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                    >
+                      {rowIdx + 1}
+                    </td>
+
+                    {/* 2. LINE (từ st_products) */}
+                    <td
+                      title={p.line_name || undefined}
+                      className={`sticky left-[34px] z-[5] px-1.5 py-2 font-semibold text-slate-700 max-w-[46px] truncate border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                    >
+                      {p.line_name || '—'}
+                    </td>
+
+                    {/* 3. Mã hàng (từ st_products, link xanh đậm -> Full Product Detail Modal) */}
+                    <td
+                      className={`sticky left-[80px] z-[5] px-1.5 py-2 border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
                     >
                       <button
                         type="button"
                         data-testid={`st-product-code-btn-${p.product_code}`}
                         onClick={() => setDetailModalItem(item)}
                         title="Bấm để xem chi tiết thông tin sản phẩm"
-                        className="font-mono font-bold text-[#14539E] hover:underline cursor-pointer text-left whitespace-nowrap"
+                        className="font-mono text-[11.5px] font-bold text-[#14539E] hover:underline cursor-pointer text-left whitespace-nowrap"
                       >
                         {p.product_code}
                       </button>
                     </td>
 
-                    {/* 2. Quy cách (từ st_products) */}
+                    {/* 4. Quy cách (từ st_products) */}
                     <td
                       title={p.specification || undefined}
-                      className="px-2 py-2.5 border-r border-slate-100 text-slate-600 max-w-[125px] truncate"
+                      className="px-1.5 py-2 border-r border-slate-100 text-[11.5px] text-slate-600 max-w-[92px] truncate"
                     >
                       {p.specification || '—'}
                     </td>
 
-                    {/* 3. QUY TRÌNH ERP (Icon-only) */}
-                    <td className="px-1 py-2.5 border-r border-slate-100 text-center align-middle">
+                    {/* 5. QUY TRÌNH ERP (Icon-only) */}
+                    <td className="px-1 py-2 border-r border-slate-100 text-center align-middle">
                       {hasProcessErp ? (
                         <span
                           title="Đã có Quy trình ERP"
@@ -688,12 +717,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       )}
                     </td>
 
-                    {/* 4. NGÀY TẠO QT */}
-                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
+                    {/* 6. NGÀY TẠO QT */}
+                    <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
                       {formatStDateVN(st?.process_erp_date)}
                     </td>
 
-                    {/* 5. Công đoạn (WIN -> CUT -> SOL -> ASS -> IMP -> SOL2 -> FIN) */}
+                    {/* 7. Công đoạn (WIN -> CUT -> SOL -> ASS -> IMP -> SOL2 -> FIN) */}
                     <td className="px-1 py-2 border-r border-slate-100 align-middle">
                       <div className="flex items-center justify-center gap-0.5 flex-nowrap">
                         {ST_PRODUCTION_STAGES.map((stage, idx) => {
@@ -722,14 +751,14 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                             <React.Fragment key={stage.key}>
                               <span
                                 title={tooltipText}
-                                className={`inline-flex items-center justify-center px-1 py-0.5 rounded border font-mono text-[9.5px] font-semibold leading-none whitespace-nowrap select-none ${badgeClass}`}
+                                className={`inline-flex items-center justify-center px-1 py-0.5 rounded border font-mono text-[9px] font-semibold leading-none whitespace-nowrap select-none ${badgeClass}`}
                               >
                                 {stage.code}
                               </span>
                               {idx < ST_PRODUCTION_STAGES.length - 1 && (
                                 <span
                                   aria-hidden="true"
-                                  className="text-[8.5px] text-slate-300 select-none leading-none"
+                                  className="text-[8px] text-slate-300 select-none leading-none"
                                 >
                                   →
                                 </span>
@@ -740,10 +769,10 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       </div>
                     </td>
 
-                    {/* 6. Tỷ lệ % */}
-                    <td className="px-1.5 py-2 border-r border-slate-100 align-middle whitespace-nowrap">
+                    {/* 8. Tỷ lệ % */}
+                    <td className="px-1 py-2 border-r border-slate-100 align-middle whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1">
-                        <div className="w-9 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
+                        <div className="w-6 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
                           <div
                             className={`h-full rounded-full transition-all duration-200 ${
                               percentage === 100
@@ -757,7 +786,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         </div>
                         <span
                           data-testid={`st-row-percent-${p.product_code}`}
-                          className={`font-mono text-[11px] font-bold tabular-nums w-8 text-right ${
+                          className={`font-mono text-[10.5px] font-bold tabular-nums w-7 text-right ${
                             percentage === 100
                               ? 'text-emerald-700'
                               : percentage > 0
@@ -770,8 +799,8 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       </div>
                     </td>
 
-                    {/* 7. ST (Icon-only) */}
-                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center align-middle">
+                    {/* 9. ST (Icon-only) */}
+                    <td className="px-1 py-2 border-r border-slate-100 text-center align-middle">
                       {hasSt ? (
                         <span
                           title="Đã hoàn thành ST"
@@ -798,32 +827,32 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       )}
                     </td>
 
-                    {/* 8. Ngày áp dụng */}
-                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
+                    {/* 10. Ngày áp dụng */}
+                    <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
                       {formatStDateVN(st?.st_date)}
                     </td>
 
-                    {/* 9. Hiện trạng (Auto Badge: Hoàn thành / Đang làm) */}
-                    <td className="px-2 py-2.5 border-r border-slate-100 text-center align-middle whitespace-nowrap">
+                    {/* 11. Hiện trạng (Auto Badge: Hoàn thành / Đang làm) */}
+                    <td className="px-1 py-2 border-r border-slate-100 text-center align-middle whitespace-nowrap">
                       {item.isCompleted ? (
                         <span
                           data-testid={`st-row-status-${p.product_code}`}
-                          className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold whitespace-nowrap"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10.5px] font-semibold whitespace-nowrap"
                         >
                           Hoàn thành
                         </span>
                       ) : (
                         <span
                           data-testid={`st-row-status-${p.product_code}`}
-                          className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold whitespace-nowrap"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-[10.5px] font-semibold whitespace-nowrap"
                         >
                           Đang làm
                         </span>
                       )}
                     </td>
 
-                    {/* 10. Thao tác (Icon-only Cập nhật tiến độ, NO delete button) */}
-                    <td className="px-1.5 py-2 text-center align-middle">
+                    {/* 12. Thao tác (Icon-only Cập nhật tiến độ, NO delete button) */}
+                    <td className="px-1 py-2 text-center align-middle">
                       <button
                         type="button"
                         data-testid={`st-product-progress-btn-${p.product_code}`}

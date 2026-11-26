@@ -1425,9 +1425,18 @@ export function getStNewProductFilterDate(item: StProductWithStatus): string {
 }
 
 export function extractAvailableYearsFromNewProducts(
-  items: StProductWithStatus[]
+  items: StProductWithStatus[],
+  includeYear?: number
 ): number[] {
   const yearSet = new Set<number>();
+  if (
+    typeof includeYear === 'number' &&
+    Number.isInteger(includeYear) &&
+    includeYear >= 2000 &&
+    includeYear <= 2100
+  ) {
+    yearSet.add(includeYear);
+  }
   for (const item of items) {
     const iso = getStNewProductFilterDate(item);
     if (iso && iso.length >= 4) {
@@ -1438,6 +1447,18 @@ export function extractAvailableYearsFromNewProducts(
     }
   }
   return Array.from(yearSet).sort((a, b) => b - a);
+}
+
+export function computeNewProductStatusCounts(
+  items: StProductWithStatus[]
+): { total: number; completed: number; inProgress: number } {
+  const total = items.length;
+  const completed = items.filter((item) => item.isCompleted).length;
+  return {
+    total,
+    completed,
+    inProgress: total - completed,
+  };
 }
 
 export interface StNewProductListFilters {
