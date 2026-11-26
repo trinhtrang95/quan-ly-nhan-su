@@ -31,6 +31,9 @@ test('services layer exposes HR, Settings, and ST Work CRUD & Realtime APIs', ()
   assert.equal(typeof stWorkService.upsertStNewProductStatus, 'function');
   assert.equal(typeof stWorkService.createStChangeRequest, 'function');
   assert.equal(typeof stWorkService.subscribeToStWorkRealtime, 'function');
+  assert.equal(typeof stWorkService.compressImageClientSide, 'function');
+  assert.equal(typeof stWorkService.uploadImageToHrBucket, 'function');
+  assert.equal(typeof stWorkService.deleteImageFromHrBucket, 'function');
 });
 
 test('all domain services share the exact same Supabase client singleton', () => {

@@ -299,6 +299,7 @@ describe('stWorkLogic pure calculations', () => {
       assert.equal(ws.views[0].state, 'frozen');
       assert.equal(ws.views[0].ySplit, 3);
       assert.ok(ws.autoFilter);
+      assert.ok((ws.getColumn(2).width || 0) >= 8);
     }
   });
 

@@ -16,8 +16,14 @@ import {
   Clock,
   SlidersHorizontal,
   Briefcase,
+  LayoutGrid,
+  PackageCheck,
+  ClipboardList,
+  FileSpreadsheet,
+  BarChart3,
 } from 'lucide-react';
 import { ActiveModule as BaseActiveModule, CompanyUnit, UserAccount } from '../types/hr';
+import { StWorkSubTab } from '../utils/stWorkLogic';
 
 export type ActiveModule = BaseActiveModule | 'overtime';
 
@@ -35,8 +41,17 @@ export type HrChildMenuId =
   | 'summary_report'
   | 'general_settings';
 
+export type StWorkChildMenuId =
+  | 'st_overview'
+  | 'st_new_products'
+  | 'st_change_requests'
+  | 'st_customer_quotes'
+  | 'st_reports';
+
+export type NavChildMenuId = HrChildMenuId | StWorkChildMenuId;
+
 export interface NavChildItem {
-  id: HrChildMenuId;
+  id: NavChildMenuId;
   label: string;
   shortLabel: string;
   path: string;
@@ -114,8 +129,49 @@ export const NAVIGATION_DATA: NavParentItem[] = [
     id: 'st_work',
     label: 'Quản lý công việc ST',
     shortLabel: 'CV ST',
-    path: '/quan-ly-cong-viec-st',
     icon: Briefcase,
+    children: [
+      {
+        id: 'st_overview',
+        label: 'Tổng quan ST',
+        shortLabel: 'Tổng quan',
+        path: '/quan-ly-cong-viec-st',
+        icon: LayoutGrid,
+        testId: 'sidebar-subnav-st-overview',
+      },
+      {
+        id: 'st_new_products',
+        label: 'Danh mục Mã hàng',
+        shortLabel: 'Mã hàng',
+        path: '/st-ma-hang',
+        icon: PackageCheck,
+        testId: 'sidebar-subnav-st-new-products',
+      },
+      {
+        id: 'st_change_requests',
+        label: 'Phiếu yêu cầu',
+        shortLabel: 'Phiếu YC',
+        path: '/st-phieu-yeu-cau',
+        icon: ClipboardList,
+        testId: 'sidebar-subnav-st-change-requests',
+      },
+      {
+        id: 'st_customer_quotes',
+        label: 'Báo giá khách hàng',
+        shortLabel: 'Báo giá',
+        path: '/st-bao-gia',
+        icon: FileSpreadsheet,
+        testId: 'sidebar-subnav-st-customer-quotes',
+      },
+      {
+        id: 'st_reports',
+        label: 'Báo cáo ST',
+        shortLabel: 'Báo cáo ST',
+        path: '/st-bao-cao',
+        icon: BarChart3,
+        testId: 'sidebar-subnav-st-reports',
+      },
+    ],
   },
   {
     id: 'settings',
@@ -134,6 +190,8 @@ interface SidebarProps {
   onSelectLeaveSubTab?: (subTab: LeaveSubTab) => void;
   reportSubTab?: ReportSubTab;
   onSelectReportSubTab?: (subTab: ReportSubTab) => void;
+  stWorkSubTab?: StWorkSubTab;
+  onSelectStWorkSubTab?: (subTab: StWorkSubTab) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
   employeeCount: number;
@@ -153,6 +211,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectLeaveSubTab,
   reportSubTab = 'monthly_summary',
   onSelectReportSubTab,
+  stWorkSubTab = 'overview',
+  onSelectStWorkSubTab,
   collapsed,
   onToggleCollapse,
   currentUser,
@@ -182,25 +242,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeModule === 'annual_report' ||
     activeModule === 'general_settings';
 
+  const isInsideStWorkModule = activeModule === 'st_work';
+
   // Global state quản lý trạng thái đóng/mở chung của tất cả các Menu cha
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(true);
 
   // State chi tiết từng Menu cha để đồng bộ với isAllExpanded và vẫn cho phép đóng/mở từng phân hệ
   const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>(() => ({
     hr_module: true,
+    st_work: true,
   }));
 
-  // Đảm bảo khi chuyển sang bất kỳ menu con nào của Module "Nhân sự", menu cha luôn tự động mở (Expanded)
+  // Đảm bảo khi chuyển sang bất kỳ menu con nào của Module cha, menu cha luôn tự động mở (Expanded)
   useEffect(() => {
-    if (isInsideHrModule) {
+    if (isInsideHrModule || isInsideStWorkModule) {
       setExpandedMap((prev) => {
-        const next: Record<string, boolean> = { ...prev, hr_module: true };
+        const next: Record<string, boolean> = {
+          ...prev,
+          ...(isInsideHrModule ? { hr_module: true } : {}),
+          ...(isInsideStWorkModule ? { st_work: true } : {}),
+        };
         const allOpen = expandableParentIds.every((id) => Boolean(next[id]));
         setIsAllExpanded(allOpen);
         return next;
       });
     }
-  }, [isInsideHrModule, activeModule, leaveSubTab, reportSubTab, expandableParentIds]);
+  }, [
+    isInsideHrModule,
+    isInsideStWorkModule,
+    activeModule,
+    leaveSubTab,
+    reportSubTab,
+    stWorkSubTab,
+    expandableParentIds,
+  ]);
 
   // Hàm xử lý nút "Thu gọn tất cả / Mở rộng tất cả"
   const handleToggleAllExpanded = () => {
@@ -231,7 +306,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       : currentUser.fullName.slice(0, 2).toUpperCase();
   })();
 
-  const isChildActive = (childId: HrChildMenuId): boolean => {
+  const isChildActive = (childId: NavChildMenuId): boolean => {
     switch (childId) {
       case 'employees_list':
         return activeModule === 'employees';
@@ -243,14 +318,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return activeModule === 'annual_report';
       case 'general_settings':
         return activeModule === 'general_settings';
+      case 'st_overview':
+        return activeModule === 'st_work' && stWorkSubTab === 'overview';
+      case 'st_new_products':
+        return activeModule === 'st_work' && stWorkSubTab === 'new_products';
+      case 'st_change_requests':
+        return activeModule === 'st_work' && stWorkSubTab === 'change_requests';
+      case 'st_customer_quotes':
+        return activeModule === 'st_work' && stWorkSubTab === 'customer_quotes';
+      case 'st_reports':
+        return activeModule === 'st_work' && stWorkSubTab === 'reports';
       default:
         return false;
     }
   };
 
-  const handleSelectHrChild = (childId: HrChildMenuId) => {
+  const handleSelectNavChild = (
+    parentId: 'hr_module' | 'st_work',
+    childId: NavChildMenuId
+  ) => {
     setExpandedMap((prev) => {
-      const next: Record<string, boolean> = { ...prev, hr_module: true };
+      const next: Record<string, boolean> = { ...prev, [parentId]: true };
       const allOpen = expandableParentIds.every((id) => Boolean(next[id]));
       setIsAllExpanded(allOpen);
       return next;
@@ -273,6 +361,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
         break;
       case 'general_settings':
         onSelectModule('general_settings');
+        break;
+      case 'st_overview':
+        onSelectModule('st_work');
+        onSelectStWorkSubTab?.('overview');
+        break;
+      case 'st_new_products':
+        onSelectModule('st_work');
+        onSelectStWorkSubTab?.('new_products');
+        break;
+      case 'st_change_requests':
+        onSelectModule('st_work');
+        onSelectStWorkSubTab?.('change_requests');
+        break;
+      case 'st_customer_quotes':
+        onSelectModule('st_work');
+        onSelectStWorkSubTab?.('customer_quotes');
+        break;
+      case 'st_reports':
+        onSelectModule('st_work');
+        onSelectStWorkSubTab?.('reports');
         break;
     }
   };
@@ -338,17 +446,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
 
-            // Module cha dạng Accordion: "Nhân sự" (gồm 5 menu con)
-            if (item.id === 'hr_module' && item.children) {
-              const isParentHighlighted = isInsideHrModule;
+            // Module cha dạng Accordion: "Nhân sự" hoặc "Quản lý công việc ST" (gồm 5 menu con)
+            if (
+              (item.id === 'hr_module' || item.id === 'st_work') &&
+              item.children
+            ) {
+              const isHrParent = item.id === 'hr_module';
+              const isParentHighlighted = isHrParent
+                ? isInsideHrModule
+                : isInsideStWorkModule;
               const isModuleExpanded = Boolean(expandedMap[item.id]);
 
               return (
                 <div key={item.id} className="space-y-1">
-                  {/* Menu cha: Nhân sự (bg-transparent, chỉ hover:bg-white/10) */}
+                  {/* Menu cha dạng Accordion */}
                   <button
                     type="button"
-                    data-testid="sidebar-nav-hr-parent"
+                    data-testid={
+                      isHrParent
+                        ? 'sidebar-nav-hr-parent'
+                        : 'sidebar-nav-st-work-parent'
+                    }
                     aria-expanded={!collapsed ? isModuleExpanded : undefined}
                     onClick={() => {
                       if (collapsed) {
@@ -358,8 +476,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           [item.id]: true,
                         }));
                         setIsAllExpanded(true);
-                        if (!isInsideHrModule) {
-                          onSelectModule('employees');
+                        if (!isParentHighlighted) {
+                          if (isHrParent) {
+                            onSelectModule('employees');
+                          } else {
+                            onSelectModule('st_work');
+                            onSelectStWorkSubTab?.(stWorkSubTab);
+                          }
                         }
                       } else {
                         handleToggleSingleParent(item.id);
@@ -398,7 +521,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </button>
 
-                  {/* 5 Menu con bên trong Module "Nhân sự" với đường kẻ dọc liền mạch border-white/20 */}
+                  {/* 5 Menu con bên trong với đường kẻ dọc liền mạch border-white/20 */}
                   {!collapsed && (
                     <div
                       aria-hidden={!isModuleExpanded}
@@ -410,7 +533,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <div className="overflow-hidden">
                         <div
-                          data-testid="sidebar-hr-children"
+                          data-testid={
+                            isHrParent
+                              ? 'sidebar-hr-children'
+                              : 'sidebar-st-work-children'
+                          }
                           className="relative ml-5 border-l border-white/20 space-y-1"
                         >
                           {item.children.map((child) => {
@@ -429,7 +556,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   type="button"
                                   tabIndex={isModuleExpanded ? 0 : -1}
                                   data-testid={child.testId}
-                                  onClick={() => handleSelectHrChild(child.id)}
+                                  onClick={() =>
+                                    handleSelectNavChild(
+                                      isHrParent ? 'hr_module' : 'st_work',
+                                      child.id
+                                    )
+                                  }
                                   className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs transition-all cursor-pointer text-left ${
                                     active
                                       ? 'bg-white text-[#14539E] font-bold shadow-sm'
@@ -456,10 +588,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               );
             }
 
-            // Các mục Menu cấp 1 đơn: "Trang chủ", "Quản lý công việc ST" và "Hệ thống / Cài đặt"
+            // Các mục Menu cấp 1 đơn: "Trang chủ" và "Hệ thống / Cài đặt"
             const isTopActive =
               (item.id === 'dashboard' && activeModule === 'dashboard') ||
-              (item.id === 'st_work' && activeModule === 'st_work') ||
               (item.id === 'settings' && activeModule === 'settings');
 
             return (
@@ -469,7 +600,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 data-testid={`sidebar-nav-${item.id}`}
                 onClick={() => {
                   if (item.id === 'dashboard') onSelectModule('dashboard');
-                  else if (item.id === 'st_work') onSelectModule('st_work');
                   else if (item.id === 'settings') onSelectModule('settings');
                 }}
                 title={collapsed ? item.label : undefined}
@@ -609,7 +739,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={child.id}
               type="button"
-              onClick={() => handleSelectHrChild(child.id)}
+              onClick={() => handleSelectNavChild('hr_module', child.id)}
               className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
                 active
                   ? 'bg-white text-[#14539E] font-bold'

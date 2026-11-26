@@ -84,6 +84,7 @@ import { PrintReportModal, ReportPrintType } from './components/hr/reports/Print
 import { OvertimeWorkspace } from './components/hr/overtime/OvertimeWorkspace';
 import { GeneralSettingsView } from './components/settings/GeneralSettingsView';
 import { StWorkWorkspace } from './components/stWork/StWorkWorkspace';
+import { StWorkSubTab } from './utils/stWorkLogic';
 import { EmployeeColumnId } from './utils/employeeColumns';
 import {
   applyThemeToDocument,
@@ -157,6 +158,7 @@ function AppContent() {
           module: 'dashboard' as ActiveModule,
           leaveSubTab: 'leave_requests' as LeaveSubTab,
           reportSubTab: 'monthly_summary' as ReportSubTab,
+          stWorkSubTab: 'overview' as StWorkSubTab,
         };
 
   const [activeModule, setActiveModule] = useState<ActiveModule>(
@@ -167,6 +169,9 @@ function AppContent() {
   );
   const [reportSubTab, setReportSubTab] = useState<ReportSubTab>(
     initialRoute.reportSubTab
+  );
+  const [stWorkSubTab, setStWorkSubTab] = useState<StWorkSubTab>(
+    initialRoute.stWorkSubTab
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
@@ -195,11 +200,18 @@ function AppContent() {
   }, [activeModule]);
 
   // Đồng bộ URL định tuyến thông qua Custom Hook độc lập (useHRRouteSync)
-  useHRRouteSync(activeModule, leaveSubTab, reportSubTab, (resolved) => {
-    setActiveModule(resolved.module);
-    setLeaveSubTab(resolved.leaveSubTab);
-    setReportSubTab(resolved.reportSubTab);
-  });
+  useHRRouteSync(
+    activeModule,
+    leaveSubTab,
+    reportSubTab,
+    stWorkSubTab,
+    (resolved) => {
+      setActiveModule(resolved.module);
+      setLeaveSubTab(resolved.leaveSubTab);
+      setReportSubTab(resolved.reportSubTab);
+      setStWorkSubTab(resolved.stWorkSubTab);
+    }
+  );
 
   // Check if already initialized locally
   const [localInitialized] = useState<boolean>(() => {
@@ -1534,6 +1546,8 @@ function AppContent() {
         onSelectLeaveSubTab={(subTab) => setLeaveSubTab(subTab)}
         reportSubTab={reportSubTab}
         onSelectReportSubTab={(subTab) => setReportSubTab(subTab)}
+        stWorkSubTab={stWorkSubTab}
+        onSelectStWorkSubTab={(subTab) => setStWorkSubTab(subTab)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
         employeeCount={companyEmployees.length}
@@ -1916,6 +1930,8 @@ function AppContent() {
               >
                 <StWorkWorkspace
                   groups={effectiveGroups}
+                  activeSubTab={stWorkSubTab}
+                  onSubTabChange={(subTab) => setStWorkSubTab(subTab)}
                   onShowToast={showToast}
                 />
               </div>

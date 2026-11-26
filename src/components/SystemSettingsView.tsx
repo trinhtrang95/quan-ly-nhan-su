@@ -26,7 +26,9 @@ import {
   ArrowUp,
   ArrowDown,
   Palette,
+  Layers,
 } from 'lucide-react';
+import { StGeneralSetupTab } from './stWork/StGeneralSetupTab';
 import {
   CompanyUnit,
   DepartmentGroup,
@@ -63,7 +65,13 @@ import {
   ThemePresetId,
 } from '../utils/themeManager';
 
-export type SettingsSubTab = 'units' | 'departments' | 'accounts' | 'backup';
+export type SettingsSubTab =
+  | 'units'
+  | 'departments'
+  | 'accounts'
+  | 'backup'
+  | 'st_lines'
+  | 'st_customers';
 
 interface SystemSettingsViewProps {
   companyUnits: CompanyUnit[];
@@ -120,6 +128,15 @@ const SUB_TABS: {
   { id: 'departments', label: 'Phòng ban & Quỹ phép', icon: FolderCog },
   { id: 'accounts', label: 'Tài khoản & Phân quyền', icon: UsersRound },
   { id: 'backup', label: 'Quản trị & Sao lưu Dữ liệu', icon: Database },
+];
+
+const ST_SETTINGS_TABS: {
+  id: SettingsSubTab;
+  label: string;
+  icon: React.FC<{ className?: string }>;
+}[] = [
+  { id: 'st_lines', label: 'Line sản xuất', icon: Layers },
+  { id: 'st_customers', label: 'Khách hàng', icon: Briefcase },
 ];
 
 export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
@@ -650,6 +667,34 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                     isActive
                       ? 'bg-[#0D9488] text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+
+            <span
+              aria-hidden="true"
+              className="w-px h-6 bg-slate-300 mx-1 hidden sm:inline-block"
+            />
+
+            {ST_SETTINGS_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeSubTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  data-testid={`settings-subtab-${tab.id}`}
+                  onClick={() => setActiveSubTab(tab.id)}
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-[#14539E] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-[#14539E] hover:bg-white/70'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -2371,6 +2416,24 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               </button>
             </div>
           </div>
+        </section>
+      )}
+
+      {activeSubTab === 'st_lines' && (
+        <section
+          aria-label="Quản lý Line sản xuất ST"
+          className="min-h-[480px] flex flex-col"
+        >
+          <StGeneralSetupTab forcedMode="lines" />
+        </section>
+      )}
+
+      {activeSubTab === 'st_customers' && (
+        <section
+          aria-label="Quản lý Khách hàng ST"
+          className="min-h-[480px] flex flex-col"
+        >
+          <StGeneralSetupTab forcedMode="customers" />
         </section>
       )}
 

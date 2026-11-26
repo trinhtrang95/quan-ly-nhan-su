@@ -3,10 +3,9 @@ export type StWorkSubTab =
   | 'new_products'
   | 'change_requests'
   | 'customer_quotes'
-  | 'reports'
-  | 'general_setup';
+  | 'reports';
 
-export type StSetupSubTab = 'products' | 'lines' | 'customers';
+export type StSetupSubTab = 'lines' | 'customers';
 
 export type StChangeRequestStatus =
   | 'Mới'

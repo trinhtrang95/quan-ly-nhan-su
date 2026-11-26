@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { ActiveModule as BaseActiveModule } from '../types/hr';
 import { LeaveSubTab, ReportSubTab } from '../components/Sidebar';
+import { StWorkSubTab } from './stWorkLogic';
 
 export type ActiveModule = BaseActiveModule | 'overtime';
 
@@ -8,6 +9,7 @@ export interface RouteState {
   module: ActiveModule;
   leaveSubTab: LeaveSubTab;
   reportSubTab: ReportSubTab;
+  stWorkSubTab: StWorkSubTab;
 }
 
 /**
@@ -22,6 +24,7 @@ export class HRRouteManager {
         module: 'employees',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/don-nghi') {
@@ -29,6 +32,7 @@ export class HRRouteManager {
         module: 'leave_logs',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/quy-phep-nam') {
@@ -36,6 +40,7 @@ export class HRRouteManager {
         module: 'annual_report',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'leave_fund',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/bao-cao-tang-ca' || clean === '/gio-tang-ca') {
@@ -43,6 +48,7 @@ export class HRRouteManager {
         module: 'annual_report',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'overtime_hours',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/bao-cao-tong-hop' || clean === '/bao-cao-thang') {
@@ -50,6 +56,7 @@ export class HRRouteManager {
         module: 'annual_report',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/bao-cao-nam') {
@@ -57,6 +64,7 @@ export class HRRouteManager {
         module: 'annual_report',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'annual_matrix',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/tang-ca') {
@@ -64,6 +72,7 @@ export class HRRouteManager {
         module: 'overtime',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
       };
     }
     if (clean === '/thiet-lap-chung') {
@@ -71,13 +80,47 @@ export class HRRouteManager {
         module: 'general_settings',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
       };
     }
-    if (clean === '/quan-ly-cong-viec-st') {
+    if (clean === '/quan-ly-cong-viec-st' || clean === '/st-tong-quan') {
       return {
         module: 'st_work',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
+      };
+    }
+    if (clean === '/st-ma-hang') {
+      return {
+        module: 'st_work',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'new_products',
+      };
+    }
+    if (clean === '/st-phieu-yeu-cau') {
+      return {
+        module: 'st_work',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'change_requests',
+      };
+    }
+    if (clean === '/st-bao-gia') {
+      return {
+        module: 'st_work',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'customer_quotes',
+      };
+    }
+    if (clean === '/st-bao-cao') {
+      return {
+        module: 'st_work',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'reports',
       };
     }
     if (clean === '/cai-dat' || clean === '/he-thong') {
@@ -85,19 +128,22 @@ export class HRRouteManager {
         module: 'settings',
         leaveSubTab: 'leave_requests',
         reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'overview',
       };
     }
     return {
       module: 'dashboard',
       leaveSubTab: 'leave_requests',
       reportSubTab: 'monthly_summary',
+      stWorkSubTab: 'overview',
     };
   }
 
   static getPathnameForState(
     module: ActiveModule,
     _leaveSubTab: LeaveSubTab,
-    reportSubTab?: ReportSubTab
+    reportSubTab?: ReportSubTab,
+    stWorkSubTab?: StWorkSubTab
   ): string {
     if (module === 'employees') return '/danh-sach-nhan-su';
     if (module === 'leave_logs') return '/don-nghi';
@@ -109,7 +155,13 @@ export class HRRouteManager {
     }
     if (module === 'overtime') return '/tang-ca';
     if (module === 'general_settings') return '/thiet-lap-chung';
-    if (module === 'st_work') return '/quan-ly-cong-viec-st';
+    if (module === 'st_work') {
+      if (stWorkSubTab === 'new_products') return '/st-ma-hang';
+      if (stWorkSubTab === 'change_requests') return '/st-phieu-yeu-cau';
+      if (stWorkSubTab === 'customer_quotes') return '/st-bao-gia';
+      if (stWorkSubTab === 'reports') return '/st-bao-cao';
+      return '/quan-ly-cong-viec-st';
+    }
     if (module === 'settings') return '/cai-dat';
     return '/';
   }
@@ -122,6 +174,7 @@ export function useHRRouteSync(
   activeModule: ActiveModule,
   leaveSubTab: LeaveSubTab,
   reportSubTab: ReportSubTab,
+  stWorkSubTab: StWorkSubTab,
   onRouteChanged: (state: RouteState) => void
 ): void {
   useEffect(() => {
@@ -129,7 +182,8 @@ export function useHRRouteSync(
     const targetPath = HRRouteManager.getPathnameForState(
       activeModule,
       leaveSubTab,
-      reportSubTab
+      reportSubTab,
+      stWorkSubTab
     );
     if (window.location.pathname !== targetPath) {
       window.history.replaceState(
@@ -138,7 +192,7 @@ export function useHRRouteSync(
         `${targetPath}${window.location.search}${window.location.hash}`
       );
     }
-  }, [activeModule, leaveSubTab, reportSubTab]);
+  }, [activeModule, leaveSubTab, reportSubTab, stWorkSubTab]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

@@ -151,6 +151,40 @@ function styleTotalRow(
   }
 }
 
+function extractCellDisplayLength(value: ExcelJS.CellValue): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'object') {
+    if ('formula' in value) {
+      return 14;
+    }
+    if ('richText' in value && Array.isArray(value.richText)) {
+      return value.richText.map((r) => r.text).join('').length;
+    }
+    return String(value).length;
+  }
+  const str = String(value);
+  const lines = str.split(/\r?\n/);
+  return lines.reduce((max, line) => Math.max(max, line.length), 0);
+}
+
+export function autoFitWorksheetColumns(
+  sheet: ExcelJS.Worksheet,
+  minWidth: number = 8,
+  maxWidth: number = 48
+): void {
+  const colCount = sheet.columnCount;
+  for (let colIdx = 1; colIdx <= colCount; colIdx++) {
+    const col = sheet.getColumn(colIdx);
+    let maxLen = typeof col.width === 'number' ? col.width - 3 : minWidth;
+    for (let rowIdx = 3; rowIdx <= sheet.rowCount; rowIdx++) {
+      const cellVal = sheet.getRow(rowIdx).getCell(colIdx).value;
+      const len = extractCellDisplayLength(cellVal);
+      if (len > maxLen) maxLen = len;
+    }
+    col.width = Math.min(maxWidth, Math.max(minWidth, maxLen + 4));
+  }
+}
+
 export function buildStReportWorkbook(
   payload: StWorkExcelExportPayload
 ): ExcelJS.Workbook {
@@ -479,6 +513,12 @@ export function buildStReportWorkbook(
   quoteTotalRow.getCell(3).value = `${customerQuotes.length} hồ sơ`;
   quoteTotalRow.getCell(4).value = `Đã báo giá: ${quotedCount} | Còn lại: ${quoteRemaining}`;
   styleTotalRow(quoteTotalRow, 6, []);
+
+  // Tự động căn độ rộng cột cho toàn bộ 4 sheet
+  autoFitWorksheetColumns(summarySheet, 8, 52);
+  autoFitWorksheetColumns(productsSheet, 8, 42);
+  autoFitWorksheetColumns(requestsSheet, 8, 48);
+  autoFitWorksheetColumns(quotesSheet, 8, 46);
 
   return workbook;
 }
