@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, CheckCircle2, Loader2, Package, Plus, Upload, X } from 'lucide-react';
+import { Check, CheckCircle2, FileSpreadsheet, Loader2, Package, Plus, Upload, X } from 'lucide-react';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   getLocalIsoDateToday,
@@ -23,6 +23,7 @@ export interface StNewProductQuickCreateModalProps {
   onClose: () => void;
   onCreated: (product: StProduct, status: StNewProductStatus) => void;
   onRefresh: () => Promise<void>;
+  onOpenImport?: () => void;
   onShowToast?: (message: string) => void;
 }
 
@@ -36,6 +37,7 @@ export const StNewProductQuickCreateModal: React.FC<
   onClose,
   onCreated,
   onRefresh,
+  onOpenImport,
   onShowToast,
 }) => {
   // Section 1: st_products fields
@@ -511,28 +513,47 @@ export const StNewProductQuickCreateModal: React.FC<
           </div>
 
           {/* Footer */}
-          <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={onClose}
-              className="h-8 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold cursor-pointer hover:bg-slate-50"
-            >
-              Hủy
-            </button>
-            <button
-              type="submit"
-              disabled={isSaving}
-              data-testid="st-quick-create-save-btn"
-              className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isSaving ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5" />
+          <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+            <div>
+              {onOpenImport && (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  data-testid="st-quick-create-import-btn"
+                  onClick={() => {
+                    onClose();
+                    onOpenImport();
+                  }}
+                  className="h-9 px-3 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Nhập từ file</span>
+                </button>
               )}
-              <span>Lưu mã hàng mới</span>
-            </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={onClose}
+                className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                data-testid="st-quick-create-save-btn"
+                className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>Lưu mã hàng mới</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

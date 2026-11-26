@@ -3,9 +3,7 @@ import {
   ArrowUpDown,
   Check,
   CheckCircle2,
-  ChevronDown,
   Clock,
-  FileSpreadsheet,
   Image as ImageIcon,
   Loader2,
   Maximize2,
@@ -346,40 +344,39 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   );
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl">
-      {/* 1. Standalone Search Bar Row directly under page title */}
-      <div className="px-4 py-2 border-b border-slate-200 bg-white rounded-t-xl shrink-0">
-        <div className="relative w-full max-w-xl">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+    <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl font-sans">
+      {/* Unified Single Horizontal Toolbar: Search -> Năm -> Tháng -> Line -> Khách hàng -> Hiện trạng -> Sort Icon -> + Thêm mã hàng mới */}
+      <div className="px-2.5 py-2 border-b border-slate-200 bg-slate-50/70 rounded-t-xl flex items-center gap-1.5 flex-nowrap overflow-x-auto xl:overflow-visible shrink-0">
+        {/* 1. Search Input */}
+        <div className="relative w-44 xl:w-48 2xl:w-56 shrink-0">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm mã hàng, tên hàng, quy cách..."
+            placeholder="Tìm mã hàng, quy cách..."
             aria-label="Tìm kiếm đơn giá mới"
-            className="w-full h-9 pl-9 pr-8 text-xs bg-slate-50/70 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:border-[#14539E]"
+            className="w-full h-9 pl-8 pr-7 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
               aria-label="Xóa từ khóa tìm kiếm"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
-      </div>
 
-      {/* 2. Single Horizontal Filter & Action Bar: Năm -> Tháng -> Line -> Khách hàng -> Hiện trạng -> + Thêm mã hàng mới -> Nhập từ file -> Sắp xếp theo */}
-      <div className="px-3 py-2 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center gap-1.5 shrink-0">
+        {/* 2. Năm */}
         <select
           data-testid="st-new-products-year-filter"
           value={yearFilter}
           onChange={(e) => setYearFilter(e.target.value)}
           aria-label="Lọc theo Năm"
-          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          className="h-9 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer shrink-0"
         >
           <option value="ALL">Tất cả Năm</option>
           {availableYears.map((yr) => (
@@ -389,12 +386,13 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           ))}
         </select>
 
+        {/* 3. Tháng */}
         <select
           data-testid="st-new-products-month-filter"
           value={monthFilter}
           onChange={(e) => setMonthFilter(e.target.value)}
           aria-label="Lọc theo Tháng"
-          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          className="h-9 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer shrink-0"
         >
           <option value="ALL">Tất cả Tháng</option>
           {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
@@ -404,11 +402,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           ))}
         </select>
 
+        {/* 4. Line */}
         <select
           value={lineFilter}
           onChange={(e) => setLineFilter(e.target.value)}
           aria-label="Lọc theo Line"
-          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          className="h-9 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer max-w-[104px] shrink-0"
         >
           <option value="ALL">Tất cả Line</option>
           {lineNames.map((name) => (
@@ -418,13 +417,14 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           ))}
         </select>
 
+        {/* 5. Khách hàng */}
         <select
           value={customerFilter}
           onChange={(e) => setCustomerFilter(e.target.value)}
           aria-label="Lọc theo Khách hàng"
-          className="h-8 px-1.5 text-[11.5px] font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer max-w-[122px]"
+          className="h-9 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer min-w-[96px] max-w-[114px] shrink-0"
         >
-          <option value="ALL">Tất cả Khách hàng</option>
+          <option value="ALL">Tất cả KH</option>
           {customerNames.map((name) => (
             <option key={name} value={name}>
               {name}
@@ -432,12 +432,13 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           ))}
         </select>
 
-        <div className="inline-flex items-center gap-0.5 p-0.5 bg-white border border-slate-300 rounded-lg shrink-0">
+        {/* 6. Hiện trạng */}
+        <div className="h-9 inline-flex items-center gap-0.5 p-0.5 bg-white border border-slate-300 rounded-lg shrink-0">
           <button
             type="button"
             data-testid="st-status-filter-all"
             onClick={() => setStatusFilter('all')}
-            className={`h-7 px-1.5 rounded-md text-[11.5px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-full px-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
               statusFilter === 'all'
                 ? 'bg-[#14539E] text-white'
                 : 'text-slate-600 hover:text-slate-900'
@@ -449,7 +450,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             type="button"
             data-testid="st-status-filter-completed"
             onClick={() => setStatusFilter('completed')}
-            className={`h-7 px-1.5 rounded-md text-[11.5px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-full px-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
               statusFilter === 'completed'
                 ? 'bg-emerald-600 text-white'
                 : 'text-slate-600 hover:text-slate-900'
@@ -461,7 +462,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             type="button"
             data-testid="st-status-filter-in_progress"
             onClick={() => setStatusFilter('in_progress')}
-            className={`h-7 px-1.5 rounded-md text-[11.5px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+            className={`h-full px-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
               statusFilter === 'in_progress'
                 ? 'bg-amber-600 text-white'
                 : 'text-slate-600 hover:text-slate-900'
@@ -471,26 +472,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           </button>
         </div>
 
-        <button
-          type="button"
-          data-testid="st-new-products-add-btn"
-          onClick={() => setIsQuickCreateOpen(true)}
-          className="h-8 px-2.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-[11.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Thêm mã hàng mới</span>
-        </button>
-
-        <button
-          type="button"
-          data-testid="st-new-products-import-btn"
-          onClick={() => setIsProgressImportOpen(true)}
-          className="h-8 px-2 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-[11.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5" />
-          <span>Nhập từ file</span>
-        </button>
-
+        {/* 7. Icon-only Sắp xếp theo */}
         <div className="relative shrink-0" ref={sortMenuRef}>
           <button
             type="button"
@@ -498,23 +480,22 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             onClick={() => setIsSortMenuOpen((prev) => !prev)}
             aria-haspopup="menu"
             aria-expanded={isSortMenuOpen}
-            title={`Đang sắp xếp: ${activeSortOption.label}`}
-            className="h-8 px-2 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E] text-[11.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+            aria-label="Sắp xếp theo"
+            title={`Sắp xếp theo (${activeSortOption.label})`}
+            className={`w-9 h-9 rounded-lg border text-xs font-medium inline-flex items-center justify-center cursor-pointer transition-colors shrink-0 ${
+              isSortMenuOpen
+                ? 'border-[#14539E] bg-blue-50 text-[#14539E]'
+                : 'border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E]'
+            }`}
           >
-            <ArrowUpDown className="w-3.5 h-3.5" />
-            <span>Sắp xếp theo</span>
-            <ChevronDown
-              className={`w-3.5 h-3.5 transition-transform ${
-                isSortMenuOpen ? 'rotate-180' : ''
-              }`}
-            />
+            <ArrowUpDown className="w-4 h-4" />
           </button>
 
           {isSortMenuOpen && (
             <div
               role="menu"
               data-testid="st-new-products-sort-menu"
-              className="absolute left-0 xl:left-auto xl:right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30"
+              className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30"
             >
               <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Sắp xếp danh sách
@@ -532,7 +513,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       setSortMode(opt.value);
                       setIsSortMenuOpen(false);
                     }}
-                    className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                    className={`w-full px-3 py-2 text-left text-xs font-medium flex items-center justify-between gap-2 cursor-pointer transition-colors ${
                       active
                         ? 'bg-blue-50/80 text-[#14539E] font-semibold'
                         : 'text-slate-700 hover:bg-slate-50'
@@ -546,6 +527,17 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             </div>
           )}
         </div>
+
+        {/* 8. + Thêm mã hàng mới (far right) */}
+        <button
+          type="button"
+          data-testid="st-new-products-add-btn"
+          onClick={() => setIsQuickCreateOpen(true)}
+          className="ml-auto h-9 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Thêm mã hàng mới</span>
+        </button>
       </div>
 
       {/* 3. Read-Only 12-Column Table (`st_new_product_status` joined with `st_products`) */}
@@ -607,7 +599,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                 <th className="sticky left-[80px] z-20 bg-slate-100 px-1.5 py-2.5 min-w-[82px] border-r border-b border-slate-200 whitespace-nowrap">
                   MÃ HÀNG
                 </th>
-                <th className="px-1.5 py-2.5 w-[86px] max-w-[92px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1.5 py-2.5 w-[64px] max-w-[68px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   QUY CÁCH
                 </th>
                 <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
@@ -691,7 +683,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     {/* 4. Quy cách (từ st_products) */}
                     <td
                       title={p.specification || undefined}
-                      className="px-1.5 py-2 border-r border-slate-100 text-[11.5px] text-slate-600 max-w-[92px] truncate"
+                      className="px-1.5 py-2 border-r border-slate-100 text-[11.5px] text-slate-600 max-w-[68px] truncate"
                     >
                       {p.specification || '—'}
                     </td>
@@ -1466,6 +1458,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           onProductAndStatusCreated?.(product, status);
         }}
         onRefresh={onRefresh}
+        onOpenImport={() => setIsProgressImportOpen(true)}
         onShowToast={onShowToast}
       />
     </div>
