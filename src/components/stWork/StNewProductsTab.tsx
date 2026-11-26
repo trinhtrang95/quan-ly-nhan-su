@@ -15,12 +15,15 @@ import {
 } from 'lucide-react';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
+  buildSingleStageInitialState,
+  buildSingleStageStatusPayload,
   calculateCompletionDays,
   computeNewProductStatusCounts,
   computeStagesProgress,
   extractAvailableYearsFromNewProducts,
   filterNewProductsList,
   formatNumberVN,
+  formatStageBadgeTooltip,
   formatStDateVN,
   getLocalIsoDateToday,
   getPendingWorkflowStep,
@@ -33,6 +36,7 @@ import {
   StNewProductSortMode,
   StNewProductStatus,
   StProduct,
+  StProductionStageMeta,
   StProductWithStatus,
   StStageBoolField,
   StStageDateField,
@@ -157,6 +161,15 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
 
   // Modal D: 2-in-1 Quick Create Product + Initial Status
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState<boolean>(false);
+
+  // Modal E: Single-Stage Mini Modal (triggered by clicking WIN..FIN badge)
+  const [singleStageTarget, setSingleStageTarget] = useState<{
+    item: StProductWithStatus;
+    stage: StProductionStageMeta;
+  } | null>(null);
+  const [singleStageDone, setSingleStageDone] = useState<boolean>(false);
+  const [singleStageDate, setSingleStageDate] = useState<string>('');
+  const [isSavingSingleStage, setIsSavingSingleStage] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isSortMenuOpen) return;
@@ -333,6 +346,50 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
       setIsSavingMini(false);
+    }
+  };
+
+  const handleOpenSingleStageModal = (
+    item: StProductWithStatus,
+    stage: StProductionStageMeta
+  ) => {
+    const initial = buildSingleStageInitialState(item.status, stage);
+    setSingleStageTarget({ item, stage });
+    setSingleStageDone(initial.done);
+    setSingleStageDate(initial.date);
+  };
+
+  const handleCloseSingleStageModal = () => {
+    if (isSavingSingleStage) return;
+    setSingleStageTarget(null);
+  };
+
+  const handleSaveSingleStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!singleStageTarget || isSavingSingleStage) return;
+
+    const { item, stage } = singleStageTarget;
+    setIsSavingSingleStage(true);
+    try {
+      const payload = buildSingleStageStatusPayload(
+        item,
+        stage,
+        singleStageDone,
+        singleStageDate
+      );
+      const savedStatus = await upsertStNewProductStatus(payload);
+      onStatusUpdated(savedStatus);
+      await onRefresh();
+      onShowToast?.(
+        singleStageDone
+          ? `Đã cập nhật hoàn thành công đoạn ${stage.code} cho mã "${item.product.product_code}".`
+          : `Đã đặt lại trạng thái chưa hoàn thành công đoạn ${stage.code} cho mã "${item.product.product_code}".`
+      );
+      setSingleStageTarget(null);
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setIsSavingSingleStage(false);
     }
   };
 
@@ -726,27 +783,30 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                             nextPendingStageKey === stage.key;
 
                           const badgeClass = done
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-400'
                             : isCurrentNext
-                            ? 'bg-amber-50 border-amber-400 text-amber-700'
-                            : 'bg-slate-50 border-slate-200 text-slate-400';
+                            ? 'bg-amber-50 border-amber-400 text-amber-700 hover:bg-amber-100 hover:border-amber-500'
+                            : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100 hover:border-slate-300 hover:text-slate-600';
 
-                          const tooltipText = done
-                            ? `${stage.fullLabel}: Hoàn thành${
-                                doneDate ? ` (${formatStDateVN(doneDate)})` : ''
-                              }`
-                            : isCurrentNext
-                            ? `${stage.fullLabel}: Đang thực hiện`
-                            : `${stage.fullLabel}: Chưa thực hiện`;
+                          const tooltipText = formatStageBadgeTooltip(
+                            stage,
+                            done,
+                            doneDate,
+                            isCurrentNext
+                          );
 
                           return (
                             <React.Fragment key={stage.key}>
-                              <span
+                              <button
+                                type="button"
+                                data-testid={`st-stage-btn-${p.product_code}-${stage.key}`}
+                                onClick={() => handleOpenSingleStageModal(item, stage)}
                                 title={tooltipText}
-                                className={`inline-flex items-center justify-center px-1 py-0.5 rounded border font-mono text-[9px] font-semibold leading-none whitespace-nowrap select-none ${badgeClass}`}
+                                aria-label={`${p.product_code}: ${tooltipText}`}
+                                className={`inline-flex items-center justify-center px-1 py-0.5 rounded border font-mono text-[9px] font-semibold leading-none whitespace-nowrap select-none cursor-pointer transition-all hover:-translate-y-px hover:shadow-xs focus:outline-none focus:ring-1 focus:ring-[#14539E] ${badgeClass}`}
                               >
                                 {stage.code}
-                              </span>
+                              </button>
                               {idx < ST_PRODUCTION_STAGES.length - 1 && (
                                 <span
                                   aria-hidden="true"
@@ -1146,6 +1206,136 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     <Check className="w-3.5 h-3.5" />
                   )}
                   <span>Lưu tiến độ</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
+
+      {/* MODAL E: Single-Stage Mini Modal (WIN / CUT / SOL / ASS / IMP / SOL2 / FIN) */}
+      {singleStageTarget && (() => {
+        const { item, stage } = singleStageTarget;
+        const sp = item.product;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Cập nhật công đoạn ${stage.fullLabel} cho ${sp.product_code}`}
+            onClick={handleCloseSingleStageModal}
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          >
+            <form
+              data-testid="st-single-stage-modal"
+              onSubmit={handleSaveSingleStage}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-2 bg-slate-50/80">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-sm font-bold text-[#14539E]">
+                      {sp.product_code}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-[#14539E] font-mono text-[11px] font-bold">
+                      {stage.fullLabel}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                    {sp.product_name}
+                    {sp.specification ? ` · ${sp.specification}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSavingSingleStage}
+                  onClick={handleCloseSingleStageModal}
+                  aria-label="Đóng cửa sổ cập nhật công đoạn"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 inline-flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-4 space-y-3 text-xs">
+                <label
+                  className={`rounded-lg border px-3 py-2.5 flex items-center gap-2.5 font-semibold cursor-pointer transition-colors ${
+                    singleStageDone
+                      ? 'bg-emerald-50/60 border-emerald-200 text-slate-900'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    data-testid="st-single-stage-check"
+                    checked={singleStageDone}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSingleStageDone(checked);
+                      setSingleStageDate((prev) =>
+                        checked ? prev || getLocalIsoDateToday() : ''
+                      );
+                    }}
+                    className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
+                  />
+                  <span>Đã hoàn thành công đoạn này</span>
+                </label>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label
+                      htmlFor="st-single-stage-date-input"
+                      className="font-semibold text-slate-700"
+                    >
+                      Ngày hoàn thành
+                    </label>
+                    <span
+                      data-testid="st-single-stage-date-vn"
+                      className="font-mono text-[11px] font-medium text-slate-500"
+                    >
+                      {singleStageDate ? formatStDateVN(singleStageDate) : '—'}
+                    </span>
+                  </div>
+                  <input
+                    id="st-single-stage-date-input"
+                    type="date"
+                    lang="vi"
+                    data-testid="st-single-stage-date"
+                    value={singleStageDate}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSingleStageDate(val);
+                      if (val) setSingleStageDone(true);
+                    }}
+                    className="w-full h-9 px-2.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                  />
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingSingleStage}
+                  onClick={handleCloseSingleStageModal}
+                  className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer hover:bg-slate-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSingleStage}
+                  data-testid="st-single-stage-save-btn"
+                  className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingSingleStage ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>Lưu</span>
                 </button>
               </div>
             </form>

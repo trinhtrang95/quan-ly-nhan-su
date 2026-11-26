@@ -1595,3 +1595,82 @@ export function sortNewProductsList(
   return copy;
 }
 
+export function formatStageBadgeTooltip(
+  stage: StProductionStageMeta,
+  done: boolean,
+  doneDate: string | null | undefined,
+  isCurrentNext: boolean
+): string {
+  if (done) {
+    return `${stage.name} (${stage.code}) - Hoàn thành${
+      doneDate ? `: ${formatStDateVN(doneDate)}` : ''
+    }`;
+  }
+  return `${stage.name} (${stage.code}) - ${
+    isCurrentNext ? 'Đang chờ' : 'Chưa thực hiện'
+  }`;
+}
+
+export function buildSingleStageInitialState(
+  status: StNewProductStatus | null | undefined,
+  stage: StProductionStageMeta,
+  todayIso: string = getLocalIsoDateToday()
+): { done: boolean; date: string } {
+  const existingDone = Boolean(status?.[stage.boolField]);
+  const existingDate = toIsoDateOnly(status?.[stage.dateField]);
+  if (existingDone) {
+    return {
+      done: true,
+      date: existingDate || todayIso,
+    };
+  }
+  return {
+    done: true,
+    date: todayIso,
+  };
+}
+
+export function buildSingleStageStatusPayload(
+  item: StProductWithStatus,
+  stage: StProductionStageMeta,
+  done: boolean,
+  dateIso: string,
+  fallbackTodayIso: string = getLocalIsoDateToday()
+) {
+  const st = item.status;
+  const cleanDate = done
+    ? toIsoDateOnly(dateIso) || fallbackTodayIso
+    : null;
+
+  const base = {
+    id: st?.id || null,
+    product_id: item.product.id,
+    has_process_erp: Boolean(st?.has_process_erp),
+    process_erp_date: st?.process_erp_date || null,
+    has_stage_win: Boolean(st?.has_stage_win),
+    stage_win_date: st?.stage_win_date || null,
+    has_stage_cut: Boolean(st?.has_stage_cut),
+    stage_cut_date: st?.stage_cut_date || null,
+    has_stage_sol: Boolean(st?.has_stage_sol),
+    stage_sol_date: st?.stage_sol_date || null,
+    has_stage_ass: Boolean(st?.has_stage_ass),
+    stage_ass_date: st?.stage_ass_date || null,
+    has_stage_imp: Boolean(st?.has_stage_imp),
+    stage_imp_date: st?.stage_imp_date || null,
+    has_stage_sol2: Boolean(st?.has_stage_sol2),
+    stage_sol2_date: st?.stage_sol2_date || null,
+    has_stage_fin: Boolean(st?.has_stage_fin),
+    stage_fin_date: st?.stage_fin_date || null,
+    has_st: Boolean(st?.has_st),
+    st_date: st?.st_date || null,
+    unit_price: st?.unit_price ?? null,
+    currency: st?.currency || 'VND',
+    notes: st?.notes || null,
+  };
+
+  return {
+    ...base,
+    [stage.boolField]: done,
+    [stage.dateField]: cleanDate,
+  };
+}

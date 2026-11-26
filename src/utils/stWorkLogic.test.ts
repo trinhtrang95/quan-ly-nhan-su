@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyRealtimeStRow,
+  buildSingleStageInitialState,
+  buildSingleStageStatusPayload,
   calculateCompletionDays,
   computeNewProductStatusCounts,
   computeStagesProgress,
@@ -10,6 +12,7 @@ import {
   encodeStepsIntoNotes,
   extractAvailableYearsFromNewProducts,
   filterNewProductsList,
+  formatStageBadgeTooltip,
   getNewProductWaitingLabel,
   getPendingWorkflowStep,
   isNewProductCompleted,
@@ -20,6 +23,7 @@ import {
   resolveOverviewPeriodRange,
   resolveReportPeriodRange,
   sortNewProductsList,
+  ST_PRODUCTION_STAGES,
   type StChangeRequest,
   type StCustomerQuote,
   type StNewProductStatus,
@@ -787,5 +791,100 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
       ['CODE-A', 'CODE-B', 'CODE-C']
     );
   });
+
+  it('single-stage modal helpers pre-fill uncompleted stages, preserve sibling fields, and format tooltips', () => {
+    const winStage = ST_PRODUCTION_STAGES[0];
+    const solStage = ST_PRODUCTION_STAGES[2];
+
+    assert.equal(
+      formatStageBadgeTooltip(winStage, false, null, true),
+      'WINDING (WIN) - Đang chờ'
+    );
+    assert.equal(
+      formatStageBadgeTooltip(solStage, true, '2026-11-26', false),
+      'SOLDER (SOL) - Hoàn thành: 26/11/2026'
+    );
+
+    const product: StProduct = {
+      id: 'p-single',
+      line_name: 'S',
+      customer_short_name: 'KH',
+      product_name: 'SP Single',
+      product_code: 'ST-SINGLE',
+      specification: 'SPEC-1',
+      image_url: null,
+      created_at: '2026-11-20T00:00:00Z',
+      updated_at: '2026-11-20T00:00:00Z',
+    };
+    const partialStatus = buildFullCompletedStatus({
+      id: 'st-single',
+      product_id: 'p-single',
+      has_process_erp: true,
+      process_erp_date: '2026-11-20',
+      has_stage_win: true,
+      stage_win_date: '2026-11-21',
+      has_stage_cut: false,
+      stage_cut_date: null,
+      has_stage_sol: false,
+      stage_sol_date: null,
+      has_stage_ass: false,
+      stage_ass_date: null,
+      has_stage_imp: false,
+      stage_imp_date: null,
+      has_stage_sol2: false,
+      stage_sol2_date: null,
+      has_stage_fin: false,
+      stage_fin_date: null,
+      has_st: false,
+      st_date: null,
+      notes: 'Giữ nguyên ghi chú',
+    });
+
+    const uncompletedInit = buildSingleStageInitialState(
+      partialStatus,
+      solStage,
+      '2026-11-26'
+    );
+    assert.deepEqual(uncompletedInit, { done: true, date: '2026-11-26' });
+
+    const completedInit = buildSingleStageInitialState(
+      partialStatus,
+      winStage,
+      '2026-11-26'
+    );
+    assert.deepEqual(completedInit, { done: true, date: '2026-11-21' });
+
+    const [item] = mergeProductsWithStatus([product], [partialStatus]);
+    const saveSolPayload = buildSingleStageStatusPayload(
+      item,
+      solStage,
+      true,
+      '2026-11-26',
+      '2026-11-26'
+    );
+    assert.equal(saveSolPayload.has_stage_win, true);
+    assert.equal(saveSolPayload.stage_win_date, '2026-11-21');
+    assert.equal(saveSolPayload.has_stage_sol, true);
+    assert.equal(saveSolPayload.stage_sol_date, '2026-11-26');
+    assert.equal(saveSolPayload.notes, 'Giữ nguyên ghi chú');
+    assert.equal(
+      computeStagesProgress({
+        ...saveSolPayload,
+        id: saveSolPayload.id || undefined,
+      }).percentage,
+      29
+    );
+
+    const clearWinPayload = buildSingleStageStatusPayload(
+      item,
+      winStage,
+      false,
+      '',
+      '2026-11-26'
+    );
+    assert.equal(clearWinPayload.has_stage_win, false);
+    assert.equal(clearWinPayload.stage_win_date, null);
+  });
 });
+
 
