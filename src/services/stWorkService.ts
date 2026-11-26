@@ -1,5 +1,7 @@
 import { getOvertimeSupabaseClient, overtimeSupabase } from './supabaseClient';
 import {
+  encodeStepsIntoNotes,
+  isNewProductCompleted,
   normalizeStChangeRequestRow,
   normalizeStCustomerQuoteRow,
   normalizeStCustomerRow,
@@ -327,24 +329,64 @@ export async function createStProduct(input: {
   if (Array.isArray(existingStatusRows) && existingStatusRows[0]) {
     createdStatus = normalizeStNewProductStatusRow(existingStatusRows[0]);
   } else {
-    const statusRows = await overtimeSupabase.request<
-      Record<string, unknown>[]
-    >('st_new_product_status?select=*', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        product_id: createdProduct.id,
-        has_process: false,
-        process_created_at: null,
-        has_unit_price: false,
-        unit_price: null,
-        currency: 'VND',
-        price_created_at: null,
-        price_applied_at: null,
-        notes: null,
-        updated_at: nowIso,
-      }),
-    });
+    const baseLegacyPayload = {
+      product_id: createdProduct.id,
+      has_process: false,
+      process_created_at: null,
+      has_unit_price: false,
+      unit_price: null,
+      currency: 'VND',
+      price_created_at: null,
+      price_applied_at: null,
+      notes: null,
+      updated_at: nowIso,
+    };
+
+    let statusRows: Record<string, unknown>[] = [];
+    if (supportsNativeSixStepColumns !== false) {
+      try {
+        statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
+          'st_new_product_status?select=*',
+          {
+            method: 'POST',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({
+              ...baseLegacyPayload,
+              has_quote: false,
+              quote_date: null,
+              has_bom_erp: false,
+              bom_erp_date: null,
+              has_spec_erp: false,
+              spec_erp_date: null,
+              has_khsx: false,
+              khsx_date: null,
+              has_process_erp: false,
+              process_erp_date: null,
+              has_st: false,
+              st_date: null,
+            }),
+          }
+        );
+        supportsNativeSixStepColumns = true;
+      } catch (err) {
+        if (isMissingSixStepColumnError(err)) {
+          supportsNativeSixStepColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (supportsNativeSixStepColumns === false) {
+      statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
+        'st_new_product_status?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(baseLegacyPayload),
+        }
+      );
+    }
 
     if (Array.isArray(statusRows) && statusRows[0]) {
       createdStatus = normalizeStNewProductStatusRow(statusRows[0]);
@@ -357,6 +399,18 @@ export async function createStProduct(input: {
       createdStatus || {
         id: '',
         product_id: createdProduct.id,
+        has_quote: false,
+        quote_date: null,
+        has_bom_erp: false,
+        bom_erp_date: null,
+        has_spec_erp: false,
+        spec_erp_date: null,
+        has_khsx: false,
+        khsx_date: null,
+        has_process_erp: false,
+        process_erp_date: null,
+        has_st: false,
+        st_date: null,
         has_process: false,
         process_created_at: null,
         has_unit_price: false,
@@ -431,24 +485,64 @@ export async function deleteStProduct(id: string): Promise<void> {
 // 4. ST NEW PRODUCT STATUS (`st_new_product_status`)
 // ==========================================
 
-export async function upsertStNewProductStatus(input: {
+let supportsNativeSixStepColumns: boolean | null = null;
+
+function isMissingSixStepColumnError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return (
+    msg.includes('42703') ||
+    msg.includes('PGRST204') ||
+    msg.includes('does not exist') ||
+    msg.includes('Could not find the')
+  );
+}
+
+export interface UpsertStNewProductStatusInput {
   id?: string | null;
   product_id: string;
-  has_process: boolean;
-  process_created_at: string | null;
-  has_unit_price: boolean;
-  unit_price: number | null;
+  has_quote: boolean;
+  quote_date: string | null;
+  has_bom_erp: boolean;
+  bom_erp_date: string | null;
+  has_spec_erp: boolean;
+  spec_erp_date: string | null;
+  has_khsx: boolean;
+  khsx_date: string | null;
+  has_process_erp: boolean;
+  process_erp_date: string | null;
+  has_st: boolean;
+  st_date: string | null;
+  unit_price?: number | null;
   currency?: string;
-  price_created_at: string | null;
-  price_applied_at: string | null;
   notes: string | null;
-}): Promise<StNewProductStatus> {
+}
+
+export async function upsertStNewProductStatus(
+  input: UpsertStNewProductStatusInput
+): Promise<StNewProductStatus> {
   const nowIso = new Date().toISOString();
-  const payload = {
+  const sixStepValues = {
+    has_quote: Boolean(input.has_quote),
+    quote_date: input.quote_date || null,
+    has_bom_erp: Boolean(input.has_bom_erp),
+    bom_erp_date: input.bom_erp_date || null,
+    has_spec_erp: Boolean(input.has_spec_erp),
+    spec_erp_date: input.spec_erp_date || null,
+    has_khsx: Boolean(input.has_khsx),
+    khsx_date: input.khsx_date || null,
+    has_process_erp: Boolean(input.has_process_erp),
+    process_erp_date: input.process_erp_date || null,
+    has_st: Boolean(input.has_st),
+    st_date: input.st_date || null,
+  };
+  const completed = isNewProductCompleted(sixStepValues);
+  const cleanUserNotes = input.notes?.trim() || null;
+
+  const legacyBasePayload = {
     product_id: input.product_id,
-    has_process: Boolean(input.has_process),
-    process_created_at: input.process_created_at || null,
-    has_unit_price: Boolean(input.has_unit_price),
+    has_process: Boolean(sixStepValues.has_process_erp),
+    process_created_at: sixStepValues.process_erp_date || null,
+    has_unit_price: Boolean(sixStepValues.has_quote),
     unit_price:
       input.unit_price !== null &&
       input.unit_price !== undefined &&
@@ -456,10 +550,20 @@ export async function upsertStNewProductStatus(input: {
         ? Number(input.unit_price)
         : null,
     currency: (input.currency || 'VND').trim() || 'VND',
-    price_created_at: input.price_created_at || null,
-    price_applied_at: input.price_applied_at || null,
-    notes: input.notes?.trim() || null,
+    price_created_at: sixStepValues.quote_date || null,
+    price_applied_at: completed ? sixStepValues.st_date || null : null,
     updated_at: nowIso,
+  };
+
+  const nativePayload = {
+    ...legacyBasePayload,
+    ...sixStepValues,
+    notes: cleanUserNotes,
+  };
+
+  const fallbackPayload = {
+    ...legacyBasePayload,
+    notes: encodeStepsIntoNotes(cleanUserNotes, sixStepValues),
   };
 
   let targetId = input.id || '';
@@ -474,32 +578,50 @@ export async function upsertStNewProductStatus(input: {
     }
   }
 
-  if (targetId) {
-    const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
-      `st_new_product_status?id=eq.${encodeURIComponent(targetId)}&select=*`,
+  const sendSave = async (bodyPayload: Record<string, unknown>) => {
+    if (targetId) {
+      const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+        `st_new_product_status?id=eq.${encodeURIComponent(targetId)}&select=*`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(bodyPayload),
+        }
+      );
+      if (Array.isArray(rows) && rows[0]) {
+        return normalizeStNewProductStatusRow(rows[0]);
+      }
+    }
+
+    const inserted = await overtimeSupabase.request<Record<string, unknown>[]>(
+      'st_new_product_status?select=*',
       {
-        method: 'PATCH',
+        method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(bodyPayload),
       }
     );
-    if (Array.isArray(rows) && rows[0]) {
-      return normalizeStNewProductStatusRow(rows[0]);
+    if (!Array.isArray(inserted) || !inserted[0]) {
+      throw new Error('Không thể lưu trạng thái Mã hàng mới.');
+    }
+    return normalizeStNewProductStatusRow(inserted[0]);
+  };
+
+  if (supportsNativeSixStepColumns !== false) {
+    try {
+      const saved = await sendSave(nativePayload);
+      supportsNativeSixStepColumns = true;
+      return saved;
+    } catch (err) {
+      if (isMissingSixStepColumnError(err)) {
+        supportsNativeSixStepColumns = false;
+      } else {
+        throw err;
+      }
     }
   }
 
-  const inserted = await overtimeSupabase.request<Record<string, unknown>[]>(
-    'st_new_product_status?select=*',
-    {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify(payload),
-    }
-  );
-  if (!Array.isArray(inserted) || !inserted[0]) {
-    throw new Error('Không thể lưu trạng thái Mã hàng mới.');
-  }
-  return normalizeStNewProductStatusRow(inserted[0]);
+  return sendSave(fallbackPayload);
 }
 
 // ==========================================

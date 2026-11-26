@@ -283,22 +283,23 @@ export function buildStReportWorkbook(
     { key: 'customer', width: 16 },
     { key: 'code', width: 20 },
     { key: 'name', width: 26 },
-    { key: 'spec', width: 24 },
-    { key: 'registered', width: 15 },
-    { key: 'hasProcess', width: 14 },
-    { key: 'processDate', width: 17 },
-    { key: 'unitPrice', width: 16 },
-    { key: 'priceCreated', width: 17 },
-    { key: 'priceApplied', width: 18 },
+    { key: 'spec', width: 22 },
+    { key: 'registered', width: 14 },
+    { key: 'quote', width: 14 },
+    { key: 'bomErp', width: 14 },
+    { key: 'specErp', width: 14 },
+    { key: 'khsx', width: 14 },
+    { key: 'processErp', width: 15 },
+    { key: 'st', width: 14 },
     { key: 'days', width: 17 },
     { key: 'status', width: 22 },
     { key: 'notes', width: 28 },
   ];
   styleTitleBanner(
     productsSheet,
-    'CHI TIẾT THEO DÕI MÃ HÀNG MỚI (HOÀN THÀNH & DỞ DANG)',
+    'CHI TIẾT THEO DÕI MÃ HÀNG MỚI (DẢI TUẦN TỰ 6 BƯỚC)',
     subtitle,
-    15
+    16
   );
   styleHeaderRow(productsSheet, 3, [
     'STT',
@@ -308,13 +309,14 @@ export function buildStReportWorkbook(
     'Tên hàng',
     'Quy cách',
     'Ngày đăng ký',
-    'Có quy trình',
-    'Ngày tạo quy trình',
-    'Đơn giá',
-    'Ngày tạo đơn giá',
-    'Ngày áp dụng đơn giá',
+    'Báo giá',
+    'BOM ERP',
+    'SPEC ERP',
+    'KHSX',
+    'Quy trình ERP',
+    'ST',
     'Số ngày hoàn thành',
-    'Trạng thái',
+    'Trạng thái hiện tại',
     'Ghi chú',
   ]);
 
@@ -323,16 +325,38 @@ export function buildStReportWorkbook(
     return (b.product.created_at || '').localeCompare(a.product.created_at || '');
   });
 
+  const formatStepCell = (
+    item: StProductWithStatus,
+    boolKey:
+      | 'has_quote'
+      | 'has_bom_erp'
+      | 'has_spec_erp'
+      | 'has_khsx'
+      | 'has_process_erp'
+      | 'has_st',
+    dateKey:
+      | 'quote_date'
+      | 'bom_erp_date'
+      | 'spec_erp_date'
+      | 'khsx_date'
+      | 'process_erp_date'
+      | 'st_date',
+    stepKey: string
+  ): string => {
+    const st = item.status;
+    if (st?.[boolKey]) {
+      return st[dateKey] ? formatStDateVN(st[dateKey]) : 'Đã xong';
+    }
+    if (item.currentWaitingStep === stepKey) {
+      return 'Đang chờ';
+    }
+    return '—';
+  };
+
   let productRowIdx = 4;
   sortedProducts.forEach((item, index) => {
     const excelRow = productsSheet.getRow(productRowIdx);
     const st = item.status;
-    const statusText =
-      item.progressCategory === 'completed'
-        ? 'Hoàn thành SX đại trà'
-        : item.progressCategory === 'pending_price'
-        ? 'Đã có quy trình - Chờ đơn giá'
-        : 'Đang dở dang (Chưa tạo quy trình)';
 
     excelRow.getCell(1).value = index + 1;
     excelRow.getCell(2).value = item.product.line_name;
@@ -341,28 +365,29 @@ export function buildStReportWorkbook(
     excelRow.getCell(5).value = item.product.product_name;
     excelRow.getCell(6).value = item.product.specification || '';
     excelRow.getCell(7).value = formatStDateVN(item.product.created_at);
-    excelRow.getCell(8).value = st?.has_process ? 'Đã tạo' : 'Chưa tạo';
-    excelRow.getCell(9).value = formatStDateVN(st?.process_created_at);
-    excelRow.getCell(10).value =
-      st?.unit_price !== null && st?.unit_price !== undefined
-        ? Number(st.unit_price)
-        : null;
-    excelRow.getCell(11).value = formatStDateVN(st?.price_created_at);
-    excelRow.getCell(12).value = formatStDateVN(st?.price_applied_at);
-    excelRow.getCell(13).value =
+    excelRow.getCell(8).value = formatStepCell(item, 'has_quote', 'quote_date', 'quote');
+    excelRow.getCell(9).value = formatStepCell(item, 'has_bom_erp', 'bom_erp_date', 'bom_erp');
+    excelRow.getCell(10).value = formatStepCell(item, 'has_spec_erp', 'spec_erp_date', 'spec_erp');
+    excelRow.getCell(11).value = formatStepCell(item, 'has_khsx', 'khsx_date', 'khsx');
+    excelRow.getCell(12).value = formatStepCell(item, 'has_process_erp', 'process_erp_date', 'process_erp');
+    excelRow.getCell(13).value = formatStepCell(item, 'has_st', 'st_date', 'st');
+    excelRow.getCell(14).value =
       item.completionDays !== null ? item.completionDays : null;
-    excelRow.getCell(14).value = statusText;
-    excelRow.getCell(15).value = st?.notes || '';
+    excelRow.getCell(15).value = item.waitingLabel;
+    excelRow.getCell(16).value = st?.notes || '';
 
-    applyDataRowBorderAndFont(excelRow, 15, [1, 10, 13]);
+    applyDataRowBorderAndFont(excelRow, 16, [1, 14]);
     excelRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
+    for (let c = 8; c <= 13; c++) {
+      excelRow.getCell(c).alignment = { vertical: 'middle', horizontal: 'center' };
+    }
     productRowIdx += 1;
   });
 
   const productLastDataRow = Math.max(3, productRowIdx - 1);
   productsSheet.autoFilter = {
     from: { row: 3, column: 1 },
-    to: { row: productLastDataRow, column: 15 },
+    to: { row: productLastDataRow, column: 16 },
   };
 
   const completedTotal = sortedProducts.filter((p) => p.isCompleted).length;
@@ -371,16 +396,12 @@ export function buildStReportWorkbook(
   productTotalRow.getCell(1).value = '';
   productTotalRow.getCell(2).value = 'Tổng cộng';
   productTotalRow.getCell(4).value = `${sortedProducts.length} mã`;
-  productTotalRow.getCell(10).value =
+  productTotalRow.getCell(14).value =
     sortedProducts.length > 0
-      ? { formula: `SUM(J4:J${productLastDataRow})` }
+      ? { formula: `AVERAGE(N4:N${productLastDataRow})` }
       : 0;
-  productTotalRow.getCell(13).value =
-    sortedProducts.length > 0
-      ? { formula: `AVERAGE(M4:M${productLastDataRow})` }
-      : 0;
-  productTotalRow.getCell(14).value = `Hoàn thành: ${completedTotal} | Dở dang: ${inProgressTotal}`;
-  styleTotalRow(productTotalRow, 15, [10, 13]);
+  productTotalRow.getCell(15).value = `Hoàn thành: ${completedTotal} | Dở dang: ${inProgressTotal}`;
+  styleTotalRow(productTotalRow, 16, [14]);
 
   // ==========================================
   // SHEET 3: Phiếu yêu cầu

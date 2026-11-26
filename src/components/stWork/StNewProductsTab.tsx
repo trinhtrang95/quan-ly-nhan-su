@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ArrowRight,
   Check,
   CheckCircle2,
   Clock,
@@ -9,7 +10,6 @@ import {
   PackageOpen,
   Pencil,
   Plus,
-  Save,
   Search,
   Trash2,
   Upload,
@@ -21,11 +21,16 @@ import {
   formatNumberVN,
   formatStDateVN,
   getLocalIsoDateToday,
+  getPendingWorkflowStep,
+  isNewProductCompleted,
+  ST_WORKFLOW_STEPS,
   StCustomer,
   StLine,
   StNewProductStatus,
   StProduct,
   StProductWithStatus,
+  StWorkflowBoolField,
+  StWorkflowDateField,
 } from '../../utils/stWorkLogic';
 import {
   createStCustomer,
@@ -47,30 +52,37 @@ export interface StNewProductsTabProps {
   onShowToast?: (message: string) => void;
 }
 
-interface ProductStatusDraft {
-  has_process: boolean;
-  process_created_at: string;
-  has_unit_price: boolean;
-  unit_price: string;
-  price_created_at: string;
-  price_applied_at: string;
-  notes: string;
-}
-
 type StatusFilterMode = 'all' | 'completed' | 'in_progress';
 
-function toDraft(status: StNewProductStatus | null): ProductStatusDraft {
+interface ModalStepState {
+  has_quote: boolean;
+  quote_date: string;
+  has_bom_erp: boolean;
+  bom_erp_date: string;
+  has_spec_erp: boolean;
+  spec_erp_date: string;
+  has_khsx: boolean;
+  khsx_date: string;
+  has_process_erp: boolean;
+  process_erp_date: string;
+  has_st: boolean;
+  st_date: string;
+}
+
+function toModalStepState(status: StNewProductStatus | null): ModalStepState {
   return {
-    has_process: Boolean(status?.has_process),
-    process_created_at: status?.process_created_at || '',
-    has_unit_price: Boolean(status?.has_unit_price),
-    unit_price:
-      status?.unit_price !== null && status?.unit_price !== undefined
-        ? String(status.unit_price)
-        : '',
-    price_created_at: status?.price_created_at || '',
-    price_applied_at: status?.price_applied_at || '',
-    notes: status?.notes || '',
+    has_quote: Boolean(status?.has_quote),
+    quote_date: status?.quote_date || '',
+    has_bom_erp: Boolean(status?.has_bom_erp),
+    bom_erp_date: status?.bom_erp_date || '',
+    has_spec_erp: Boolean(status?.has_spec_erp),
+    spec_erp_date: status?.spec_erp_date || '',
+    has_khsx: Boolean(status?.has_khsx),
+    khsx_date: status?.khsx_date || '',
+    has_process_erp: Boolean(status?.has_process_erp),
+    process_erp_date: status?.process_erp_date || '',
+    has_st: Boolean(status?.has_st),
+    st_date: status?.st_date || '',
   };
 }
 
@@ -89,7 +101,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [statusFilter, setStatusFilter] = useState<StatusFilterMode>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Registration bar state (merged Danh mục sản phẩm)
+  // Registration bar state (always visible)
   const [newProdLine, setNewProdLine] = useState<string>('');
   const [newProdCustomer, setNewProdCustomer] = useState<string>('');
   const [newProdName, setNewProdName] = useState<string>('');
@@ -112,29 +124,26 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [quickCustNotes, setQuickCustNotes] = useState<string>('');
   const [isSavingQuickCust, setIsSavingQuickCust] = useState<boolean>(false);
 
-  // Detail modal state (click Mã hàng to inspect full details)
-  const [detailProductId, setDetailProductId] = useState<string | null>(null);
+  // Unified Detail & 6-Step Progress Update Modal state (safe draft, saves only on button click)
+  const [activeModalItem, setActiveModalItem] =
+    useState<StProductWithStatus | null>(null);
+  const [modalLine, setModalLine] = useState<string>('');
+  const [modalCustomer, setModalCustomer] = useState<string>('');
+  const [modalCode, setModalCode] = useState<string>('');
+  const [modalName, setModalName] = useState<string>('');
+  const [modalSpec, setModalSpec] = useState<string>('');
+  const [modalImageUrl, setModalImageUrl] = useState<string>('');
+  const [modalSteps, setModalSteps] = useState<ModalStepState>(() =>
+    toModalStepState(null)
+  );
+  const [modalNotes, setModalNotes] = useState<string>('');
+  const [isUploadingModalImg, setIsUploadingModalImg] = useState<boolean>(false);
+  const [isSavingModal, setIsSavingModal] = useState<boolean>(false);
 
-  // Full edit modal state (product metadata + process/price/notes)
-  const [editingItem, setEditingItem] = useState<StProductWithStatus | null>(null);
-  const [editProdLine, setEditProdLine] = useState<string>('');
-  const [editProdCustomer, setEditProdCustomer] = useState<string>('');
-  const [editProdName, setEditProdName] = useState<string>('');
-  const [editProdCode, setEditProdCode] = useState<string>('');
-  const [editProdSpec, setEditProdSpec] = useState<string>('');
-  const [editProdImageUrl, setEditProdImageUrl] = useState<string>('');
-  const [editHasProcess, setEditHasProcess] = useState<boolean>(false);
-  const [editProcessCreatedAt, setEditProcessCreatedAt] = useState<string>('');
-  const [editHasUnitPrice, setEditHasUnitPrice] = useState<boolean>(false);
-  const [editUnitPrice, setEditUnitPrice] = useState<string>('');
-  const [editPriceCreatedAt, setEditPriceCreatedAt] = useState<string>('');
-  const [editPriceAppliedAt, setEditPriceAppliedAt] = useState<string>('');
-  const [editNotes, setEditNotes] = useState<string>('');
-  const [isUploadingEditImg, setIsUploadingEditImg] = useState<boolean>(false);
-  const [isSavingEditProduct, setIsSavingEditProduct] = useState<boolean>(false);
-
-  // Delete confirmation & broken/preview images
-  const [confirmDeleteProdId, setConfirmDeleteProdId] = useState<string | null>(null);
+  // Delete confirmation & image preview/error state
+  const [confirmDeleteProdId, setConfirmDeleteProdId] = useState<string | null>(
+    null
+  );
   const [deletingProdId, setDeletingProdId] = useState<string | null>(null);
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [previewImage, setPreviewImage] = useState<{
@@ -142,29 +151,8 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     title: string;
   } | null>(null);
 
-  // Status inline editing drafts
-  const [drafts, setDrafts] = useState<Record<string, ProductStatusDraft>>({});
-  const [dirtyMap, setDirtyMap] = useState<Record<string, boolean>>({});
-  const [savingMap, setSavingMap] = useState<Record<string, boolean>>({});
-
   const effectiveNewLine = newProdLine || lines[0]?.name || '';
   const effectiveNewCustomer = newProdCustomer || customers[0]?.short_name || '';
-
-  // Sync incoming Supabase/Realtime updates for rows not currently being edited
-  useEffect(() => {
-    setDrafts((prev) => {
-      const next: Record<string, ProductStatusDraft> = {};
-      for (const item of productsWithStatus) {
-        const pid = item.product.id;
-        if (dirtyMap[pid] && prev[pid]) {
-          next[pid] = prev[pid];
-        } else {
-          next[pid] = toDraft(item.status);
-        }
-      }
-      return next;
-    });
-  }, [productsWithStatus, dirtyMap]);
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -225,32 +213,67 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     return Array.from(set);
   }, [customers, productsWithStatus]);
 
-  const detailItem = useMemo(() => {
-    if (!detailProductId) return null;
-    return (
-      productsWithStatus.find((item) => item.product.id === detailProductId) ||
-      null
-    );
-  }, [detailProductId, productsWithStatus]);
+  // Live preview status inside Detail & Stepper Modal
+  const modalLivePreview = useMemo(() => {
+    if (!activeModalItem) {
+      return {
+        isCompleted: false,
+        pendingStep: null,
+        waitingLabel: 'Chờ Báo giá',
+        completionDays: null as number | null,
+      };
+    }
+    const statusCandidate = {
+      ...modalSteps,
+      st_date: modalSteps.st_date || null,
+    };
+    const completed = isNewProductCompleted(statusCandidate);
+    const pendingStep = getPendingWorkflowStep(statusCandidate);
+    const completionDays = completed
+      ? calculateCompletionDays(
+          activeModalItem.product.created_at,
+          modalSteps.st_date
+        )
+      : null;
+
+    return {
+      isCompleted: completed,
+      pendingStep,
+      waitingLabel: pendingStep
+        ? pendingStep.waitingLabel
+        : 'Hoàn thành SX đại trà',
+      completionDays,
+    };
+  }, [activeModalItem, modalSteps]);
 
   // Image upload with client-side compression via stWorkService
   const handleUploadProductImage = async (
     file: File,
-    mode: 'new' | 'edit'
+    mode: 'new' | 'modal'
   ) => {
     if (mode === 'new') setIsUploadingNewImg(true);
-    else setIsUploadingEditImg(true);
+    else setIsUploadingModalImg(true);
 
     try {
       const publicUrl = await uploadImageToHrBucket(file, 'st-products');
-      if (mode === 'new') setNewProdImageUrl(publicUrl);
-      else setEditProdImageUrl(publicUrl);
+      if (mode === 'new') {
+        setNewProdImageUrl(publicUrl);
+      } else {
+        setModalImageUrl(publicUrl);
+        if (activeModalItem) {
+          setBrokenImages((prev) => {
+            const copy = { ...prev };
+            delete copy[activeModalItem.product.id];
+            return copy;
+          });
+        }
+      }
       onShowToast?.('Đã nén và tải ảnh sản phẩm lên hệ thống.');
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
       if (mode === 'new') setIsUploadingNewImg(false);
-      else setIsUploadingEditImg(false);
+      else setIsUploadingModalImg(false);
     }
   };
 
@@ -285,7 +308,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       setNewProdSpec('');
       setNewProdImageUrl('');
       onShowToast?.(
-        `Đã đăng ký mã hàng "${product.product_code}" và tự động khởi tạo dòng theo dõi.`
+        `Đã đăng ký mã hàng "${product.product_code}" và khởi tạo chuỗi 6 bước theo dõi.`
       );
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
@@ -351,82 +374,107 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     }
   };
 
-  // Edit full product & status modal handlers
-  const handleOpenEditProduct = (item: StProductWithStatus) => {
+  // Open unified Detail & 6-Step Progress Update Modal
+  const handleOpenDetailModal = (item: StProductWithStatus) => {
     const p = item.product;
-    const currentDraft = drafts[p.id] || toDraft(item.status);
-    setEditingItem(item);
-    setEditProdLine(p.line_name);
-    setEditProdCustomer(p.customer_short_name);
-    setEditProdName(p.product_name);
-    setEditProdCode(p.product_code);
-    setEditProdSpec(p.specification);
-    setEditProdImageUrl(p.image_url || '');
-    setEditHasProcess(currentDraft.has_process);
-    setEditProcessCreatedAt(currentDraft.process_created_at);
-    setEditHasUnitPrice(currentDraft.has_unit_price);
-    setEditUnitPrice(currentDraft.unit_price);
-    setEditPriceCreatedAt(currentDraft.price_created_at);
-    setEditPriceAppliedAt(currentDraft.price_applied_at);
-    setEditNotes(currentDraft.notes);
+    setActiveModalItem(item);
+    setModalLine(p.line_name);
+    setModalCustomer(p.customer_short_name);
+    setModalCode(p.product_code);
+    setModalName(p.product_name);
+    setModalSpec(p.specification);
+    setModalImageUrl(p.image_url || '');
+    setModalSteps(toModalStepState(item.status));
+    setModalNotes(item.status?.notes || '');
   };
 
-  const handleSaveEditProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingItem) return;
+  const handleCloseDetailModal = () => {
+    if (isSavingModal) return;
+    setActiveModalItem(null);
+  };
 
-    const trimmedPrice = editUnitPrice.trim();
-    const parsedPrice = trimmedPrice === '' ? null : Number(trimmedPrice);
-    if (trimmedPrice !== '' && (Number.isNaN(parsedPrice) || (parsedPrice ?? 0) < 0)) {
-      onShowToast?.('Đơn giá phải là số không âm hợp lệ.');
+  const handleToggleModalStep = (
+    boolField: StWorkflowBoolField,
+    dateField: StWorkflowDateField,
+    checked: boolean
+  ) => {
+    setModalSteps((prev) => ({
+      ...prev,
+      [boolField]: checked,
+      [dateField]: checked ? prev[dateField] || getLocalIsoDateToday() : '',
+    }));
+  };
+
+  const handleChangeModalStepDate = (
+    boolField: StWorkflowBoolField,
+    dateField: StWorkflowDateField,
+    dateVal: string
+  ) => {
+    setModalSteps((prev) => ({
+      ...prev,
+      [dateField]: dateVal,
+      ...(dateVal ? { [boolField]: true } : {}),
+    }));
+  };
+
+  const handleSaveModalUpdates = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeModalItem) return;
+
+    if (!modalLine || !modalCustomer || !modalCode.trim() || !modalName.trim()) {
+      onShowToast?.(
+        'Line, Khách hàng, Mã hàng và Tên hàng không được để trống.'
+      );
       return;
     }
 
-    const pid = editingItem.product.id;
-    setIsSavingEditProduct(true);
+    const pid = activeModalItem.product.id;
+    setIsSavingModal(true);
     try {
       await updateStProduct(pid, {
-        line_name: editProdLine,
-        customer_short_name: editProdCustomer,
-        product_name: editProdName,
-        product_code: editProdCode,
-        specification: editProdSpec,
-        image_url: editProdImageUrl || null,
+        line_name: modalLine,
+        customer_short_name: modalCustomer,
+        product_name: modalName.trim(),
+        product_code: modalCode.trim(),
+        specification: modalSpec.trim(),
+        image_url: modalImageUrl.trim() || null,
       });
 
       const savedStatus = await upsertStNewProductStatus({
-        id: editingItem.status?.id || null,
+        id: activeModalItem.status?.id || null,
         product_id: pid,
-        has_process: editHasProcess,
-        process_created_at: editProcessCreatedAt || null,
-        has_unit_price: editHasUnitPrice,
-        unit_price: parsedPrice,
-        currency: editingItem.status?.currency || 'VND',
-        price_created_at: editPriceCreatedAt || null,
-        price_applied_at: editPriceAppliedAt || null,
-        notes: editNotes.trim() || null,
+        has_quote: modalSteps.has_quote,
+        quote_date: modalSteps.quote_date || null,
+        has_bom_erp: modalSteps.has_bom_erp,
+        bom_erp_date: modalSteps.bom_erp_date || null,
+        has_spec_erp: modalSteps.has_spec_erp,
+        spec_erp_date: modalSteps.spec_erp_date || null,
+        has_khsx: modalSteps.has_khsx,
+        khsx_date: modalSteps.khsx_date || null,
+        has_process_erp: modalSteps.has_process_erp,
+        process_erp_date: modalSteps.process_erp_date || null,
+        has_st: modalSteps.has_st,
+        st_date: modalSteps.st_date || null,
+        unit_price: activeModalItem.status?.unit_price ?? null,
+        currency: activeModalItem.status?.currency || 'VND',
+        notes: modalNotes.trim() || null,
       });
 
-      setDirtyMap((prev) => {
-        const copy = { ...prev };
-        delete copy[pid];
-        return copy;
-      });
-      setDrafts((prev) => ({ ...prev, [pid]: toDraft(savedStatus) }));
       onStatusUpdated(savedStatus);
-
       setBrokenImages((prev) => {
         const next = { ...prev };
         delete next[pid];
         return next;
       });
       await onRefresh();
-      onShowToast?.(`Đã cập nhật thông tin mã hàng "${editProdCode.trim()}".`);
-      setEditingItem(null);
+      onShowToast?.(
+        `Đã lưu cập nhật thông tin & tiến độ mã hàng "${modalCode.trim()}".`
+      );
+      setActiveModalItem(null);
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
-      setIsSavingEditProduct(false);
+      setIsSavingModal(false);
     }
   };
 
@@ -436,6 +484,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       await deleteStProduct(p.id);
       await onRefresh();
       setConfirmDeleteProdId(null);
+      if (activeModalItem?.product.id === p.id) {
+        setActiveModalItem(null);
+      }
       onShowToast?.(`Đã xóa mã hàng "${p.product_code}".`);
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
@@ -444,139 +495,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     }
   };
 
-  // Status inline edit persistence
-  const persistDraft = async (
-    item: StProductWithStatus,
-    overrideDraft?: ProductStatusDraft,
-    toastLabel?: string
-  ) => {
-    const pid = item.product.id;
-    const draft = overrideDraft || drafts[pid] || toDraft(item.status);
-
-    const trimmedPrice = draft.unit_price.trim();
-    const parsedPrice = trimmedPrice === '' ? null : Number(trimmedPrice);
-    if (trimmedPrice !== '' && Number.isNaN(parsedPrice)) {
-      onShowToast?.('Đơn giá phải là số hợp lệ.');
-      return;
-    }
-
-    setSavingMap((prev) => ({ ...prev, [pid]: true }));
-    try {
-      const saved = await upsertStNewProductStatus({
-        id: item.status?.id || null,
-        product_id: pid,
-        has_process: draft.has_process,
-        process_created_at: draft.process_created_at || null,
-        has_unit_price: draft.has_unit_price,
-        unit_price: parsedPrice,
-        currency: item.status?.currency || 'VND',
-        price_created_at: draft.price_created_at || null,
-        price_applied_at: draft.price_applied_at || null,
-        notes: draft.notes.trim() || null,
-      });
-      setDirtyMap((prev) => {
-        const copy = { ...prev };
-        delete copy[pid];
-        return copy;
-      });
-      setDrafts((prev) => ({ ...prev, [pid]: toDraft(saved) }));
-      onStatusUpdated(saved);
-      if (toastLabel) {
-        onShowToast?.(toastLabel);
-      }
-    } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
-    } finally {
-      setSavingMap((prev) => {
-        const copy = { ...prev };
-        delete copy[pid];
-        return copy;
-      });
-    }
-  };
-
-  const handleToggleProcess = (item: StProductWithStatus, checked: boolean) => {
-    const pid = item.product.id;
-    const current = drafts[pid] || toDraft(item.status);
-    const updated: ProductStatusDraft = {
-      ...current,
-      has_process: checked,
-      process_created_at: checked
-        ? current.process_created_at || getLocalIsoDateToday()
-        : '',
-    };
-    setDrafts((prev) => ({ ...prev, [pid]: updated }));
-    void persistDraft(
-      item,
-      updated,
-      `Đã cập nhật quy trình mã hàng "${item.product.product_code}".`
-    );
-  };
-
-  const handleToggleUnitPrice = (
-    item: StProductWithStatus,
-    checked: boolean
-  ) => {
-    const pid = item.product.id;
-    const current = drafts[pid] || toDraft(item.status);
-    const updated: ProductStatusDraft = {
-      ...current,
-      has_unit_price: checked,
-      price_created_at: checked
-        ? current.price_created_at || getLocalIsoDateToday()
-        : '',
-      unit_price: checked ? current.unit_price : '',
-      price_applied_at: checked ? current.price_applied_at : '',
-    };
-    setDrafts((prev) => ({ ...prev, [pid]: updated }));
-    void persistDraft(
-      item,
-      updated,
-      `Đã cập nhật trạng thái đơn giá mã "${item.product.product_code}".`
-    );
-  };
-
-  const handleDateChange = (
-    item: StProductWithStatus,
-    field: 'process_created_at' | 'price_created_at' | 'price_applied_at',
-    value: string
-  ) => {
-    const pid = item.product.id;
-    const current = drafts[pid] || toDraft(item.status);
-    const updated: ProductStatusDraft = {
-      ...current,
-      [field]: value,
-      ...(field === 'process_created_at' && value ? { has_process: true } : {}),
-      ...((field === 'price_created_at' || field === 'price_applied_at') &&
-      value
-        ? { has_unit_price: true }
-        : {}),
-    };
-    setDrafts((prev) => ({ ...prev, [pid]: updated }));
-    void persistDraft(item, updated);
-  };
-
-  const handleTextDraftChange = (
-    item: StProductWithStatus,
-    field: 'unit_price' | 'notes',
-    value: string
-  ) => {
-    const pid = item.product.id;
-    const current = drafts[pid] || toDraft(item.status);
-    const updated: ProductStatusDraft = {
-      ...current,
-      [field]: value,
-      ...(field === 'unit_price' && value.trim() !== ''
-        ? { has_unit_price: true }
-        : {}),
-    };
-    setDrafts((prev) => ({ ...prev, [pid]: updated }));
-    setDirtyMap((prev) => ({ ...prev, [pid]: true }));
-  };
-
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden">
-      {/* Filter & KPI Strip */}
+      {/* 1. Filter & KPI Strip (Search -> Line -> Customer -> Status) */}
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center gap-2 shrink-0">
         <div className="relative w-full sm:w-64 lg:w-72">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -665,177 +586,177 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
         </div>
       </div>
 
-      {/* Product Registration Bar (Always visible, merged from Danh mục sản phẩm) */}
+      {/* 2. Always-Visible Product Registration Bar */}
       <div className="px-4 py-2.5 border-b border-slate-200 bg-white shrink-0">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200">
-            {/* Line + quick "+" button */}
-            <div className="lg:col-span-2 flex items-center gap-1">
-              <select
-                value={effectiveNewLine}
-                onChange={(e) => setNewProdLine(e.target.value)}
-                aria-label="Chọn Line sản xuất"
-                className="flex-1 min-w-0 h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-              >
-                {lines.length === 0 ? (
-                  <option value="">-- Chưa có Line --</option>
-                ) : (
-                  lines.map((l) => (
-                    <option key={l.id} value={l.name}>
-                      {l.name}
-                    </option>
-                  ))
-                )}
-              </select>
+          {/* Line + quick "+" button */}
+          <div className="lg:col-span-2 flex items-center gap-1">
+            <select
+              value={effectiveNewLine}
+              onChange={(e) => setNewProdLine(e.target.value)}
+              aria-label="Chọn Line sản xuất"
+              className="flex-1 min-w-0 h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+            >
+              {lines.length === 0 ? (
+                <option value="">-- Chưa có Line --</option>
+              ) : (
+                lines.map((l) => (
+                  <option key={l.id} value={l.name}>
+                    {l.name}
+                  </option>
+                ))
+              )}
+            </select>
+            <button
+              type="button"
+              data-testid="st-quick-add-line-btn"
+              onClick={() => setQuickLineModalOpen(true)}
+              title="Thêm nhanh Line mới"
+              aria-label="Thêm nhanh Line mới"
+              className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:border-[#14539E] text-[#14539E] inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Khách hàng + quick "+" button */}
+          <div className="lg:col-span-2 flex items-center gap-1">
+            <select
+              value={effectiveNewCustomer}
+              onChange={(e) => setNewProdCustomer(e.target.value)}
+              aria-label="Chọn Khách hàng"
+              className="flex-1 min-w-0 h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+            >
+              {customers.length === 0 ? (
+                <option value="">-- Chưa có KH --</option>
+              ) : (
+                customers.map((c) => (
+                  <option key={c.id} value={c.short_name}>
+                    {c.short_name}
+                  </option>
+                ))
+              )}
+            </select>
+            <button
+              type="button"
+              data-testid="st-quick-add-customer-btn"
+              onClick={() => setQuickCustModalOpen(true)}
+              title="Thêm nhanh Khách hàng mới"
+              aria-label="Thêm nhanh Khách hàng mới"
+              className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:border-[#14539E] text-[#14539E] inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Tên hàng */}
+          <div className="lg:col-span-2">
+            <input
+              type="text"
+              value={newProdName}
+              onChange={(e) => setNewProdName(e.target.value)}
+              placeholder="Tên hàng *"
+              aria-label="Tên hàng mới"
+              className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+            />
+          </div>
+
+          {/* Mã hàng */}
+          <div className="lg:col-span-2">
+            <input
+              type="text"
+              value={newProdCode}
+              onChange={(e) => setNewProdCode(e.target.value)}
+              placeholder="Mã hàng *"
+              aria-label="Mã hàng mới"
+              className="w-full h-8 px-2.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+            />
+          </div>
+
+          {/* Quy cách */}
+          <div className="lg:col-span-1">
+            <input
+              type="text"
+              value={newProdSpec}
+              onChange={(e) => setNewProdSpec(e.target.value)}
+              placeholder="Quy cách"
+              aria-label="Quy cách mới"
+              className="w-full h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+            />
+          </div>
+
+          {/* Hình ảnh (URL hoặc upload nén ảnh) */}
+          <div className="lg:col-span-2 flex items-center gap-1">
+            {newProdImageUrl && (
               <button
                 type="button"
-                data-testid="st-quick-add-line-btn"
-                onClick={() => setQuickLineModalOpen(true)}
-                title="Thêm nhanh Line mới"
-                aria-label="Thêm nhanh Line mới"
-                className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:border-[#14539E] text-[#14539E] inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                onClick={() =>
+                  setPreviewImage({
+                    url: newProdImageUrl,
+                    title: newProdCode || newProdName || 'Ảnh xem trước',
+                  })
+                }
+                title="Xem ảnh đã chọn"
+                className="w-8 h-8 rounded-lg border border-slate-300 overflow-hidden bg-white shrink-0 cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <img
+                  src={newProdImageUrl}
+                  alt="Preview"
+                  className="w-full h-full object-cover"
+                />
               </button>
-            </div>
-
-            {/* Khách hàng + quick "+" button */}
-            <div className="lg:col-span-2 flex items-center gap-1">
-              <select
-                value={effectiveNewCustomer}
-                onChange={(e) => setNewProdCustomer(e.target.value)}
-                aria-label="Chọn Khách hàng"
-                className="flex-1 min-w-0 h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-              >
-                {customers.length === 0 ? (
-                  <option value="">-- Chưa có KH --</option>
-                ) : (
-                  customers.map((c) => (
-                    <option key={c.id} value={c.short_name}>
-                      {c.short_name}
-                    </option>
-                  ))
-                )}
-              </select>
-              <button
-                type="button"
-                data-testid="st-quick-add-customer-btn"
-                onClick={() => setQuickCustModalOpen(true)}
-                title="Thêm nhanh Khách hàng mới"
-                aria-label="Thêm nhanh Khách hàng mới"
-                className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:border-[#14539E] text-[#14539E] inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Tên hàng */}
-            <div className="lg:col-span-2">
-              <input
-                type="text"
-                value={newProdName}
-                onChange={(e) => setNewProdName(e.target.value)}
-                placeholder="Tên hàng *"
-                aria-label="Tên hàng mới"
-                className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
-            </div>
-
-            {/* Mã hàng */}
-            <div className="lg:col-span-2">
-              <input
-                type="text"
-                value={newProdCode}
-                onChange={(e) => setNewProdCode(e.target.value)}
-                placeholder="Mã hàng *"
-                aria-label="Mã hàng mới"
-                className="w-full h-8 px-2.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
-            </div>
-
-            {/* Quy cách */}
-            <div className="lg:col-span-1">
-              <input
-                type="text"
-                value={newProdSpec}
-                onChange={(e) => setNewProdSpec(e.target.value)}
-                placeholder="Quy cách"
-                aria-label="Quy cách mới"
-                className="w-full h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
-            </div>
-
-            {/* Hình ảnh (URL hoặc upload nén ảnh) */}
-            <div className="lg:col-span-2 flex items-center gap-1">
-              {newProdImageUrl && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPreviewImage({
-                      url: newProdImageUrl,
-                      title: newProdCode || newProdName || 'Ảnh xem trước',
-                    })
-                  }
-                  title="Xem ảnh đã chọn"
-                  className="w-8 h-8 rounded-lg border border-slate-300 overflow-hidden bg-white shrink-0 cursor-pointer"
-                >
-                  <img
-                    src={newProdImageUrl}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                  />
-                </button>
+            )}
+            <input
+              type="text"
+              value={newProdImageUrl}
+              onChange={(e) => setNewProdImageUrl(e.target.value)}
+              placeholder="URL ảnh hoặc tải lên..."
+              aria-label="URL hình ảnh sản phẩm"
+              className="flex-1 min-w-0 h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+            />
+            <label
+              title="Tải ảnh từ máy tính (tự động nén nhẹ)"
+              className="h-8 w-8 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer shrink-0"
+            >
+              {isUploadingNewImg ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
+              ) : (
+                <Upload className="w-3.5 h-3.5" />
               )}
               <input
-                type="text"
-                value={newProdImageUrl}
-                onChange={(e) => setNewProdImageUrl(e.target.value)}
-                placeholder="URL ảnh hoặc tải lên..."
-                aria-label="URL hình ảnh sản phẩm"
-                className="flex-1 min-w-0 h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={isUploadingNewImg}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleUploadProductImage(file, 'new');
+                  e.target.value = '';
+                }}
               />
-              <label
-                title="Tải ảnh từ máy tính (tự động nén nhẹ)"
-                className="h-8 w-8 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer shrink-0"
-              >
-                {isUploadingNewImg ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
-                ) : (
-                  <Upload className="w-3.5 h-3.5" />
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  disabled={isUploadingNewImg}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void handleUploadProductImage(file, 'new');
-                    e.target.value = '';
-                  }}
-                />
-              </label>
-            </div>
+            </label>
+          </div>
 
-            {/* Nút Thêm */}
-            <div className="lg:col-span-1 flex justify-end">
-              <button
-                type="button"
-                disabled={isAddingProduct}
-                onClick={() => void handleAddProduct()}
-                className="w-full h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap"
-              >
-                {isAddingProduct ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Plus className="w-3.5 h-3.5" />
-                )}
-                <span>Thêm</span>
-              </button>
+          {/* Nút Thêm */}
+          <div className="lg:col-span-1 flex justify-end">
+            <button
+              type="button"
+              disabled={isAddingProduct}
+              onClick={() => void handleAddProduct()}
+              className="w-full h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              {isAddingProduct ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Plus className="w-3.5 h-3.5" />
+              )}
+              <span>Thêm</span>
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Main High-Density Unified Table */}
+      {/* 3. Read-Only 12-Column Table with Pinned Left Columns & 6-Step Sequential Pipeline */}
       <div className="flex-1 min-h-0 overflow-auto">
         {isLoading && productsWithStatus.length === 0 ? (
           <div className="p-10 flex items-center justify-center gap-2 text-xs text-slate-500">
@@ -856,214 +777,172 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             Không có mã hàng nào khớp bộ lọc hiện tại.
           </div>
         ) : (
-          <table className="w-full min-w-[980px] border-collapse text-left">
-            <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+          <table className="w-full min-w-[1100px] border-collapse text-left">
+            <thead className="sticky top-0 z-30 bg-slate-100 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
               <tr>
-                <th className="px-2 py-2 w-12 text-center border-r border-slate-200/70">
+                <th
+                  rowSpan={2}
+                  className="sticky left-0 z-40 bg-slate-100 px-1.5 py-2 w-10 min-w-[40px] max-w-[40px] text-center border-r border-b border-slate-200"
+                >
                   STT
                 </th>
-                <th className="px-2.5 py-2 w-40 border-r border-slate-200/70">
+                <th
+                  rowSpan={2}
+                  className="sticky left-10 z-40 bg-slate-100 px-2 py-2 w-28 min-w-[112px] border-r border-b border-slate-200 shadow-[2px_0_5px_-2px_rgba(15,23,42,0.12)]"
+                >
                   Mã hàng
                 </th>
-                <th className="px-2.5 py-2 min-w-[180px] border-r border-slate-200/70">
+                <th
+                  rowSpan={2}
+                  className="px-2 py-2 min-w-[130px] border-r border-b border-slate-200 bg-slate-100"
+                >
                   Tên hàng
                 </th>
-                <th className="px-2.5 py-2 w-36 border-r border-slate-200/70">
+                <th
+                  rowSpan={2}
+                  className="px-2 py-2 w-24 min-w-[92px] border-r border-b border-slate-200 bg-slate-100"
+                >
                   Quy cách
                 </th>
-                <th className="px-2.5 py-2 w-48 border-r border-slate-200/70">
-                  Quy trình
+                <th
+                  colSpan={6}
+                  className="px-2 py-1.5 text-center bg-blue-50/95 text-[#14539E] border-r border-b border-blue-200/80 tracking-wider"
+                >
+                  TIẾN ĐỘ TUẦN TỰ CÔNG VIỆC
                 </th>
-                <th className="px-2.5 py-2 w-44 border-r border-slate-200/70">
-                  Đơn giá
-                </th>
-                <th className="px-2.5 py-2 min-w-[190px] border-r border-slate-200/70">
+                <th
+                  rowSpan={2}
+                  className="px-2 py-2 min-w-[100px] border-r border-b border-slate-200 bg-slate-100"
+                >
                   Ghi chú
                 </th>
-                <th className="px-2 py-2 w-28 text-center">
+                <th
+                  rowSpan={2}
+                  className="px-1.5 py-2 w-[112px] min-w-[112px] text-center border-b border-slate-200 bg-slate-100"
+                >
                   Thao tác
                 </th>
+              </tr>
+              <tr>
+                {ST_WORKFLOW_STEPS.map((step, stepIdx) => {
+                  const hasNext = stepIdx < ST_WORKFLOW_STEPS.length - 1;
+                  return (
+                    <th
+                      key={step.key}
+                      className="relative px-1.5 py-1.5 w-[88px] min-w-[84px] text-center bg-slate-100 border-r border-b border-slate-200 text-[10px] font-bold text-slate-700 whitespace-nowrap"
+                    >
+                      <span>{step.label}</span>
+                      {hasNext && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute -right-2 top-1/2 -translate-y-1/2 z-10 w-3.5 h-3.5 rounded-full bg-white border border-blue-200 text-[#14539E] inline-flex items-center justify-center shadow-2xs pointer-events-none"
+                        >
+                          <ArrowRight className="w-2.5 h-2.5" />
+                        </span>
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-xs">
               {filteredItems.map((item, idx) => {
                 const p = item.product;
                 const pid = p.id;
-                const draft = drafts[pid] || toDraft(item.status);
-                const isDirty = Boolean(dirtyMap[pid]);
-                const isSaving = Boolean(savingMap[pid]);
+                const st = item.status;
                 const isDeleting = deletingProdId === pid;
-                const liveCompleted = Boolean(
-                  draft.has_process && draft.price_applied_at
-                );
+                const stickyCellBg = item.isCompleted
+                  ? 'bg-[#F4FBF7] group-hover:bg-[#EAF7F0]'
+                  : 'bg-white group-hover:bg-[#F3F8FF]';
 
                 return (
                   <tr
                     key={pid}
-                    className={`transition-colors ${
-                      liveCompleted
-                        ? 'bg-emerald-50/20 hover:bg-emerald-50/40'
-                        : 'hover:bg-blue-50/30'
+                    className={`group transition-colors ${
+                      item.isCompleted
+                        ? 'bg-[#F4FBF7] hover:bg-[#EAF7F0]'
+                        : 'bg-white hover:bg-[#F3F8FF]'
                     }`}
                   >
-                    {/* 1. STT */}
-                    <td className="px-2 py-2 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
+                    {/* 1. STT (pinned left) */}
+                    <td
+                      className={`sticky left-0 z-10 px-1.5 py-2.5 w-10 min-w-[40px] max-w-[40px] text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                    >
                       {formatNumberVN(idx + 1)}
                     </td>
 
-                    {/* 2. Mã hàng (khóa chính — bấm để mở Modal chi tiết) */}
-                    <td className="px-2.5 py-2 border-r border-slate-100">
+                    {/* 2. Mã hàng (pinned left, #14539E, hover underline, click opens Detail/Update Modal) */}
+                    <td
+                      className={`sticky left-10 z-10 px-2 py-2.5 w-28 min-w-[112px] border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(15,23,42,0.12)] transition-colors ${stickyCellBg}`}
+                    >
                       <button
                         type="button"
                         data-testid={`st-product-code-btn-${p.product_code}`}
-                        onClick={() => setDetailProductId(pid)}
-                        title="Bấm để xem chi tiết thông tin mã hàng"
+                        onClick={() => handleOpenDetailModal(item)}
+                        title="Bấm để xem chi tiết & cập nhật tiến độ mã hàng"
                         className="font-mono font-bold text-[#14539E] hover:underline cursor-pointer text-left break-all"
                       >
                         {p.product_code}
                       </button>
                     </td>
 
-                    {/* 3. Tên hàng */}
-                    <td className="px-2.5 py-2 border-r border-slate-100 text-slate-900 font-medium">
+                    {/* 3. Tên hàng (Read-only) */}
+                    <td className="px-2 py-2.5 border-r border-slate-100 text-slate-900 font-medium">
                       {p.product_name}
                     </td>
 
-                    {/* 4. Quy cách */}
-                    <td className="px-2.5 py-2 border-r border-slate-100 text-slate-600">
+                    {/* 4. Quy cách (Read-only) */}
+                    <td className="px-2 py-2.5 border-r border-slate-100 text-slate-600">
                       {p.specification || '—'}
                     </td>
 
-                    {/* 5. Quy trình: Checkbox nhanh + Ngày tạo quy trình gọn gàng */}
-                    <td className="px-2.5 py-2 border-r border-slate-100">
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={draft.has_process}
-                          onChange={(e) =>
-                            handleToggleProcess(item, e.target.checked)
-                          }
-                          aria-label={`Có quy trình cho ${p.product_code}`}
-                          title="Tích nếu đã có quy trình"
-                          className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
-                        />
-                        <input
-                          type="date"
-                          value={draft.process_created_at}
-                          onChange={(e) =>
-                            handleDateChange(
-                              item,
-                              'process_created_at',
-                              e.target.value
-                            )
-                          }
-                          aria-label={`Ngày tạo quy trình ${p.product_code}`}
-                          className="flex-1 min-w-0 h-7 px-1.5 text-[11px] font-mono bg-white border border-slate-300 rounded focus:outline-none focus:border-[#14539E]"
-                        />
+                    {/* 5..10. Dải tuần tự 6 bước (Read-only) */}
+                    {ST_WORKFLOW_STEPS.map((step) => {
+                      const isDone = Boolean(st?.[step.boolField]);
+                      const rawDate = st?.[step.dateField] || null;
+                      const isWaiting =
+                        !isDone && item.currentWaitingStep === step.key;
+
+                      return (
+                        <td
+                          key={step.key}
+                          className="px-1.5 py-2 border-r border-slate-100 text-center align-middle"
+                        >
+                          {isDone ? (
+                            <div className="inline-flex flex-col items-center gap-0.5">
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold whitespace-nowrap">
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                Đã xong
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-600 tabular-nums">
+                                {rawDate ? formatStDateVN(rawDate) : '—'}
+                              </span>
+                            </div>
+                          ) : isWaiting ? (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold whitespace-nowrap">
+                              <Clock className="w-2.5 h-2.5" />
+                              Đang chờ
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 font-medium select-none">
+                              —
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+
+                    {/* 11. Ghi chú (Read-only plain text) */}
+                    <td className="px-2.5 py-2.5 border-r border-slate-100 text-slate-600">
+                      <div
+                        className="line-clamp-2 break-words"
+                        title={st?.notes || ''}
+                      >
+                        {st?.notes || '—'}
                       </div>
                     </td>
 
-                    {/* 6. Đơn giá: Checkbox nhanh + Nhập/hiển thị mức đơn giá */}
-                    <td className="px-2.5 py-2 border-r border-slate-100">
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={draft.has_unit_price}
-                          onChange={(e) =>
-                            handleToggleUnitPrice(item, e.target.checked)
-                          }
-                          aria-label={`Có đơn giá cho ${p.product_code}`}
-                          title="Tích nếu đã có đơn giá"
-                          className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
-                        />
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
-                          value={draft.unit_price}
-                          onChange={(e) =>
-                            handleTextDraftChange(
-                              item,
-                              'unit_price',
-                              e.target.value
-                            )
-                          }
-                          onBlur={() => {
-                            if (isDirty) void persistDraft(item);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.currentTarget.blur();
-                            }
-                          }}
-                          placeholder="Đơn giá..."
-                          aria-label={`Đơn giá ${p.product_code}`}
-                          className="flex-1 min-w-0 h-7 px-1.5 text-xs font-mono text-right bg-white border border-slate-300 rounded focus:outline-none focus:border-[#14539E]"
-                        />
-                      </div>
-                    </td>
-
-                    {/* 7. Ghi chú */}
-                    <td className="px-2.5 py-2 border-r border-slate-100">
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={draft.notes}
-                          onChange={(e) =>
-                            handleTextDraftChange(item, 'notes', e.target.value)
-                          }
-                          onBlur={() => {
-                            if (isDirty) void persistDraft(item);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              void persistDraft(
-                                item,
-                                undefined,
-                                `Đã lưu ghi chú mã "${p.product_code}".`
-                              );
-                            }
-                          }}
-                          placeholder="Ghi chú..."
-                          aria-label={`Ghi chú ${p.product_code}`}
-                          className="flex-1 min-w-0 h-7 px-2 text-xs bg-white border border-slate-300 rounded focus:outline-none focus:border-[#14539E]"
-                        />
-
-                        {isSaving ? (
-                          <span
-                            title="Đang lưu trạng thái..."
-                            className="w-6 h-7 rounded-md bg-blue-50 text-[#14539E] inline-flex items-center justify-center shrink-0"
-                          >
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          </span>
-                        ) : isDirty ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void persistDraft(
-                                item,
-                                undefined,
-                                `Đã lưu cập nhật mã "${p.product_code}".`
-                              )
-                            }
-                            aria-label={`Lưu trạng thái ${p.product_code}`}
-                            title="Lưu trạng thái"
-                            className="w-7 h-7 rounded-md bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center shrink-0 cursor-pointer"
-                          >
-                            <Save className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <span
-                            title="Đã đồng bộ"
-                            className="w-5 h-7 rounded-md text-slate-300 inline-flex items-center justify-center shrink-0"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 8. Thao tác */}
+                    {/* 12. Thao tác (Cập nhật + Xóa) */}
                     <td className="px-2 py-2 text-center">
                       {confirmDeleteProdId === pid ? (
                         <div className="inline-flex items-center justify-center gap-1">
@@ -1087,12 +966,14 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         <div className="inline-flex items-center justify-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => handleOpenEditProduct(item)}
-                            aria-label={`Sửa thông tin mã hàng ${p.product_code}`}
-                            title="Sửa đầy đủ thông tin mã hàng"
-                            className="w-7 h-7 rounded-md border border-slate-200 text-slate-600 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                            data-testid={`st-product-update-btn-${p.product_code}`}
+                            onClick={() => handleOpenDetailModal(item)}
+                            aria-label={`Cập nhật mã hàng ${p.product_code}`}
+                            title="Mở chi tiết & cập nhật tiến độ"
+                            className="h-7 px-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:border-[#14539E] hover:text-[#14539E] text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
                           >
-                            <Pencil className="w-3.5 h-3.5" />
+                            <Pencil className="w-3 h-3" />
+                            <span>Cập nhật</span>
                           </button>
                           <button
                             type="button"
@@ -1284,41 +1165,31 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
         </div>
       )}
 
-      {/* Product Detail Modal (when clicking Mã hàng) */}
-      {detailItem && (() => {
-        const dp = detailItem.product;
-        const dDraft = drafts[dp.id] || toDraft(detailItem.status);
-        const detailCompleted = Boolean(
-          dDraft.has_process && dDraft.price_applied_at
-        );
-        const detailDays = detailCompleted
-          ? calculateCompletionDays(dp.created_at, dDraft.price_applied_at)
-          : null;
+      {/* Unified Detail & 6-Step Progress Update Modal (Saves ONLY on Lưu cập nhật) */}
+      {activeModalItem && (() => {
+        const dp = activeModalItem.product;
         const imgBroken = Boolean(brokenImages[dp.id]);
-        const unitPriceNum =
-          dDraft.unit_price.trim() !== '' && !Number.isNaN(Number(dDraft.unit_price))
-            ? Number(dDraft.unit_price)
-            : null;
 
         return (
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`Chi tiết mã hàng ${dp.product_code}`}
-            onClick={() => setDetailProductId(null)}
-            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+            aria-label={`Chi tiết và cập nhật mã hàng ${dp.product_code}`}
+            onClick={handleCloseDetailModal}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
           >
-            <div
+            <form
+              onSubmit={handleSaveModalUpdates}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-3xl bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="w-full max-w-4xl bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
             >
               {/* Modal Header */}
-              <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0 bg-slate-50/70">
-                <div className="flex items-center gap-2.5 min-w-0">
+              <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0 bg-slate-50/80">
+                <div className="flex flex-wrap items-center gap-2.5 min-w-0">
                   <span className="font-mono text-base font-bold text-[#14539E] truncate">
-                    {dp.product_code}
+                    {modalCode || dp.product_code}
                   </span>
-                  {detailCompleted ? (
+                  {modalLivePreview.isCompleted ? (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold whitespace-nowrap">
                       <CheckCircle2 className="w-3 h-3" />
                       Hoàn thành SX đại trà
@@ -1326,537 +1197,354 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold whitespace-nowrap">
                       <Clock className="w-3 h-3" />
-                      Đang dở dang
+                      {modalLivePreview.waitingLabel}
                     </span>
                   )}
                 </div>
                 <button
                   type="button"
-                  onClick={() => setDetailProductId(null)}
-                  aria-label="Đóng chi tiết"
+                  onClick={handleCloseDetailModal}
+                  aria-label="Đóng cửa sổ"
                   className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 inline-flex items-center justify-center cursor-pointer shrink-0"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Modal Body: Clean 2-Column Layout */}
-              <div className="p-5 overflow-y-auto grid grid-cols-1 md:grid-cols-12 gap-5">
-                {/* Left Column: Product Image + Key Summary */}
-                <div className="md:col-span-5 flex flex-col gap-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
-                    {dp.image_url && !imgBroken ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPreviewImage({
-                            url: dp.image_url!,
-                            title: `${dp.product_code} - ${dp.product_name}`,
-                          })
-                        }
-                        title="Bấm để phóng to toàn màn hình"
-                        className="relative w-full aspect-square bg-white flex items-center justify-center cursor-pointer group overflow-hidden"
-                      >
-                        <img
-                          src={dp.image_url}
-                          alt={dp.product_name}
-                          referrerPolicy="no-referrer"
-                          onError={() =>
-                            setBrokenImages((prev) => ({
-                              ...prev,
-                              [dp.id]: true,
-                            }))
+              {/* Modal Body: 2 Clear Parts */}
+              <div className="p-5 overflow-y-auto space-y-5 text-xs">
+                {/* PART 1: Product Information (Image + Editable Metadata + Registration/Completion Metrics) */}
+                <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">
+                      1. Thông tin sản phẩm
+                    </h4>
+                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600 font-mono tabular-nums">
+                      <span>
+                        Ngày ĐK:{' '}
+                        <strong className="text-slate-900">
+                          {formatStDateVN(dp.created_at)}
+                        </strong>
+                      </span>
+                      <span>
+                        Số ngày hoàn thành:{' '}
+                        <strong
+                          className={
+                            modalLivePreview.isCompleted
+                              ? 'text-emerald-700'
+                              : 'text-slate-500'
                           }
-                          className="w-full h-full object-contain p-2 transition-transform duration-200 group-hover:scale-[1.02]"
-                        />
-                        <span className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-slate-900/75 text-white text-[11px] font-medium inline-flex items-center gap-1 shadow-sm">
-                          <Maximize2 className="w-3 h-3" />
-                          Phóng to
-                        </span>
-                      </button>
-                    ) : (
-                      <div className="w-full aspect-square flex flex-col items-center justify-center gap-2 text-slate-400 p-4">
-                        <ImageIcon className="w-10 h-10 text-slate-300" />
-                        <span className="text-xs">Chưa có hình ảnh sản phẩm</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                      <div className="text-[11px] text-slate-500 font-medium">
-                        Ngày đăng ký
-                      </div>
-                      <div className="mt-0.5 text-xs font-mono font-semibold text-slate-900 tabular-nums">
-                        {formatStDateVN(dp.created_at) || '—'}
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                      <div className="text-[11px] text-slate-500 font-medium">
-                        Số ngày hoàn thành
-                      </div>
-                      <div
-                        className={`mt-0.5 text-xs font-mono font-bold tabular-nums ${
-                          detailCompleted ? 'text-emerald-700' : 'text-slate-500'
-                        }`}
-                      >
-                        {detailCompleted
-                          ? `${formatNumberVN(detailDays ?? 0)} ngày`
-                          : '—'}
-                      </div>
+                        >
+                          {modalLivePreview.isCompleted
+                            ? `${formatNumberVN(
+                                modalLivePreview.completionDays ?? 0
+                              )} ngày`
+                            : '—'}
+                        </strong>
+                      </span>
                     </div>
                   </div>
-                </div>
 
-                {/* Right Column: Detailed Specs & Progress */}
-                <div className="md:col-span-7 flex flex-col gap-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Mã hàng</div>
-                      <div className="mt-0.5 font-mono font-bold text-[#14539E]">
-                        {dp.product_code}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Tên hàng</div>
-                      <div className="mt-0.5 font-semibold text-slate-900">
-                        {dp.product_name}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Quy cách</div>
-                      <div className="mt-0.5 font-medium text-slate-800">
-                        {dp.specification || '—'}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Line sản xuất</div>
-                      <div className="mt-0.5 font-semibold text-slate-800">
-                        {dp.line_name || '—'}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Khách hàng</div>
-                      <div className="mt-0.5 font-semibold text-slate-800">
-                        {dp.customer_short_name || '—'}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Hiện trạng</div>
-                      <div className="mt-1">
-                        {detailCompleted ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Hoàn thành SX đại trà
-                          </span>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                    {/* Product Image + Zoom + Upload */}
+                    <div className="md:col-span-4 flex flex-col gap-2">
+                      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                        {modalImageUrl && !imgBroken ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({
+                                url: modalImageUrl,
+                                title: `${modalCode || dp.product_code} - ${
+                                  modalName || dp.product_name
+                                }`,
+                              })
+                            }
+                            title="Bấm để phóng to toàn màn hình"
+                            className="relative w-full h-48 bg-white flex items-center justify-center cursor-pointer group overflow-hidden"
+                          >
+                            <img
+                              src={modalImageUrl}
+                              alt={modalName || dp.product_name}
+                              referrerPolicy="no-referrer"
+                              onError={() =>
+                                setBrokenImages((prev) => ({
+                                  ...prev,
+                                  [dp.id]: true,
+                                }))
+                              }
+                              className="w-full h-full object-contain p-2 transition-transform duration-200 group-hover:scale-[1.02]"
+                            />
+                            <span className="absolute bottom-2 right-2 px-2 py-1 rounded-md bg-slate-900/75 text-white text-[10px] font-medium inline-flex items-center gap-1 shadow-xs">
+                              <Maximize2 className="w-3 h-3" />
+                              Phóng to
+                            </span>
+                          </button>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold">
-                            <Clock className="w-3 h-3" />
-                            Đang dở dang
-                          </span>
+                          <div className="w-full h-48 flex flex-col items-center justify-center gap-1.5 text-slate-400 p-3 bg-slate-50">
+                            <ImageIcon className="w-8 h-8 text-slate-300" />
+                            <span className="text-[11px]">
+                              Chưa có hình ảnh sản phẩm
+                            </span>
+                          </div>
                         )}
                       </div>
-                    </div>
 
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
-                      <div className="text-[11px] text-slate-500">
-                        Trạng thái &amp; Ngày tạo quy trình
-                      </div>
-                      <div className="mt-0.5 flex items-center justify-between gap-2">
-                        <span
-                          className={`font-semibold ${
-                            dDraft.has_process ? 'text-emerald-700' : 'text-slate-500'
-                          }`}
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={modalImageUrl}
+                          onChange={(e) => {
+                            setModalImageUrl(e.target.value);
+                            setBrokenImages((prev) => {
+                              const next = { ...prev };
+                              delete next[dp.id];
+                              return next;
+                            });
+                          }}
+                          placeholder="Dán URL ảnh hoặc tải ảnh..."
+                          aria-label="URL ảnh sản phẩm"
+                          className="flex-1 min-w-0 h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                        />
+                        <label
+                          title="Đổi / tải ảnh mới"
+                          className="h-8 px-2.5 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E] inline-flex items-center gap-1 cursor-pointer shrink-0 font-semibold"
                         >
-                          {dDraft.has_process ? 'Đã có quy trình' : 'Chưa có'}
-                        </span>
-                        <span className="font-mono text-[11px] text-slate-700 tabular-nums">
-                          {dDraft.process_created_at
-                            ? formatStDateVN(dDraft.process_created_at)
-                            : '—'}
-                        </span>
+                          {isUploadingModalImg ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
+                          ) : (
+                            <Upload className="w-3.5 h-3.5" />
+                          )}
+                          <span>Tải ảnh</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={isUploadingModalImg}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file)
+                                void handleUploadProductImage(file, 'modal');
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
                       </div>
                     </div>
 
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
-                      <div className="text-[11px] text-slate-500">
-                        Trạng thái &amp; Mức đơn giá
+                    {/* Editable Product Fields */}
+                    <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-3 content-start">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Mã hàng <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={modalCode}
+                          onChange={(e) => setModalCode(e.target.value)}
+                          className="w-full h-9 px-3 font-mono font-semibold text-[#14539E] bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                        />
                       </div>
-                      <div className="mt-0.5 flex items-center justify-between gap-2">
-                        <span
-                          className={`font-semibold ${
-                            dDraft.has_unit_price ? 'text-emerald-700' : 'text-slate-500'
-                          }`}
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Tên hàng <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={modalName}
+                          onChange={(e) => setModalName(e.target.value)}
+                          className="w-full h-9 px-3 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Line sản xuất <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          value={modalLine}
+                          onChange={(e) => setModalLine(e.target.value)}
+                          className="w-full h-9 px-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
                         >
-                          {dDraft.has_unit_price ? 'Đã có đơn giá' : 'Chưa có'}
-                        </span>
-                        <span className="font-mono font-bold text-slate-900 tabular-nums">
-                          {unitPriceNum !== null
-                            ? `${formatNumberVN(unitPriceNum)} ${
-                                detailItem.status?.currency || 'VND'
-                              }`
-                            : '—'}
-                        </span>
+                          {lineNames.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    </div>
 
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">Ngày tạo đơn giá</div>
-                      <div className="mt-0.5 font-mono font-medium text-slate-800 tabular-nums">
-                        {dDraft.price_created_at
-                          ? formatStDateVN(dDraft.price_created_at)
-                          : '—'}
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Khách hàng <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          value={modalCustomer}
+                          onChange={(e) => setModalCustomer(e.target.value)}
+                          className="w-full h-9 px-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+                        >
+                          {customerNames.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    </div>
 
-                    <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
-                      <div className="text-[11px] text-slate-500">
-                        Ngày áp dụng đơn giá SX đại trà
-                      </div>
-                      <div className="mt-0.5 font-mono font-medium text-slate-800 tabular-nums">
-                        {dDraft.price_applied_at
-                          ? formatStDateVN(dDraft.price_applied_at)
-                          : '—'}
+                      <div className="sm:col-span-2">
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Quy cách
+                        </label>
+                        <input
+                          type="text"
+                          value={modalSpec}
+                          onChange={(e) => setModalSpec(e.target.value)}
+                          placeholder="Nhập quy cách sản phẩm..."
+                          className="w-full h-9 px-3 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                        />
                       </div>
                     </div>
                   </div>
+                </section>
 
-                  <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 text-xs">
-                    <div className="text-[11px] text-slate-500 font-medium mb-1">
+                {/* PART 2: 6-Step Sequential Progress Stepper & Notes */}
+                <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">
+                      2. Bảng điều khiển dải tuần tự 6 bước (Stepper)
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      Báo giá → BOM ERP → SPEC ERP → KHSX → Quy trình ERP → ST
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {ST_WORKFLOW_STEPS.map((step) => {
+                      const checked = modalSteps[step.boolField];
+                      const dateVal = modalSteps[step.dateField];
+                      const isWaiting =
+                        !checked &&
+                        modalLivePreview.pendingStep?.key === step.key;
+
+                      return (
+                        <div
+                          key={step.key}
+                          className={`rounded-xl border p-3 transition-colors space-y-2 ${
+                            checked
+                              ? 'bg-emerald-50/50 border-emerald-200'
+                              : isWaiting
+                              ? 'bg-amber-50/60 border-amber-200'
+                              : 'bg-slate-50/60 border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="inline-flex items-center gap-2 font-bold text-slate-900 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                data-testid={`st-stepper-check-${step.key}`}
+                                checked={checked}
+                                onChange={(e) =>
+                                  handleToggleModalStep(
+                                    step.boolField,
+                                    step.dateField,
+                                    e.target.checked
+                                  )
+                                }
+                                className="w-4 h-4 accent-[#14539E] rounded cursor-pointer"
+                              />
+                              <span>
+                                {step.order}. {step.label}
+                              </span>
+                            </label>
+
+                            {checked ? (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-semibold whitespace-nowrap">
+                                Hoàn thành
+                              </span>
+                            ) : isWaiting ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-semibold whitespace-nowrap">
+                                Đang chờ
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">
+                                Chưa tới lượt
+                              </span>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-medium text-slate-500 mb-1">
+                              Ngày hoàn thành
+                            </label>
+                            <input
+                              type="date"
+                              data-testid={`st-stepper-date-${step.key}`}
+                              value={dateVal}
+                              onChange={(e) =>
+                                handleChangeModalStepDate(
+                                  step.boolField,
+                                  step.dateField,
+                                  e.target.value
+                                )
+                              }
+                              aria-label={`Ngày hoàn thành bước ${step.label}`}
+                              className="w-full h-8 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
                       Ghi chú
-                    </div>
-                    <div className="text-slate-800 whitespace-pre-wrap">
-                      {dDraft.notes.trim() || 'Không có ghi chú.'}
-                    </div>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={modalNotes}
+                      onChange={(e) => setModalNotes(e.target.value)}
+                      placeholder="Nhập ghi chú xử lý, vướng mắc hoặc thông tin bổ sung..."
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] resize-none"
+                    />
                   </div>
-                </div>
+                </section>
               </div>
 
               {/* Modal Footer */}
-              <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setDetailProductId(null)}
-                  className="h-8 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold cursor-pointer hover:bg-slate-50"
-                >
-                  Đóng
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const target = detailItem;
-                    setDetailProductId(null);
-                    handleOpenEditProduct(target);
-                  }}
-                  className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span>Chỉnh sửa</span>
-                </button>
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
+                <span className="text-[11px] text-slate-500">
+                  Mọi thay đổi chỉ được lưu xuống hệ thống khi bấm{' '}
+                  <strong className="text-slate-700">Lưu cập nhật</strong>.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCloseDetailModal}
+                    className="h-8 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold cursor-pointer hover:bg-slate-50"
+                  >
+                    Đóng
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingModal}
+                    data-testid="st-modal-save-btn"
+                    className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingModal ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>Lưu cập nhật</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            </form>
           </div>
         );
       })()}
-
-      {/* Full Edit Product & Status Modal */}
-      {editingItem && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Sửa thông tin mã hàng ${editingItem.product.product_code}`}
-          onClick={() => setEditingItem(null)}
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-        >
-          <form
-            onSubmit={handleSaveEditProduct}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-          >
-            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50/70">
-              <h3 className="text-sm font-bold text-slate-900">
-                Cập nhật đầy đủ thông tin Mã hàng ({editingItem.product.product_code})
-              </h3>
-              <button
-                type="button"
-                onClick={() => setEditingItem(null)}
-                aria-label="Đóng"
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto space-y-4 text-xs">
-              {/* Product metadata */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Line sản xuất <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={editProdLine}
-                    onChange={(e) => setEditProdLine(e.target.value)}
-                    className="w-full h-9 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:border-[#14539E]"
-                  >
-                    {lineNames.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Khách hàng <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={editProdCustomer}
-                    onChange={(e) => setEditProdCustomer(e.target.value)}
-                    className="w-full h-9 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:border-[#14539E]"
-                  >
-                    {customerNames.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Mã hàng <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={editProdCode}
-                    onChange={(e) => setEditProdCode(e.target.value)}
-                    className="w-full h-9 px-3 font-mono border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Tên hàng <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={editProdName}
-                    onChange={(e) => setEditProdName(e.target.value)}
-                    className="w-full h-9 px-3 border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Quy cách
-                  </label>
-                  <input
-                    type="text"
-                    value={editProdSpec}
-                    onChange={(e) => setEditProdSpec(e.target.value)}
-                    className="w-full h-9 px-3 border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Hình ảnh (URL hoặc tải ảnh lên)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {editProdImageUrl && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPreviewImage({
-                            url: editProdImageUrl,
-                            title: editProdCode || editProdName || 'Ảnh sản phẩm',
-                          })
-                        }
-                        title="Xem ảnh"
-                        className="w-9 h-9 rounded-lg border border-slate-300 overflow-hidden bg-slate-50 shrink-0 cursor-pointer"
-                      >
-                        <img
-                          src={editProdImageUrl}
-                          alt="Preview"
-                          className="w-full h-full object-cover"
-                        />
-                      </button>
-                    )}
-                    <input
-                      type="text"
-                      value={editProdImageUrl}
-                      onChange={(e) => setEditProdImageUrl(e.target.value)}
-                      placeholder="Dán URL ảnh hoặc tải file..."
-                      className="flex-1 h-9 px-3 border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                    />
-                    <label className="h-9 px-3 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E] inline-flex items-center gap-1.5 cursor-pointer shrink-0 font-semibold">
-                      {isUploadingEditImg ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#14539E]" />
-                      ) : (
-                        <Upload className="w-3.5 h-3.5" />
-                      )}
-                      <span>Tải ảnh</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={isUploadingEditImg}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) void handleUploadProductImage(file, 'edit');
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Process, Unit Price & Dates */}
-              <div className="pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-                  <label className="inline-flex items-center gap-2 font-semibold text-slate-800 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editHasProcess}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setEditHasProcess(checked);
-                        setEditProcessCreatedAt((prev) =>
-                          checked ? prev || getLocalIsoDateToday() : ''
-                        );
-                      }}
-                      className="w-4 h-4 accent-[#14539E] rounded cursor-pointer"
-                    />
-                    <span>Đã có quy trình</span>
-                  </label>
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                      Ngày tạo quy trình
-                    </label>
-                    <input
-                      type="date"
-                      value={editProcessCreatedAt}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEditProcessCreatedAt(val);
-                        if (val) setEditHasProcess(true);
-                      }}
-                      className="w-full h-9 px-2.5 font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-                  <label className="inline-flex items-center gap-2 font-semibold text-slate-800 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editHasUnitPrice}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setEditHasUnitPrice(checked);
-                        if (checked) {
-                          setEditPriceCreatedAt(
-                            (prev) => prev || getLocalIsoDateToday()
-                          );
-                        } else {
-                          setEditUnitPrice('');
-                          setEditPriceCreatedAt('');
-                          setEditPriceAppliedAt('');
-                        }
-                      }}
-                      className="w-4 h-4 accent-[#14539E] rounded cursor-pointer"
-                    />
-                    <span>Đã có đơn giá</span>
-                  </label>
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                      Mức đơn giá ({editingItem.status?.currency || 'VND'})
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={editUnitPrice}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEditUnitPrice(val);
-                        if (val.trim() !== '') setEditHasUnitPrice(true);
-                      }}
-                      placeholder="Nhập đơn giá..."
-                      className="w-full h-9 px-2.5 font-mono text-right bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Ngày tạo đơn giá
-                  </label>
-                  <input
-                    type="date"
-                    value={editPriceCreatedAt}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setEditPriceCreatedAt(val);
-                      if (val) setEditHasUnitPrice(true);
-                    }}
-                    className="w-full h-9 px-2.5 font-mono border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Ngày áp dụng đơn giá SX đại trà
-                  </label>
-                  <input
-                    type="date"
-                    value={editPriceAppliedAt}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setEditPriceAppliedAt(val);
-                      if (val) setEditHasUnitPrice(true);
-                    }}
-                    className="w-full h-9 px-2.5 font-mono border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Ghi chú
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    placeholder="Ghi chú thêm về quy trình, đơn giá, tiến độ..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] resize-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setEditingItem(null)}
-                className="h-8 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold cursor-pointer"
-              >
-                Hủy
-              </button>
-              <button
-                type="submit"
-                disabled={isSavingEditProduct}
-                className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {isSavingEditProduct ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Check className="w-3.5 h-3.5" />
-                )}
-                <span>Lưu thay đổi</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Fullscreen Image Preview / Zoom Modal */}
       {previewImage && (

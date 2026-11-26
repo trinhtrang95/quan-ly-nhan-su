@@ -5,6 +5,9 @@ import {
   calculateCompletionDays,
   computeStOverviewMetrics,
   computeStReportComparison,
+  encodeStepsIntoNotes,
+  getNewProductWaitingLabel,
+  getPendingWorkflowStep,
   isNewProductCompleted,
   mergeProductsWithStatus,
   normalizeStChangeRequestRow,
@@ -19,32 +22,132 @@ import {
 } from './stWorkLogic';
 import { buildStReportWorkbook } from './stWorkExportService';
 
-describe('stWorkLogic pure calculations', () => {
-  it('enforces completion rule: completed only when has_process is true AND price_applied_at is present', () => {
+function buildFullSixStepStatus(
+  overrides: Partial<StNewProductStatus> = {}
+): StNewProductStatus {
+  return {
+    id: 'st-default',
+    product_id: 'p-default',
+    has_quote: true,
+    quote_date: '2026-10-02',
+    has_bom_erp: true,
+    bom_erp_date: '2026-10-04',
+    has_spec_erp: true,
+    spec_erp_date: '2026-10-06',
+    has_khsx: true,
+    khsx_date: '2026-10-08',
+    has_process_erp: true,
+    process_erp_date: '2026-10-10',
+    has_st: true,
+    st_date: '2026-10-11',
+    notes: null,
+    updated_at: '2026-10-11T02:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('stWorkLogic 6-step sequential pipeline calculations', () => {
+  it('enforces completion rule: completed only when ALL 6 steps AND st_date are present', () => {
     assert.equal(isNewProductCompleted(null), false);
+
+    // Missing step 1 (quote) even if later steps are checked
     assert.equal(
-      isNewProductCompleted({ has_process: false, price_applied_at: '2026-10-15' }),
+      isNewProductCompleted(
+        buildFullSixStepStatus({ has_quote: false, quote_date: null })
+      ),
+      false
+    );
+
+    // Missing step 4 (khsx)
+    assert.equal(
+      isNewProductCompleted(
+        buildFullSixStepStatus({ has_khsx: false, khsx_date: null })
+      ),
+      false
+    );
+
+    // Missing step 6 (st) or st_date
+    assert.equal(
+      isNewProductCompleted(
+        buildFullSixStepStatus({ has_st: false, st_date: null })
+      ),
       false
     );
     assert.equal(
-      isNewProductCompleted({ has_process: true, price_applied_at: null }),
+      isNewProductCompleted(
+        buildFullSixStepStatus({ has_st: true, st_date: null })
+      ),
       false
     );
-    assert.equal(
-      isNewProductCompleted({ has_process: true, price_applied_at: '2026-10-15' }),
-      true
-    );
+
+    // All 6 steps + st_date present -> completed
+    assert.equal(isNewProductCompleted(buildFullSixStepStatus()), true);
   });
 
-  it('calculates completion days accurately between registration date and price_applied_at', () => {
+  it('identifies the exact waiting step across all 6 sequential stages', () => {
+    assert.equal(getPendingWorkflowStep(null)?.key, 'quote');
+    assert.equal(getNewProductWaitingLabel(null), 'Chờ Báo giá');
+
+    const step2 = buildFullSixStepStatus({
+      has_bom_erp: false,
+      bom_erp_date: null,
+      has_spec_erp: false,
+      has_khsx: false,
+      has_process_erp: false,
+      has_st: false,
+      st_date: null,
+    });
+    assert.equal(getPendingWorkflowStep(step2)?.key, 'bom_erp');
+    assert.equal(getNewProductWaitingLabel(step2), 'Chờ BOM ERP');
+
+    const step3 = buildFullSixStepStatus({
+      has_spec_erp: false,
+      spec_erp_date: null,
+      has_khsx: false,
+      has_process_erp: false,
+      has_st: false,
+      st_date: null,
+    });
+    assert.equal(getPendingWorkflowStep(step3)?.key, 'spec_erp');
+    assert.equal(getNewProductWaitingLabel(step3), 'Chờ SPEC ERP');
+
+    const step4 = buildFullSixStepStatus({
+      has_khsx: false,
+      khsx_date: null,
+      has_process_erp: false,
+      has_st: false,
+      st_date: null,
+    });
+    assert.equal(getPendingWorkflowStep(step4)?.key, 'khsx');
+    assert.equal(getNewProductWaitingLabel(step4), 'Chờ KHSX');
+
+    const step5 = buildFullSixStepStatus({
+      has_process_erp: false,
+      process_erp_date: null,
+      has_st: false,
+      st_date: null,
+    });
+    assert.equal(getPendingWorkflowStep(step5)?.key, 'process_erp');
+    assert.equal(getNewProductWaitingLabel(step5), 'Chờ Quy trình ERP');
+
+    const step6 = buildFullSixStepStatus({
+      has_st: false,
+      st_date: null,
+    });
+    assert.equal(getPendingWorkflowStep(step6)?.key, 'st');
+    assert.equal(getNewProductWaitingLabel(step6), 'Chờ ST');
+
+    const done = buildFullSixStepStatus();
+    assert.equal(getPendingWorkflowStep(done), null);
+    assert.equal(getNewProductWaitingLabel(done), 'Hoàn thành SX đại trà');
+  });
+
+  it('calculates completion days accurately between registration date and st_date', () => {
     assert.equal(
       calculateCompletionDays('2026-10-01T08:30:00.000Z', '2026-10-11'),
       10
     );
-    assert.equal(
-      calculateCompletionDays('2026-10-10', '2026-10-10'),
-      0
-    );
+    assert.equal(calculateCompletionDays('2026-10-10', '2026-10-10'), 0);
     assert.equal(calculateCompletionDays('2026-10-15', '2026-10-10'), 0);
     assert.equal(calculateCompletionDays('2026-10-01', null), null);
   });
@@ -105,7 +208,7 @@ describe('stWorkLogic pure calculations', () => {
     assert.equal(yearMode.prevEnd, '2025-12-31');
   });
 
-  it('computes overview KPIs, deltas, breakdowns, and comparison rows from real records', () => {
+  it('computes overview KPIs with 6 waiting-stage counts, comparison rows, and 16-col Excel Sheet 2', () => {
     const products: StProduct[] = [
       {
         id: 'p1',
@@ -151,68 +254,79 @@ describe('stWorkLogic pure calculations', () => {
         created_at: '2026-09-01T02:00:00.000Z',
         updated_at: '2026-09-15T02:00:00.000Z',
       },
+      {
+        id: 'p5',
+        line_name: 'S Line',
+        customer_short_name: 'LG',
+        product_name: 'Module E',
+        product_code: 'ST-005',
+        specification: '8x12mm',
+        image_url: null,
+        created_at: '2026-10-18T02:00:00.000Z',
+        updated_at: '2026-10-18T02:00:00.000Z',
+      },
     ];
 
     const statuses: StNewProductStatus[] = [
-      {
+      buildFullSixStepStatus({
         id: 's1',
         product_id: 'p1',
-        has_process: true,
-        process_created_at: '2026-10-05',
-        has_unit_price: true,
-        unit_price: 12000,
-        currency: 'VND',
-        price_created_at: '2026-10-09',
-        price_applied_at: '2026-10-11',
-        notes: null,
-        updated_at: '2026-10-11T02:00:00.000Z',
-      },
-      {
+        process_erp_date: '2026-10-05',
+        st_date: '2026-10-11',
+      }),
+      buildFullSixStepStatus({
         id: 's2',
         product_id: 'p2',
-        has_process: true,
-        process_created_at: '2026-10-08',
-        has_unit_price: true,
-        unit_price: 25000,
-        currency: 'VND',
-        price_created_at: '2026-10-20',
-        price_applied_at: '2026-10-25',
-        notes: null,
-        updated_at: '2026-10-25T02:00:00.000Z',
-      },
-      {
+        process_erp_date: '2026-10-08',
+        st_date: '2026-10-25',
+      }),
+      buildFullSixStepStatus({
         id: 's3',
         product_id: 'p3',
-        has_process: true,
-        process_created_at: '2026-10-12',
-        has_unit_price: false,
-        unit_price: null,
-        currency: 'VND',
-        price_created_at: null,
-        price_applied_at: null,
-        notes: 'Chờ đơn giá',
-        updated_at: '2026-10-12T02:00:00.000Z',
-      },
-      {
+        has_khsx: false,
+        khsx_date: null,
+        has_process_erp: false,
+        process_erp_date: null,
+        has_st: false,
+        st_date: null,
+        notes: 'Chờ KHSX phân bổ',
+      }),
+      buildFullSixStepStatus({
         id: 's4',
         product_id: 'p4',
-        has_process: true,
-        process_created_at: '2026-09-05',
-        has_unit_price: true,
-        unit_price: 9000,
-        currency: 'VND',
-        price_created_at: '2026-09-10',
-        price_applied_at: '2026-09-15',
-        notes: null,
-        updated_at: '2026-09-15T02:00:00.000Z',
-      },
+        quote_date: '2026-09-02',
+        bom_erp_date: '2026-09-04',
+        spec_erp_date: '2026-09-06',
+        khsx_date: '2026-09-08',
+        process_erp_date: '2026-09-10',
+        st_date: '2026-09-15',
+      }),
+      buildFullSixStepStatus({
+        id: 's5',
+        product_id: 'p5',
+        has_quote: false,
+        quote_date: null,
+        has_bom_erp: false,
+        bom_erp_date: null,
+        has_spec_erp: false,
+        spec_erp_date: null,
+        has_khsx: false,
+        khsx_date: null,
+        has_process_erp: false,
+        process_erp_date: null,
+        has_st: false,
+        st_date: null,
+      }),
     ];
 
     const productsWithStatus = mergeProductsWithStatus(products, statuses);
     assert.equal(productsWithStatus[0].isCompleted, true);
     assert.equal(productsWithStatus[0].completionDays, 10);
     assert.equal(productsWithStatus[1].completionDays, 20);
-    assert.equal(productsWithStatus[2].progressCategory, 'pending_price');
+    assert.equal(productsWithStatus[2].currentWaitingStep, 'khsx');
+    assert.equal(productsWithStatus[2].waitingLabel, 'Chờ KHSX');
+    assert.equal(productsWithStatus[4].currentWaitingStep, 'quote');
+    assert.equal(productsWithStatus[4].waitingLabel, 'Chờ Báo giá');
 
     const requests: StChangeRequest[] = [
       {
@@ -260,13 +374,20 @@ describe('stWorkLogic pure calculations', () => {
     assert.equal(metrics.completedInPeriodCount, 2);
     assert.equal(metrics.completedInPrevPeriodCount, 1);
     assert.equal(metrics.completedDelta, 1);
-    assert.equal(metrics.inProgressTotalCount, 1);
-    assert.equal(metrics.pendingProcessCount, 0);
-    assert.equal(metrics.pendingPriceCount, 1);
+    assert.equal(metrics.inProgressTotalCount, 2);
+
+    const stepCountByKey = new Map(
+      metrics.pendingStepCounts.map((s) => [s.stepKey, s.count])
+    );
+    assert.equal(stepCountByKey.get('quote'), 1);
+    assert.equal(stepCountByKey.get('bom_erp'), 0);
+    assert.equal(stepCountByKey.get('spec_erp'), 0);
+    assert.equal(stepCountByKey.get('khsx'), 1);
+    assert.equal(stepCountByKey.get('process_erp'), 0);
+    assert.equal(stepCountByKey.get('st'), 0);
+
     assert.equal(metrics.avgCompletionDaysInPeriod, 15);
     assert.equal(metrics.requestsInPeriodCount, 2);
-    assert.equal(metrics.quotesQuotedCount, 0);
-    assert.equal(metrics.quotesRemainingCount, 0);
 
     const comparison = computeStReportComparison({
       productsWithStatus,
@@ -277,11 +398,18 @@ describe('stWorkLogic pure calculations', () => {
       prevStart: '2026-09-01',
       prevEnd: '2026-09-30',
     });
-    const completedRow = comparison.find((r) => r.key === 'mass_production_completed');
+    const completedRow = comparison.find(
+      (r) => r.key === 'mass_production_completed'
+    );
     assert.ok(completedRow);
     assert.equal(completedRow.currentValue, 2);
     assert.equal(completedRow.previousValue, 1);
     assert.equal(completedRow.delta, 1);
+
+    const procRow = comparison.find((r) => r.key === 'process_created');
+    assert.ok(procRow);
+    assert.equal(procRow.currentValue, 2);
+    assert.equal(procRow.previousValue, 1);
 
     const periodRange = resolveOverviewPeriodRange('custom', 2026, 10);
     const workbook = buildStReportWorkbook({
@@ -295,12 +423,78 @@ describe('stWorkLogic pure calculations', () => {
       workbook.worksheets.map((ws) => ws.name),
       ['Tổng hợp', 'Mã hàng mới', 'Phiếu yêu cầu', 'Báo giá khách hàng']
     );
+
+    const productSheet = workbook.getWorksheet('Mã hàng mới');
+    assert.ok(productSheet);
+    assert.equal(productSheet.columnCount, 16);
+    const headers = productSheet.getRow(3).values as unknown[];
+    assert.equal(headers[7], 'Ngày đăng ký');
+    assert.equal(headers[8], 'Báo giá');
+    assert.equal(headers[13], 'ST');
+    assert.equal(headers[15], 'Trạng thái hiện tại');
+
     for (const ws of workbook.worksheets) {
       assert.equal(ws.views[0].state, 'frozen');
       assert.equal(ws.views[0].ySplit, 3);
       assert.ok(ws.autoFilter);
       assert.ok((ws.getColumn(2).width || 0) >= 8);
     }
+  });
+
+  it('normalizes both native 6-step columns and [ST_STEPS_JSON] fallback in notes cleanly', () => {
+    // 1. Native 6-step row
+    const nativeNormalized = normalizeStNewProductStatusRow({
+      id: 'st-native',
+      product_id: 'prod-1',
+      has_quote: true,
+      quote_date: '2026-11-01',
+      has_bom_erp: true,
+      bom_erp_date: '2026-11-03',
+      has_spec_erp: true,
+      spec_erp_date: '2026-11-05',
+      has_khsx: true,
+      khsx_date: '2026-11-07',
+      has_process_erp: true,
+      process_erp_date: '2026-11-09',
+      has_st: true,
+      st_date: '2026-11-12',
+      notes: 'Hoàn tất đúng hạn',
+      updated_at: '2026-11-12T02:00:00Z',
+    });
+    assert.equal(isNewProductCompleted(nativeNormalized), true);
+    assert.equal(nativeNormalized.st_date, '2026-11-12');
+    assert.equal(nativeNormalized.notes, 'Hoàn tất đúng hạn');
+
+    // 2. Fallback encoded steps inside notes (pre-ALTER TABLE Supabase schema)
+    const encodedNotes = encodeStepsIntoNotes('Cần kiểm tra lại BOM', {
+      has_quote: true,
+      quote_date: '2026-11-20',
+      has_bom_erp: true,
+      bom_erp_date: '2026-11-21',
+      has_spec_erp: false,
+      spec_erp_date: null,
+      has_khsx: false,
+      khsx_date: null,
+      has_process_erp: false,
+      process_erp_date: null,
+      has_st: false,
+      st_date: null,
+    });
+    const fallbackNormalized = normalizeStNewProductStatusRow({
+      id: 'st-fallback',
+      product_id: 'prod-2',
+      has_process: false,
+      has_unit_price: true,
+      notes: encodedNotes,
+      updated_at: '2026-11-21T02:00:00Z',
+    });
+    assert.equal(fallbackNormalized.has_quote, true);
+    assert.equal(fallbackNormalized.quote_date, '2026-11-20');
+    assert.equal(fallbackNormalized.has_bom_erp, true);
+    assert.equal(fallbackNormalized.bom_erp_date, '2026-11-21');
+    assert.equal(fallbackNormalized.has_spec_erp, false);
+    assert.equal(fallbackNormalized.notes, 'Cần kiểm tra lại BOM');
+    assert.equal(getPendingWorkflowStep(fallbackNormalized)?.key, 'spec_erp');
   });
 
   it('normalizes Supabase rows and applies Realtime INSERT/UPDATE/DELETE cleanly', () => {
@@ -335,13 +529,18 @@ describe('stWorkLogic pure calculations', () => {
         newRow: {
           id: 'st-1',
           product_id: 'prod-1',
-          has_process: true,
-          process_created_at: '2026-11-25',
-          has_unit_price: true,
-          unit_price: '15000',
-          currency: 'VND',
-          price_created_at: '2026-11-25',
-          price_applied_at: '2026-11-25',
+          has_quote: true,
+          quote_date: '2026-11-20',
+          has_bom_erp: true,
+          bom_erp_date: '2026-11-21',
+          has_spec_erp: true,
+          spec_erp_date: '2026-11-22',
+          has_khsx: true,
+          khsx_date: '2026-11-23',
+          has_process_erp: true,
+          process_erp_date: '2026-11-24',
+          has_st: true,
+          st_date: '2026-11-25',
           notes: 'Done',
           updated_at: '2026-11-25T02:00:00Z',
         },
@@ -349,7 +548,7 @@ describe('stWorkLogic pure calculations', () => {
       },
       normalizeStNewProductStatusRow
     );
-    assert.equal(statuses[0].unit_price, 15000);
+    assert.equal(statuses[0].st_date, '2026-11-25');
     assert.equal(isNewProductCompleted(statuses[0]), true);
 
     let reqs: StChangeRequest[] = [];

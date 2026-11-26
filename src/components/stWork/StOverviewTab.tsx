@@ -242,19 +242,22 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
             </span>
           </div>
 
-          <div className="pt-2.5 border-t border-slate-100 space-y-1 text-xs">
-            <div className="flex items-center justify-between text-slate-600">
-              <span>Chưa tạo quy trình</span>
-              <span className="font-mono font-bold text-rose-600 tabular-nums">
-                {formatNumberVN(metrics.pendingProcessCount)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-slate-600">
-              <span>Đã có quy trình – đang chờ đơn giá</span>
-              <span className="font-mono font-bold text-amber-700 tabular-nums">
-                {formatNumberVN(metrics.pendingPriceCount)}
-              </span>
-            </div>
+          <div className="pt-2.5 border-t border-slate-100 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+            {metrics.pendingStepCounts.map((step) => (
+              <div
+                key={step.stepKey}
+                className="flex items-center justify-between gap-1 text-slate-600"
+              >
+                <span className="truncate">{step.waitingLabel}</span>
+                <span
+                  className={`font-mono font-bold tabular-nums ${
+                    step.count > 0 ? 'text-amber-700' : 'text-slate-400'
+                  }`}
+                >
+                  {formatNumberVN(step.count)}
+                </span>
+              </div>
+            ))}
           </div>
         </button>
 

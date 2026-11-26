@@ -88,16 +88,113 @@ export interface StProduct {
   updated_at: string;
 }
 
+export type StWorkflowStepKey =
+  | 'quote'
+  | 'bom_erp'
+  | 'spec_erp'
+  | 'khsx'
+  | 'process_erp'
+  | 'st';
+
+export type StWorkflowBoolField =
+  | 'has_quote'
+  | 'has_bom_erp'
+  | 'has_spec_erp'
+  | 'has_khsx'
+  | 'has_process_erp'
+  | 'has_st';
+
+export type StWorkflowDateField =
+  | 'quote_date'
+  | 'bom_erp_date'
+  | 'spec_erp_date'
+  | 'khsx_date'
+  | 'process_erp_date'
+  | 'st_date';
+
+export interface StWorkflowStepMeta {
+  key: StWorkflowStepKey;
+  order: number;
+  label: string;
+  waitingLabel: string;
+  boolField: StWorkflowBoolField;
+  dateField: StWorkflowDateField;
+}
+
+export const ST_WORKFLOW_STEPS: readonly StWorkflowStepMeta[] = [
+  {
+    key: 'quote',
+    order: 1,
+    label: 'Báo giá',
+    waitingLabel: 'Chờ Báo giá',
+    boolField: 'has_quote',
+    dateField: 'quote_date',
+  },
+  {
+    key: 'bom_erp',
+    order: 2,
+    label: 'BOM ERP',
+    waitingLabel: 'Chờ BOM ERP',
+    boolField: 'has_bom_erp',
+    dateField: 'bom_erp_date',
+  },
+  {
+    key: 'spec_erp',
+    order: 3,
+    label: 'SPEC ERP',
+    waitingLabel: 'Chờ SPEC ERP',
+    boolField: 'has_spec_erp',
+    dateField: 'spec_erp_date',
+  },
+  {
+    key: 'khsx',
+    order: 4,
+    label: 'KHSX',
+    waitingLabel: 'Chờ KHSX',
+    boolField: 'has_khsx',
+    dateField: 'khsx_date',
+  },
+  {
+    key: 'process_erp',
+    order: 5,
+    label: 'Quy trình ERP',
+    waitingLabel: 'Chờ Quy trình ERP',
+    boolField: 'has_process_erp',
+    dateField: 'process_erp_date',
+  },
+  {
+    key: 'st',
+    order: 6,
+    label: 'ST',
+    waitingLabel: 'Chờ ST',
+    boolField: 'has_st',
+    dateField: 'st_date',
+  },
+] as const;
+
 export interface StNewProductStatus {
   id: string;
   product_id: string;
-  has_process: boolean;
-  process_created_at: string | null;
-  has_unit_price: boolean;
-  unit_price: number | null;
-  currency: string;
-  price_created_at: string | null;
-  price_applied_at: string | null;
+  has_quote: boolean;
+  quote_date: string | null;
+  has_bom_erp: boolean;
+  bom_erp_date: string | null;
+  has_spec_erp: boolean;
+  spec_erp_date: string | null;
+  has_khsx: boolean;
+  khsx_date: string | null;
+  has_process_erp: boolean;
+  process_erp_date: string | null;
+  has_st: boolean;
+  st_date: string | null;
+  // Legacy compatibility fields (kept optional/synced with Supabase)
+  has_process?: boolean;
+  process_created_at?: string | null;
+  has_unit_price?: boolean;
+  unit_price?: number | null;
+  currency?: string;
+  price_created_at?: string | null;
+  price_applied_at?: string | null;
   notes: string | null;
   updated_at: string;
 }
@@ -106,7 +203,8 @@ export interface StProductWithStatus {
   product: StProduct;
   status: StNewProductStatus | null;
   isCompleted: boolean;
-  progressCategory: 'completed' | 'pending_process' | 'pending_price';
+  currentWaitingStep: StWorkflowStepKey | null;
+  waitingLabel: string;
   completionDays: number | null;
 }
 
@@ -154,13 +252,19 @@ export interface StResolvedPeriodRange {
   prevLabel: string;
 }
 
+export interface StPendingStepMetric {
+  stepKey: StWorkflowStepKey;
+  label: string;
+  waitingLabel: string;
+  count: number;
+}
+
 export interface StOverviewMetrics {
   completedInPeriodCount: number;
   completedInPrevPeriodCount: number;
   completedDelta: number;
   inProgressTotalCount: number;
-  pendingProcessCount: number;
-  pendingPriceCount: number;
+  pendingStepCounts: StPendingStepMetric[];
   avgCompletionDaysInPeriod: number | null;
   avgCompletionDaysAllCompleted: number | null;
   requestsInPeriodCount: number;
@@ -276,10 +380,10 @@ export function shiftIsoDateByDays(isoDate: string, deltaDays: number): string {
 
 export function calculateCompletionDays(
   registeredDate?: string | null,
-  priceAppliedAt?: string | null
+  stDate?: string | null
 ): number | null {
   const startIso = toIsoDateOnly(registeredDate);
-  const endIso = toIsoDateOnly(priceAppliedAt);
+  const endIso = toIsoDateOnly(stDate);
   if (!startIso || !endIso) return null;
 
   const [sy, sm, sd] = startIso.split('-').map(Number);
@@ -291,18 +395,38 @@ export function calculateCompletionDays(
 }
 
 export function isNewProductCompleted(
-  status?: Pick<StNewProductStatus, 'has_process' | 'price_applied_at'> | null
+  status?: Partial<StNewProductStatus> | null
 ): boolean {
   if (!status) return false;
-  return Boolean(status.has_process && toIsoDateOnly(status.price_applied_at));
+  return Boolean(
+    status.has_quote &&
+      status.has_bom_erp &&
+      status.has_spec_erp &&
+      status.has_khsx &&
+      status.has_process_erp &&
+      status.has_st &&
+      toIsoDateOnly(status.st_date)
+  );
 }
 
-export function getNewProductProgressCategory(
-  status?: Pick<StNewProductStatus, 'has_process' | 'price_applied_at'> | null
-): 'completed' | 'pending_process' | 'pending_price' {
-  if (isNewProductCompleted(status)) return 'completed';
-  if (status?.has_process) return 'pending_price';
-  return 'pending_process';
+export function getPendingWorkflowStep(
+  status?: Partial<StNewProductStatus> | null
+): StWorkflowStepMeta | null {
+  if (isNewProductCompleted(status)) return null;
+  for (const step of ST_WORKFLOW_STEPS) {
+    if (!status?.[step.boolField]) {
+      return step;
+    }
+  }
+  // If all 6 booleans are true but st_date is still missing, it is waiting on ST date
+  return ST_WORKFLOW_STEPS[ST_WORKFLOW_STEPS.length - 1];
+}
+
+export function getNewProductWaitingLabel(
+  status?: Partial<StNewProductStatus> | null
+): string {
+  const pending = getPendingWorkflowStep(status);
+  return pending ? pending.waitingLabel : 'Hoàn thành SX đại trà';
 }
 
 export function mergeProductsWithStatus(
@@ -319,16 +443,19 @@ export function mergeProductsWithStatus(
   return products.map((product) => {
     const status = statusByProductId.get(product.id) || null;
     const isCompleted = isNewProductCompleted(status);
-    const progressCategory = getNewProductProgressCategory(status);
+    const pendingStep = getPendingWorkflowStep(status);
     const completionDays = isCompleted
-      ? calculateCompletionDays(product.created_at, status?.price_applied_at)
+      ? calculateCompletionDays(product.created_at, status?.st_date)
       : null;
 
     return {
       product,
       status,
       isCompleted,
-      progressCategory,
+      currentWaitingStep: pendingStep ? pendingStep.key : null,
+      waitingLabel: pendingStep
+        ? pendingStep.waitingLabel
+        : 'Hoàn thành SX đại trà',
       completionDays,
     };
   });
@@ -511,21 +638,31 @@ export function computeStOverviewMetrics(params: {
   const completedInPeriod = productsWithStatus.filter(
     (item) =>
       item.isCompleted &&
-      isDateInRange(item.status?.price_applied_at, currentStart, currentEnd)
+      isDateInRange(item.status?.st_date, currentStart, currentEnd)
   );
   const completedInPrevPeriod = productsWithStatus.filter(
     (item) =>
       item.isCompleted &&
-      isDateInRange(item.status?.price_applied_at, prevStart, prevEnd)
+      isDateInRange(item.status?.st_date, prevStart, prevEnd)
   );
 
   const inProgressItems = productsWithStatus.filter((item) => !item.isCompleted);
-  const pendingProcessCount = inProgressItems.filter(
-    (item) => item.progressCategory === 'pending_process'
-  ).length;
-  const pendingPriceCount = inProgressItems.filter(
-    (item) => item.progressCategory === 'pending_price'
-  ).length;
+  const pendingStepMap = new Map<StWorkflowStepKey, number>();
+  for (const step of ST_WORKFLOW_STEPS) {
+    pendingStepMap.set(step.key, 0);
+  }
+  for (const item of inProgressItems) {
+    const stepKey = item.currentWaitingStep || 'quote';
+    pendingStepMap.set(stepKey, (pendingStepMap.get(stepKey) || 0) + 1);
+  }
+  const pendingStepCounts: StPendingStepMetric[] = ST_WORKFLOW_STEPS.map(
+    (step) => ({
+      stepKey: step.key,
+      label: step.label,
+      waitingLabel: step.waitingLabel,
+      count: pendingStepMap.get(step.key) || 0,
+    })
+  );
 
   const periodDays = completedInPeriod
     .map((item) => item.completionDays)
@@ -599,8 +736,7 @@ export function computeStOverviewMetrics(params: {
     completedInPrevPeriodCount: completedInPrevPeriod.length,
     completedDelta: completedInPeriod.length - completedInPrevPeriod.length,
     inProgressTotalCount: inProgressItems.length,
-    pendingProcessCount,
-    pendingPriceCount,
+    pendingStepCounts,
     avgCompletionDaysInPeriod,
     avgCompletionDaysAllCompleted,
     requestsInPeriodCount: requestsInPeriod.length,
@@ -641,24 +777,24 @@ export function computeStReportComparison(params: {
 
   const procCur = productsWithStatus.filter(
     (p) =>
-      p.status?.has_process &&
-      isDateInRange(p.status.process_created_at, currentStart, currentEnd)
+      p.status?.has_process_erp &&
+      isDateInRange(p.status.process_erp_date, currentStart, currentEnd)
   ).length;
   const procPrev = productsWithStatus.filter(
     (p) =>
-      p.status?.has_process &&
-      isDateInRange(p.status.process_created_at, prevStart, prevEnd)
+      p.status?.has_process_erp &&
+      isDateInRange(p.status.process_erp_date, prevStart, prevEnd)
   ).length;
 
   const doneCurList = productsWithStatus.filter(
     (p) =>
       p.isCompleted &&
-      isDateInRange(p.status?.price_applied_at, currentStart, currentEnd)
+      isDateInRange(p.status?.st_date, currentStart, currentEnd)
   );
   const donePrevList = productsWithStatus.filter(
     (p) =>
       p.isCompleted &&
-      isDateInRange(p.status?.price_applied_at, prevStart, prevEnd)
+      isDateInRange(p.status?.st_date, prevStart, prevEnd)
   );
 
   const avgDaysCur = (() => {
@@ -717,16 +853,16 @@ export function computeStReportComparison(params: {
       previousValue: regPrev,
       delta: regCur - regPrev,
       unit: 'mã',
-      note: 'Số mã sản phẩm được tạo trong danh mục sản phẩm',
+      note: 'Số mã sản phẩm được đăng ký mới trong kỳ',
     },
     {
       key: 'process_created',
-      label: 'Mã hàng đã tạo quy trình',
+      label: 'Mã hàng hoàn thành Quy trình ERP',
       currentValue: procCur,
       previousValue: procPrev,
       delta: procCur - procPrev,
       unit: 'mã',
-      note: 'Tính theo ngày tạo quy trình',
+      note: 'Tính theo ngày hoàn thành bước Quy trình ERP',
     },
     {
       key: 'mass_production_completed',
@@ -735,7 +871,7 @@ export function computeStReportComparison(params: {
       previousValue: donePrevList.length,
       delta: doneCurList.length - donePrevList.length,
       unit: 'mã',
-      note: 'Đã tích Có quy trình và có Ngày áp dụng đơn giá',
+      note: 'Hoàn thành đủ 6 bước tuần tự tới bước cuối ST',
     },
     {
       key: 'avg_completion_days',
@@ -744,7 +880,7 @@ export function computeStReportComparison(params: {
       previousValue: avgDaysPrev,
       delta: Number((avgDaysCur - avgDaysPrev).toFixed(1)),
       unit: 'ngày',
-      note: 'Trung bình từ ngày đăng ký đến ngày áp dụng đơn giá',
+      note: 'Trung bình từ ngày đăng ký đến ngày hoàn thành ST',
     },
     {
       key: 'change_requests_received',
@@ -829,6 +965,83 @@ export function normalizeStProductRow(row: Record<string, unknown>): StProduct {
   };
 }
 
+const ST_STEPS_MARKER_REGEX = /\n?\[ST_STEPS_JSON:(\{[\s\S]*?\})\]\s*$/;
+
+export interface StEncodedStepsPayload {
+  hq?: boolean;
+  qd?: string | null;
+  hb?: boolean;
+  bd?: string | null;
+  hs?: boolean;
+  sd?: string | null;
+  hk?: boolean;
+  kd?: string | null;
+  hp?: boolean;
+  pd?: string | null;
+  hst?: boolean;
+  std?: string | null;
+}
+
+export function extractEncodedStepsFromNotes(rawNotes: string | null | undefined): {
+  cleanNotes: string | null;
+  steps: StEncodedStepsPayload | null;
+} {
+  if (typeof rawNotes !== 'string') {
+    return { cleanNotes: null, steps: null };
+  }
+  const match = rawNotes.match(ST_STEPS_MARKER_REGEX);
+  if (!match) {
+    const trimmed = rawNotes.trim();
+    return { cleanNotes: trimmed || null, steps: null };
+  }
+  const cleanText = rawNotes.slice(0, match.index).trim();
+  try {
+    const parsed = JSON.parse(match[1]) as StEncodedStepsPayload;
+    return {
+      cleanNotes: cleanText || null,
+      steps: parsed && typeof parsed === 'object' ? parsed : null,
+    };
+  } catch {
+    return { cleanNotes: cleanText || null, steps: null };
+  }
+}
+
+export function encodeStepsIntoNotes(
+  userNotes: string | null | undefined,
+  status: {
+    has_quote: boolean;
+    quote_date: string | null;
+    has_bom_erp: boolean;
+    bom_erp_date: string | null;
+    has_spec_erp: boolean;
+    spec_erp_date: string | null;
+    has_khsx: boolean;
+    khsx_date: string | null;
+    has_process_erp: boolean;
+    process_erp_date: string | null;
+    has_st: boolean;
+    st_date: string | null;
+  }
+): string {
+  const clean = (userNotes || '').trim();
+  const payload: StEncodedStepsPayload = {
+    hq: Boolean(status.has_quote),
+    qd: status.quote_date || null,
+    hb: Boolean(status.has_bom_erp),
+    bd: status.bom_erp_date || null,
+    hs: Boolean(status.has_spec_erp),
+    sd: status.spec_erp_date || null,
+    hk: Boolean(status.has_khsx),
+    kd: status.khsx_date || null,
+    hp: Boolean(status.has_process_erp),
+    pd: status.process_erp_date || null,
+    hst: Boolean(status.has_st),
+    std: status.st_date || null,
+  };
+  const marker = `[ST_STEPS_JSON:${JSON.stringify(payload)}]`;
+  return clean ? `${clean}\n${marker}` : marker;
+}
+
 export function normalizeStNewProductStatusRow(
   row: Record<string, unknown>
 ): StNewProductStatus {
@@ -838,26 +1051,90 @@ export function normalizeStNewProductStatusRow(
       ? null
       : Number(rawPrice);
 
+  const { cleanNotes, steps: encodedSteps } = extractEncodedStepsFromNotes(
+    typeof row.notes === 'string' ? row.notes : null
+  );
+
+  const hasNativeSixSteps =
+    'has_quote' in row ||
+    'has_bom_erp' in row ||
+    'has_spec_erp' in row ||
+    'has_khsx' in row ||
+    'has_process_erp' in row ||
+    'has_st' in row;
+
+  const normDate = (val: unknown): string | null =>
+    toIsoDateOnly(typeof val === 'string' ? val : null) || null;
+
+  const has_quote = hasNativeSixSteps
+    ? Boolean(row.has_quote)
+    : Boolean(encodedSteps?.hq);
+  const quote_date = hasNativeSixSteps
+    ? normDate(row.quote_date)
+    : normDate(encodedSteps?.qd);
+
+  const has_bom_erp = hasNativeSixSteps
+    ? Boolean(row.has_bom_erp)
+    : Boolean(encodedSteps?.hb);
+  const bom_erp_date = hasNativeSixSteps
+    ? normDate(row.bom_erp_date)
+    : normDate(encodedSteps?.bd);
+
+  const has_spec_erp = hasNativeSixSteps
+    ? Boolean(row.has_spec_erp)
+    : Boolean(encodedSteps?.hs);
+  const spec_erp_date = hasNativeSixSteps
+    ? normDate(row.spec_erp_date)
+    : normDate(encodedSteps?.sd);
+
+  const has_khsx = hasNativeSixSteps
+    ? Boolean(row.has_khsx)
+    : Boolean(encodedSteps?.hk);
+  const khsx_date = hasNativeSixSteps
+    ? normDate(row.khsx_date)
+    : normDate(encodedSteps?.kd);
+
+  const has_process_erp = hasNativeSixSteps
+    ? Boolean(row.has_process_erp)
+    : Boolean(encodedSteps?.hp);
+  const process_erp_date = hasNativeSixSteps
+    ? normDate(row.process_erp_date)
+    : normDate(encodedSteps?.pd);
+
+  const has_st = hasNativeSixSteps
+    ? Boolean(row.has_st)
+    : Boolean(encodedSteps?.hst);
+  const st_date = hasNativeSixSteps
+    ? normDate(row.st_date)
+    : normDate(encodedSteps?.std);
+
   return {
     id: String(row.id || ''),
     product_id: String(row.product_id || ''),
-    has_process: Boolean(row.has_process),
-    process_created_at: toIsoDateOnly(
-      typeof row.process_created_at === 'string' ? row.process_created_at : null
-    ) || null,
-    has_unit_price: Boolean(row.has_unit_price),
-    unit_price: parsedPrice !== null && !Number.isNaN(parsedPrice) ? parsedPrice : null,
+    has_quote,
+    quote_date,
+    has_bom_erp,
+    bom_erp_date,
+    has_spec_erp,
+    spec_erp_date,
+    has_khsx,
+    khsx_date,
+    has_process_erp,
+    process_erp_date,
+    has_st,
+    st_date,
+    has_process: Boolean(row.has_process ?? has_process_erp),
+    process_created_at: normDate(row.process_created_at) || process_erp_date,
+    has_unit_price: Boolean(row.has_unit_price ?? has_quote),
+    unit_price:
+      parsedPrice !== null && !Number.isNaN(parsedPrice) ? parsedPrice : null,
     currency:
       typeof row.currency === 'string' && row.currency.trim()
         ? row.currency.trim()
         : 'VND',
-    price_created_at: toIsoDateOnly(
-      typeof row.price_created_at === 'string' ? row.price_created_at : null
-    ) || null,
-    price_applied_at: toIsoDateOnly(
-      typeof row.price_applied_at === 'string' ? row.price_applied_at : null
-    ) || null,
-    notes: typeof row.notes === 'string' ? row.notes : null,
+    price_created_at: normDate(row.price_created_at) || quote_date,
+    price_applied_at: normDate(row.price_applied_at) || st_date,
+    notes: cleanNotes,
     updated_at:
       typeof row.updated_at === 'string' && row.updated_at
         ? row.updated_at
