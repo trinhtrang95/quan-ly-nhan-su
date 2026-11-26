@@ -146,6 +146,7 @@ export type ActiveModule =
   | 'leave_logs'
   | 'annual_report'
   | 'general_settings'
+  | 'st_work'
   | 'settings';
 
 export type UserRole = 'admin' | 'user';

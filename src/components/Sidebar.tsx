@@ -15,6 +15,7 @@ import {
   FileText,
   Clock,
   SlidersHorizontal,
+  Briefcase,
 } from 'lucide-react';
 import { ActiveModule as BaseActiveModule, CompanyUnit, UserAccount } from '../types/hr';
 
@@ -44,7 +45,7 @@ export interface NavChildItem {
 }
 
 export interface NavParentItem {
-  id: 'dashboard' | 'hr_module' | 'settings';
+  id: 'dashboard' | 'hr_module' | 'st_work' | 'settings';
   label: string;
   shortLabel: string;
   path?: string;
@@ -108,6 +109,13 @@ export const NAVIGATION_DATA: NavParentItem[] = [
         testId: 'sidebar-subnav-general-settings',
       },
     ],
+  },
+  {
+    id: 'st_work',
+    label: 'Quản lý công việc ST',
+    shortLabel: 'CV ST',
+    path: '/quan-ly-cong-viec-st',
+    icon: Briefcase,
   },
   {
     id: 'settings',
@@ -448,9 +456,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               );
             }
 
-            // Các mục Menu cấp 1 đơn: "Trang chủ" và "Hệ thống / Cài đặt"
+            // Các mục Menu cấp 1 đơn: "Trang chủ", "Quản lý công việc ST" và "Hệ thống / Cài đặt"
             const isTopActive =
               (item.id === 'dashboard' && activeModule === 'dashboard') ||
+              (item.id === 'st_work' && activeModule === 'st_work') ||
               (item.id === 'settings' && activeModule === 'settings');
 
             return (
@@ -460,6 +469,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 data-testid={`sidebar-nav-${item.id}`}
                 onClick={() => {
                   if (item.id === 'dashboard') onSelectModule('dashboard');
+                  else if (item.id === 'st_work') onSelectModule('st_work');
                   else if (item.id === 'settings') onSelectModule('settings');
                 }}
                 title={collapsed ? item.label : undefined}
@@ -617,6 +627,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           );
         })}
+
+        <button
+          type="button"
+          onClick={() => onSelectModule('st_work')}
+          className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 px-2 transition-colors cursor-pointer ${
+            activeModule === 'st_work'
+              ? 'bg-white text-[#14539E] font-bold'
+              : 'text-white/80 hover:text-white'
+          }`}
+        >
+          <Briefcase
+            className={`w-4 h-4 ${
+              activeModule === 'st_work' ? 'text-[#14539E]' : 'text-blue-100'
+            }`}
+          />
+          <span className="text-[10px] leading-tight whitespace-nowrap">
+            CV ST
+          </span>
+        </button>
 
         {isAdmin && (
           <button

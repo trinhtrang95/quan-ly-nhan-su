@@ -21,6 +21,7 @@ const MODULE_TITLES: Record<ActiveModule, string> = {
   leave_logs: 'Nhật ký Nghỉ phép & Đi muộn',
   annual_report: 'Báo cáo tổng hợp',
   general_settings: 'Thiết lập chung',
+  st_work: 'Quản lý công việc ST',
   settings: 'Cài đặt Đơn vị & Hệ thống',
 };
 
@@ -136,6 +137,17 @@ export const TopBannerHeader: React.FC<TopBannerHeaderProps> = ({
           }`}
         >
           Báo cáo tổng hợp
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelectModule('st_work')}
+          className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            activeModule === 'st_work'
+              ? 'text-[#0D9488] font-semibold underline underline-offset-4'
+              : ''
+          }`}
+        >
+          Quản lý công việc ST
         </button>
         {isAdmin && (
           <button

@@ -864,11 +864,11 @@ export async function deleteImageFromHrBucket(publicUrl?: string): Promise<void>
  */
 export async function uploadImageToHrBucket(
   file: File,
-  folder: 'avatars' | 'proofs' | 'logos',
+  folder: 'avatars' | 'proofs' | 'logos' | 'st-products',
   alreadyCompressed: boolean = false,
   precomputedDataUrl: string = ''
 ): Promise<string> {
-  const maxWidth = folder === 'proofs' ? 1000 : 600;
+  const maxWidth = folder === 'proofs' || folder === 'st-products' ? 1000 : 600;
   const quality = 0.7;
 
   let targetFile = file;

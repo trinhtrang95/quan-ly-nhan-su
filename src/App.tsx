@@ -81,6 +81,7 @@ import { LightboxModal } from './components/LightboxModal';
 import { PrintReportModal, ReportPrintType } from './components/PrintReportModal';
 import { OvertimeWorkspace } from './components/overtime/OvertimeWorkspace';
 import { GeneralSettingsView } from './components/settings/GeneralSettingsView';
+import { StWorkWorkspace } from './components/stWork/StWorkWorkspace';
 import { EmployeeColumnId } from './utils/employeeColumns';
 import {
   applyThemeToDocument,
@@ -180,11 +181,15 @@ function AppContent() {
   const [hasMountedGeneralSettings, setHasMountedGeneralSettings] = useState<boolean>(
     initialRoute.module === 'general_settings'
   );
+  const [hasMountedStWork, setHasMountedStWork] = useState<boolean>(
+    initialRoute.module === 'st_work'
+  );
 
   useEffect(() => {
     if (activeModule === 'annual_report') setHasMountedReport(true);
     if (activeModule === 'overtime') setHasMountedOvertime(true);
     if (activeModule === 'general_settings') setHasMountedGeneralSettings(true);
+    if (activeModule === 'st_work') setHasMountedStWork(true);
   }, [activeModule]);
 
   // Đồng bộ URL định tuyến thông qua Custom Hook độc lập (useHRRouteSync)
@@ -1557,6 +1562,7 @@ function AppContent() {
           activeModule === 'dashboard' ||
           activeModule === 'overtime' ||
           activeModule === 'general_settings' ||
+          activeModule === 'st_work' ||
           (activeModule === 'leave_logs' && leaveSubTab === 'leave_requests')
             ? 'overflow-y-auto lg:overflow-hidden pb-20 md:pb-8 lg:pb-0'
             : 'overflow-y-auto pb-20 md:pb-8'
@@ -1566,7 +1572,8 @@ function AppContent() {
           className={`w-full max-w-[1600px] mx-auto flex-1 ${
             activeModule === 'dashboard' ||
             activeModule === 'overtime' ||
-            activeModule === 'general_settings'
+            activeModule === 'general_settings' ||
+            activeModule === 'st_work'
               ? 'px-0 pt-0 min-h-0 flex flex-col overflow-hidden'
               : activeModule === 'leave_logs' &&
                   leaveSubTab === 'leave_requests'
@@ -1581,6 +1588,7 @@ function AppContent() {
               activeModule === 'dashboard' ||
               activeModule === 'overtime' ||
               activeModule === 'general_settings' ||
+              activeModule === 'st_work' ||
               (activeModule === 'leave_logs' &&
                 leaveSubTab === 'leave_requests')
                 ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden'
@@ -1891,6 +1899,21 @@ function AppContent() {
                   groups={effectiveGroups}
                   employees={companyEmployees}
                   activeCompanyId={activeCompany.id}
+                  onShowToast={showToast}
+                />
+              </div>
+            )}
+
+            {hasMountedStWork && (
+              <div
+                className={
+                  activeModule === 'st_work'
+                    ? 'flex-1 h-full min-h-0 flex flex-col overflow-hidden'
+                    : 'hidden'
+                }
+              >
+                <StWorkWorkspace
+                  groups={effectiveGroups}
                   onShowToast={showToast}
                 />
               </div>

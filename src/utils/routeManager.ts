@@ -73,6 +73,13 @@ export class HRRouteManager {
         reportSubTab: 'monthly_summary',
       };
     }
+    if (clean === '/quan-ly-cong-viec-st') {
+      return {
+        module: 'st_work',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+      };
+    }
     if (clean === '/cai-dat' || clean === '/he-thong') {
       return {
         module: 'settings',
@@ -102,6 +109,7 @@ export class HRRouteManager {
     }
     if (module === 'overtime') return '/tang-ca';
     if (module === 'general_settings') return '/thiet-lap-chung';
+    if (module === 'st_work') return '/quan-ly-cong-viec-st';
     if (module === 'settings') return '/cai-dat';
     return '/';
   }
