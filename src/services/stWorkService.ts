@@ -81,6 +81,8 @@ export async function fetchStNewProductStatuses(): Promise<StNewProductStatus[]>
   if (Array.isArray(rows) && rows.length > 0) {
     supportsNativeTwoStepColumns =
       'has_process_erp' in rows[0] && 'has_st' in rows[0];
+    supportsNativeStageColumns =
+      'has_stage_win' in rows[0] && 'has_stage_fin' in rows[0];
   }
   return Array.isArray(rows)
     ? rows.map(normalizeStNewProductStatusRow)
@@ -334,6 +336,9 @@ export async function createStProduct(input: {
     supportsNativeTwoStepColumns =
       'has_process_erp' in existingStatusRows[0] &&
       'has_st' in existingStatusRows[0];
+    supportsNativeStageColumns =
+      'has_stage_win' in existingStatusRows[0] &&
+      'has_stage_fin' in existingStatusRows[0];
     createdStatus = normalizeStNewProductStatusRow(existingStatusRows[0]);
   } else {
     const baseLegacyPayload = {
@@ -400,6 +405,20 @@ export async function createStProduct(input: {
         product_id: createdProduct.id,
         has_process_erp: false,
         process_erp_date: null,
+        has_stage_win: false,
+        stage_win_date: null,
+        has_stage_cut: false,
+        stage_cut_date: null,
+        has_stage_sol: false,
+        stage_sol_date: null,
+        has_stage_ass: false,
+        stage_ass_date: null,
+        has_stage_imp: false,
+        stage_imp_date: null,
+        has_stage_sol2: false,
+        stage_sol2_date: null,
+        has_stage_fin: false,
+        stage_fin_date: null,
         has_st: false,
         st_date: null,
         has_process: false,
@@ -477,6 +496,7 @@ export async function deleteStProduct(id: string): Promise<void> {
 // ==========================================
 
 let supportsNativeTwoStepColumns: boolean | null = null;
+let supportsNativeStageColumns: boolean | null = null;
 
 function isMissingWorkflowColumnError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err || '');
@@ -493,6 +513,20 @@ export interface UpsertStNewProductStatusInput {
   product_id: string;
   has_process_erp: boolean;
   process_erp_date: string | null;
+  has_stage_win?: boolean;
+  stage_win_date?: string | null;
+  has_stage_cut?: boolean;
+  stage_cut_date?: string | null;
+  has_stage_sol?: boolean;
+  stage_sol_date?: string | null;
+  has_stage_ass?: boolean;
+  stage_ass_date?: string | null;
+  has_stage_imp?: boolean;
+  stage_imp_date?: string | null;
+  has_stage_sol2?: boolean;
+  stage_sol2_date?: string | null;
+  has_stage_fin?: boolean;
+  stage_fin_date?: string | null;
   has_st: boolean;
   st_date: string | null;
   has_bom_erp?: boolean;
@@ -512,13 +546,32 @@ export async function upsertStNewProductStatus(
   input: UpsertStNewProductStatusInput
 ): Promise<StNewProductStatus> {
   const nowIso = new Date().toISOString();
+  const stageFields = {
+    has_stage_win: Boolean(input.has_stage_win),
+    stage_win_date: input.stage_win_date || null,
+    has_stage_cut: Boolean(input.has_stage_cut),
+    stage_cut_date: input.stage_cut_date || null,
+    has_stage_sol: Boolean(input.has_stage_sol),
+    stage_sol_date: input.stage_sol_date || null,
+    has_stage_ass: Boolean(input.has_stage_ass),
+    stage_ass_date: input.stage_ass_date || null,
+    has_stage_imp: Boolean(input.has_stage_imp),
+    stage_imp_date: input.stage_imp_date || null,
+    has_stage_sol2: Boolean(input.has_stage_sol2),
+    stage_sol2_date: input.stage_sol2_date || null,
+    has_stage_fin: Boolean(input.has_stage_fin),
+    stage_fin_date: input.stage_fin_date || null,
+  };
   const twoStepValues = {
     has_process_erp: Boolean(input.has_process_erp),
     process_erp_date: input.process_erp_date || null,
     has_st: Boolean(input.has_st),
     st_date: input.st_date || null,
   };
-  const completed = isNewProductCompleted(twoStepValues);
+  const completed = isNewProductCompleted({
+    ...twoStepValues,
+    ...stageFields,
+  });
   const cleanUserNotes = input.notes?.trim() || null;
 
   const legacyBasePayload = {
@@ -541,6 +594,7 @@ export async function upsertStNewProductStatus(
   const nativePayload = {
     ...legacyBasePayload,
     ...twoStepValues,
+    ...stageFields,
     notes: cleanUserNotes,
   };
 
@@ -548,6 +602,7 @@ export async function upsertStNewProductStatus(
     ...legacyBasePayload,
     notes: encodeStepsIntoNotes(cleanUserNotes, {
       ...twoStepValues,
+      ...stageFields,
       ...(typeof input.has_bom_erp === 'boolean'
         ? { has_bom_erp: input.has_bom_erp, bom_erp_date: input.bom_erp_date || null }
         : {}),
@@ -599,19 +654,23 @@ export async function upsertStNewProductStatus(
       }
     );
     if (!Array.isArray(inserted) || !inserted[0]) {
-      throw new Error('Không thể lưu trạng thái Mã hàng mới.');
+      throw new Error('Không thể lưu trạng thái Đơn giá mới.');
     }
     return normalizeStNewProductStatusRow(inserted[0]);
   };
 
-  if (supportsNativeTwoStepColumns !== false) {
+  if (
+    supportsNativeTwoStepColumns !== false &&
+    supportsNativeStageColumns !== false
+  ) {
     try {
       const saved = await sendSave(nativePayload);
       supportsNativeTwoStepColumns = true;
+      supportsNativeStageColumns = true;
       return saved;
     } catch (err) {
       if (isMissingWorkflowColumnError(err)) {
-        supportsNativeTwoStepColumns = false;
+        supportsNativeStageColumns = false;
       } else {
         throw err;
       }

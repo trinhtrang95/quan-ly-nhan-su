@@ -91,7 +91,15 @@ export class HRRouteManager {
         stWorkSubTab: 'overview',
       };
     }
-    if (clean === '/st-ma-hang') {
+    if (clean === '/st-danh-muc-san-pham') {
+      return {
+        module: 'st_work',
+        leaveSubTab: 'leave_requests',
+        reportSubTab: 'monthly_summary',
+        stWorkSubTab: 'products_catalog',
+      };
+    }
+    if (clean === '/st-don-gia-moi' || clean === '/st-ma-hang') {
       return {
         module: 'st_work',
         leaveSubTab: 'leave_requests',
@@ -156,7 +164,8 @@ export class HRRouteManager {
     if (module === 'overtime') return '/tang-ca';
     if (module === 'general_settings') return '/thiet-lap-chung';
     if (module === 'st_work') {
-      if (stWorkSubTab === 'new_products') return '/st-ma-hang';
+      if (stWorkSubTab === 'products_catalog') return '/st-danh-muc-san-pham';
+      if (stWorkSubTab === 'new_products') return '/st-don-gia-moi';
       if (stWorkSubTab === 'change_requests') return '/st-phieu-yeu-cau';
       if (stWorkSubTab === 'customer_quotes') return '/st-bao-gia';
       if (stWorkSubTab === 'reports') return '/st-bao-cao';

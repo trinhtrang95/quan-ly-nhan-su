@@ -5,6 +5,7 @@ import {
   ClipboardList,
   FileSpreadsheet,
   LayoutGrid,
+  Package,
   PackageCheck,
 } from 'lucide-react';
 import { DepartmentGroup } from '../../types/hr';
@@ -34,6 +35,7 @@ import { StChangeRequestsTab } from './StChangeRequestsTab';
 import { StCustomerQuotesTab } from './StCustomerQuotesTab';
 import { StNewProductsTab } from './StNewProductsTab';
 import { StOverviewTab } from './StOverviewTab';
+import { StProductCatalogTab } from './StProductCatalogTab';
 import { StReportTab } from './StReportTab';
 
 export interface StWorkWorkspaceProps {
@@ -57,8 +59,14 @@ const SUB_TAB_META: Record<
       'Tổng hợp tiến độ mã hàng mới SX đại trà, phiếu yêu cầu thay đổi và báo giá khách hàng',
     icon: LayoutGrid,
   },
+  products_catalog: {
+    title: 'Danh mục sản phẩm',
+    subtitle:
+      'Quản lý thông tin chuẩn mã hàng, quy cách, Line, Khách hàng và hình ảnh sản phẩm',
+    icon: Package,
+  },
   new_products: {
-    title: 'Danh mục Mã hàng',
+    title: 'Đơn giá mới',
     subtitle: '',
     icon: PackageCheck,
   },
@@ -293,6 +301,17 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
           </div>
         )}
 
+        {activeTab === 'products_catalog' && (
+          <StProductCatalogTab
+            lines={lines}
+            customers={customers}
+            products={products}
+            isLoading={isLoading}
+            onRefresh={() => loadSnapshot(true)}
+            onShowToast={onShowToast}
+          />
+        )}
+
         {activeTab === 'new_products' && (
           <StNewProductsTab
             lines={lines}
@@ -301,6 +320,7 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
             isLoading={isLoading}
             onStatusUpdated={handleStatusUpdated}
             onRefresh={() => loadSnapshot(true)}
+            onNavigateToCatalog={() => handleSelectTab('products_catalog')}
             onShowToast={onShowToast}
           />
         )}

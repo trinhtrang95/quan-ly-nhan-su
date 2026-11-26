@@ -1,5 +1,6 @@
 export type StWorkSubTab =
   | 'overview'
+  | 'products_catalog'
   | 'new_products'
   | 'change_requests'
   | 'customer_quotes'
@@ -88,7 +89,103 @@ export interface StProduct {
   updated_at: string;
 }
 
-export type StWorkflowStepKey = 'process_erp' | 'st';
+export type StStageKey = 'win' | 'cut' | 'sol' | 'ass' | 'imp' | 'sol2' | 'fin';
+
+export type StStageBoolField =
+  | 'has_stage_win'
+  | 'has_stage_cut'
+  | 'has_stage_sol'
+  | 'has_stage_ass'
+  | 'has_stage_imp'
+  | 'has_stage_sol2'
+  | 'has_stage_fin';
+
+export type StStageDateField =
+  | 'stage_win_date'
+  | 'stage_cut_date'
+  | 'stage_sol_date'
+  | 'stage_ass_date'
+  | 'stage_imp_date'
+  | 'stage_sol2_date'
+  | 'stage_fin_date';
+
+export interface StProductionStageMeta {
+  key: StStageKey;
+  order: number;
+  code: string;
+  name: string;
+  fullLabel: string;
+  boolField: StStageBoolField;
+  dateField: StStageDateField;
+}
+
+export const ST_PRODUCTION_STAGES: readonly StProductionStageMeta[] = [
+  {
+    key: 'win',
+    order: 1,
+    code: 'WIN',
+    name: 'WINDING',
+    fullLabel: 'WIN - WINDING',
+    boolField: 'has_stage_win',
+    dateField: 'stage_win_date',
+  },
+  {
+    key: 'cut',
+    order: 2,
+    code: 'CUT',
+    name: 'CUTTING',
+    fullLabel: 'CUT - CUTTING',
+    boolField: 'has_stage_cut',
+    dateField: 'stage_cut_date',
+  },
+  {
+    key: 'sol',
+    order: 3,
+    code: 'SOL',
+    name: 'SOLDER',
+    fullLabel: 'SOL - SOLDER',
+    boolField: 'has_stage_sol',
+    dateField: 'stage_sol_date',
+  },
+  {
+    key: 'ass',
+    order: 4,
+    code: 'ASS',
+    name: 'ASSEMBLY',
+    fullLabel: 'ASS - ASSEMBLY',
+    boolField: 'has_stage_ass',
+    dateField: 'stage_ass_date',
+  },
+  {
+    key: 'imp',
+    order: 5,
+    code: 'IMP',
+    name: 'IMPREGNATION',
+    fullLabel: 'IMP - IMPREGNATION',
+    boolField: 'has_stage_imp',
+    dateField: 'stage_imp_date',
+  },
+  {
+    key: 'sol2',
+    order: 6,
+    code: 'SOL2',
+    name: 'SOLDER 2',
+    fullLabel: 'SOL2 - SOLDER 2',
+    boolField: 'has_stage_sol2',
+    dateField: 'stage_sol2_date',
+  },
+  {
+    key: 'fin',
+    order: 7,
+    code: 'FIN',
+    name: 'FINAL CHECK',
+    fullLabel: 'FIN - FINAL CHECK',
+    boolField: 'has_stage_fin',
+    dateField: 'stage_fin_date',
+  },
+] as const;
+
+export type StWorkflowStepKey = 'process_erp' | 'stages' | 'st';
 
 export type StWorkflowBoolField = 'has_process_erp' | 'has_st';
 
@@ -99,8 +196,8 @@ export interface StWorkflowStepMeta {
   order: number;
   label: string;
   waitingLabel: string;
-  boolField: StWorkflowBoolField;
-  dateField: StWorkflowDateField;
+  boolField?: StWorkflowBoolField;
+  dateField?: StWorkflowDateField;
 }
 
 export const ST_WORKFLOW_STEPS: readonly StWorkflowStepMeta[] = [
@@ -113,10 +210,16 @@ export const ST_WORKFLOW_STEPS: readonly StWorkflowStepMeta[] = [
     dateField: 'process_erp_date',
   },
   {
-    key: 'st',
+    key: 'stages',
     order: 2,
+    label: '7 công đoạn (WIN–FIN)',
+    waitingLabel: 'Đang thực hiện công đoạn (WIN–FIN)',
+  },
+  {
+    key: 'st',
+    order: 3,
     label: 'ST',
-    waitingLabel: 'Đã có Quy trình ERP – đang chờ ST',
+    waitingLabel: 'Đã xong QT & 7 công đoạn – chờ ST',
     boolField: 'has_st',
     dateField: 'st_date',
   },
@@ -127,6 +230,20 @@ export interface StNewProductStatus {
   product_id: string;
   has_process_erp: boolean;
   process_erp_date: string | null;
+  has_stage_win?: boolean;
+  stage_win_date?: string | null;
+  has_stage_cut?: boolean;
+  stage_cut_date?: string | null;
+  has_stage_sol?: boolean;
+  stage_sol_date?: string | null;
+  has_stage_ass?: boolean;
+  stage_ass_date?: string | null;
+  has_stage_imp?: boolean;
+  stage_imp_date?: string | null;
+  has_stage_sol2?: boolean;
+  stage_sol2_date?: string | null;
+  has_stage_fin?: boolean;
+  stage_fin_date?: string | null;
   has_st: boolean;
   st_date: string | null;
   // Optional/legacy compatibility fields
@@ -149,9 +266,18 @@ export interface StNewProductStatus {
   updated_at: string;
 }
 
+export interface StStagesProgress {
+  completedCount: number;
+  totalCount: 7;
+  percentage: number;
+  allCompleted: boolean;
+  nextPendingStageKey: StStageKey | null;
+}
+
 export interface StProductWithStatus {
   product: StProduct;
   status: StNewProductStatus | null;
+  stageProgress: StStagesProgress;
   isCompleted: boolean;
   currentWaitingStep: StWorkflowStepKey | null;
   waitingLabel: string;
@@ -344,12 +470,37 @@ export function calculateCompletionDays(
   return diffDays >= 0 ? diffDays : 0;
 }
 
+export function computeStagesProgress(
+  status?: Partial<StNewProductStatus> | null
+): StStagesProgress {
+  let completedCount = 0;
+  let nextPendingStageKey: StStageKey | null = null;
+  for (const stage of ST_PRODUCTION_STAGES) {
+    const done = Boolean(status?.[stage.boolField]);
+    if (done) {
+      completedCount += 1;
+    } else if (!nextPendingStageKey) {
+      nextPendingStageKey = stage.key;
+    }
+  }
+  const percentage = Math.round((completedCount / 7) * 100);
+  return {
+    completedCount,
+    totalCount: 7,
+    percentage,
+    allCompleted: completedCount === 7,
+    nextPendingStageKey,
+  };
+}
+
 export function isNewProductCompleted(
   status?: Partial<StNewProductStatus> | null
 ): boolean {
   if (!status) return false;
+  const stageProgress = computeStagesProgress(status);
   return Boolean(
     status.has_process_erp &&
+      stageProgress.allCompleted &&
       status.has_st &&
       toIsoDateOnly(status.st_date)
   );
@@ -362,14 +513,18 @@ export function getPendingWorkflowStep(
   if (!status?.has_process_erp) {
     return ST_WORKFLOW_STEPS[0];
   }
-  return ST_WORKFLOW_STEPS[1];
+  const stageProgress = computeStagesProgress(status);
+  if (!stageProgress.allCompleted) {
+    return ST_WORKFLOW_STEPS[1];
+  }
+  return ST_WORKFLOW_STEPS[2];
 }
 
 export function getNewProductWaitingLabel(
   status?: Partial<StNewProductStatus> | null
 ): string {
   const pending = getPendingWorkflowStep(status);
-  return pending ? pending.waitingLabel : 'Hoàn thành SX đại trà';
+  return pending ? pending.waitingLabel : 'Hoàn thành';
 }
 
 export function mergeProductsWithStatus(
@@ -385,6 +540,7 @@ export function mergeProductsWithStatus(
 
   return products.map((product) => {
     const status = statusByProductId.get(product.id) || null;
+    const stageProgress = computeStagesProgress(status);
     const isCompleted = isNewProductCompleted(status);
     const pendingStep = getPendingWorkflowStep(status);
     const completionDays = isCompleted
@@ -394,11 +550,10 @@ export function mergeProductsWithStatus(
     return {
       product,
       status,
+      stageProgress,
       isCompleted,
       currentWaitingStep: pendingStep ? pendingStep.key : null,
-      waitingLabel: pendingStep
-        ? pendingStep.waitingLabel
-        : 'Hoàn thành SX đại trà',
+      waitingLabel: pendingStep ? pendingStep.waitingLabel : 'Hoàn thành',
       completionDays,
     };
   });
@@ -809,12 +964,12 @@ export function computeStReportComparison(params: {
     },
     {
       key: 'mass_production_completed',
-      label: 'Mã hàng hoàn thành SX đại trà',
+      label: 'Mã hàng hoàn thành (Đơn giá mới)',
       currentValue: doneCurList.length,
       previousValue: donePrevList.length,
       delta: doneCurList.length - donePrevList.length,
       unit: 'mã',
-      note: 'Hoàn thành cả Quy trình ERP và ST (theo Ngày áp dụng ST)',
+      note: 'Hoàn thành Quy trình ERP + 7 công đoạn (100%) + ST (theo Ngày áp dụng)',
     },
     {
       key: 'avg_completion_days',
@@ -921,6 +1076,21 @@ export interface StEncodedStepsPayload {
   kd?: string | null;
   hp?: boolean;
   pd?: string | null;
+  // 7 production stages (WIN -> FIN)
+  sw?: boolean;
+  swd?: string | null;
+  sc?: boolean;
+  scd?: string | null;
+  ss?: boolean;
+  ssd?: string | null;
+  sa?: boolean;
+  sad?: string | null;
+  si?: boolean;
+  sid?: string | null;
+  s2?: boolean;
+  s2d?: string | null;
+  sf?: boolean;
+  sfd?: string | null;
   hst?: boolean;
   std?: string | null;
 }
@@ -962,6 +1132,20 @@ export function encodeStepsIntoNotes(
     khsx_date?: string | null;
     has_process_erp: boolean;
     process_erp_date: string | null;
+    has_stage_win?: boolean;
+    stage_win_date?: string | null;
+    has_stage_cut?: boolean;
+    stage_cut_date?: string | null;
+    has_stage_sol?: boolean;
+    stage_sol_date?: string | null;
+    has_stage_ass?: boolean;
+    stage_ass_date?: string | null;
+    has_stage_imp?: boolean;
+    stage_imp_date?: string | null;
+    has_stage_sol2?: boolean;
+    stage_sol2_date?: string | null;
+    has_stage_fin?: boolean;
+    stage_fin_date?: string | null;
     has_st: boolean;
     st_date: string | null;
   }
@@ -974,6 +1158,27 @@ export function encodeStepsIntoNotes(
     ...(status.has_khsx ? { hk: true, kd: status.khsx_date || null } : {}),
     hp: Boolean(status.has_process_erp),
     pd: status.process_erp_date || null,
+    ...(status.has_stage_win
+      ? { sw: true, swd: status.stage_win_date || null }
+      : {}),
+    ...(status.has_stage_cut
+      ? { sc: true, scd: status.stage_cut_date || null }
+      : {}),
+    ...(status.has_stage_sol
+      ? { ss: true, ssd: status.stage_sol_date || null }
+      : {}),
+    ...(status.has_stage_ass
+      ? { sa: true, sad: status.stage_ass_date || null }
+      : {}),
+    ...(status.has_stage_imp
+      ? { si: true, sid: status.stage_imp_date || null }
+      : {}),
+    ...(status.has_stage_sol2
+      ? { s2: true, s2d: status.stage_sol2_date || null }
+      : {}),
+    ...(status.has_stage_fin
+      ? { sf: true, sfd: status.stage_fin_date || null }
+      : {}),
     hst: Boolean(status.has_st),
     std: status.st_date || null,
   };
@@ -999,6 +1204,11 @@ export function normalizeStNewProductStatusRow(
     'has_st' in row ||
     'process_erp_date' in row ||
     'st_date' in row;
+
+  const hasNativeStageColumns =
+    'has_stage_win' in row ||
+    'has_stage_cut' in row ||
+    'has_stage_fin' in row;
 
   const normDate = (val: unknown): string | null =>
     toIsoDateOnly(typeof val === 'string' ? val : null) || null;
@@ -1026,15 +1236,48 @@ export function normalizeStNewProductStatusRow(
     ? normDate(encodedSteps.std)
     : legacyAppliedDate;
 
+  const readStageBool = (
+    nativeKey: StStageBoolField,
+    encodedKey: keyof StEncodedStepsPayload
+  ): boolean =>
+    hasNativeStageColumns
+      ? Boolean(row[nativeKey])
+      : Boolean(encodedSteps?.[encodedKey]);
+
+  const readStageDate = (
+    nativeKey: StStageDateField,
+    encodedKey: keyof StEncodedStepsPayload
+  ): string | null =>
+    hasNativeStageColumns
+      ? normDate(row[nativeKey])
+      : normDate(encodedSteps?.[encodedKey]);
+
   return {
     id: String(row.id || ''),
     product_id: String(row.product_id || ''),
     has_process_erp,
     process_erp_date,
+    has_stage_win: readStageBool('has_stage_win', 'sw'),
+    stage_win_date: readStageDate('stage_win_date', 'swd'),
+    has_stage_cut: readStageBool('has_stage_cut', 'sc'),
+    stage_cut_date: readStageDate('stage_cut_date', 'scd'),
+    has_stage_sol: readStageBool('has_stage_sol', 'ss'),
+    stage_sol_date: readStageDate('stage_sol_date', 'ssd'),
+    has_stage_ass: readStageBool('has_stage_ass', 'sa'),
+    stage_ass_date: readStageDate('stage_ass_date', 'sad'),
+    has_stage_imp: readStageBool('has_stage_imp', 'si'),
+    stage_imp_date: readStageDate('stage_imp_date', 'sid'),
+    has_stage_sol2: readStageBool('has_stage_sol2', 's2'),
+    stage_sol2_date: readStageDate('stage_sol2_date', 's2d'),
+    has_stage_fin: readStageBool('has_stage_fin', 'sf'),
+    stage_fin_date: readStageDate('stage_fin_date', 'sfd'),
     has_st,
     st_date,
     has_quote: Boolean(row.has_quote ?? encodedSteps?.hq ?? row.has_unit_price),
-    quote_date: normDate(row.quote_date) || normDate(encodedSteps?.qd) || normDate(row.price_created_at),
+    quote_date:
+      normDate(row.quote_date) ||
+      normDate(encodedSteps?.qd) ||
+      normDate(row.price_created_at),
     has_bom_erp: Boolean(row.has_bom_erp ?? encodedSteps?.hb),
     bom_erp_date: normDate(row.bom_erp_date) || normDate(encodedSteps?.bd),
     has_spec_erp: Boolean(row.has_spec_erp ?? encodedSteps?.hs),

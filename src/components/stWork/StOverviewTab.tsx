@@ -174,7 +174,7 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
 
       {/* 4 Main KPI Stat Blocks */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5">
-        {/* KPI 1: Mã hàng mới hoàn thành SX đại trà */}
+        {/* KPI 1: Đơn giá mới hoàn thành */}
         <button
           type="button"
           onClick={() => onNavigateTab('new_products')}
@@ -183,7 +183,7 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <div className="text-xs font-semibold text-slate-500">
-                Mã hàng mới hoàn thành SX đại trà
+                Đơn giá mới hoàn thành
               </div>
               <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1.5">
                 {isLoading ? '—' : formatNumberVN(metrics.completedInPeriodCount)}
@@ -222,7 +222,7 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
           </div>
         </button>
 
-        {/* KPI 2: Mã hàng đang dở dang */}
+        {/* KPI 2: Mã hàng đang làm */}
         <button
           type="button"
           onClick={() => onNavigateTab('new_products')}
@@ -231,7 +231,7 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <div className="text-xs font-semibold text-slate-500">
-                Mã hàng đang dở dang
+                Mã hàng đang làm
               </div>
               <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1.5">
                 {isLoading ? '—' : formatNumberVN(metrics.inProgressTotalCount)}

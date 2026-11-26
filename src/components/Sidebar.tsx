@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   Briefcase,
   LayoutGrid,
+  Package,
   PackageCheck,
   ClipboardList,
   FileSpreadsheet,
@@ -43,6 +44,7 @@ export type HrChildMenuId =
 
 export type StWorkChildMenuId =
   | 'st_overview'
+  | 'st_products_catalog'
   | 'st_new_products'
   | 'st_change_requests'
   | 'st_customer_quotes'
@@ -140,10 +142,18 @@ export const NAVIGATION_DATA: NavParentItem[] = [
         testId: 'sidebar-subnav-st-overview',
       },
       {
+        id: 'st_products_catalog',
+        label: 'Danh mục sản phẩm',
+        shortLabel: 'Sản phẩm',
+        path: '/st-danh-muc-san-pham',
+        icon: Package,
+        testId: 'sidebar-subnav-st-products-catalog',
+      },
+      {
         id: 'st_new_products',
-        label: 'Danh mục Mã hàng',
-        shortLabel: 'Mã hàng',
-        path: '/st-ma-hang',
+        label: 'Đơn giá mới',
+        shortLabel: 'Đơn giá mới',
+        path: '/st-don-gia-moi',
         icon: PackageCheck,
         testId: 'sidebar-subnav-st-new-products',
       },
@@ -320,6 +330,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return activeModule === 'general_settings';
       case 'st_overview':
         return activeModule === 'st_work' && stWorkSubTab === 'overview';
+      case 'st_products_catalog':
+        return activeModule === 'st_work' && stWorkSubTab === 'products_catalog';
       case 'st_new_products':
         return activeModule === 'st_work' && stWorkSubTab === 'new_products';
       case 'st_change_requests':
@@ -365,6 +377,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       case 'st_overview':
         onSelectModule('st_work');
         onSelectStWorkSubTab?.('overview');
+        break;
+      case 'st_products_catalog':
+        onSelectModule('st_work');
+        onSelectStWorkSubTab?.('products_catalog');
         break;
       case 'st_new_products':
         onSelectModule('st_work');

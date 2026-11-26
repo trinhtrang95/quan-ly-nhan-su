@@ -85,14 +85,18 @@ export const StReportTab: React.FC<StReportTabProps> = ({
     const waitingProcessErp = productsWithStatus.filter(
       (p) => !p.isCompleted && p.currentWaitingStep === 'process_erp'
     ).length;
+    const waitingStages = productsWithStatus.filter(
+      (p) => !p.isCompleted && p.currentWaitingStep === 'stages'
+    ).length;
     const waitingSt = productsWithStatus.filter(
       (p) => !p.isCompleted && p.currentWaitingStep === 'st'
     ).length;
     return {
       total: productsWithStatus.length,
       completed,
-      inProgress: waitingProcessErp + waitingSt,
+      inProgress: waitingProcessErp + waitingStages + waitingSt,
       waitingProcessErp,
+      waitingStages,
       waitingSt,
     };
   }, [productsWithStatus]);
@@ -344,10 +348,10 @@ export const StReportTab: React.FC<StReportTabProps> = ({
       </div>
 
       {/* Live New-Product Pipeline Breakdown */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 shrink-0">
         <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-600">
-            Hoàn thành SX đại trà
+            Hoàn thành
           </span>
           <span className="font-mono text-sm font-bold text-emerald-700 tabular-nums">
             {formatNumberVN(liveProductBreakdown.completed)}
@@ -355,7 +359,7 @@ export const StReportTab: React.FC<StReportTabProps> = ({
         </div>
         <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-600">
-            Tổng đang dở dang
+            Tổng đang làm
           </span>
           <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
             {formatNumberVN(liveProductBreakdown.inProgress)}
@@ -363,7 +367,7 @@ export const StReportTab: React.FC<StReportTabProps> = ({
         </div>
         <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-700">
-            Chưa tạo Quy trình ERP
+            Chưa tạo QT ERP
           </span>
           <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
             {formatNumberVN(liveProductBreakdown.waitingProcessErp)}
@@ -371,7 +375,15 @@ export const StReportTab: React.FC<StReportTabProps> = ({
         </div>
         <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-700">
-            Đã có Quy trình ERP – đang chờ ST
+            Đang làm CĐ (WIN–FIN)
+          </span>
+          <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
+            {formatNumberVN(liveProductBreakdown.waitingStages)}
+          </span>
+        </div>
+        <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-700">
+            Chờ ST / Ngày áp dụng
           </span>
           <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
             {formatNumberVN(liveProductBreakdown.waitingSt)}
@@ -387,7 +399,7 @@ export const StReportTab: React.FC<StReportTabProps> = ({
             {periodRange.prevLabel})
           </h3>
           <span className="text-[11px] text-slate-500">
-            File Excel gồm 4 sheet: Tổng hợp · Mã hàng mới · Phiếu yêu cầu · Báo giá khách hàng
+            File Excel gồm 4 sheet: Tổng hợp · Đơn giá mới · Phiếu yêu cầu · Báo giá khách hàng
           </span>
         </div>
 

@@ -3,6 +3,7 @@ import {
   formatStDateVN,
   isDateInRange,
   isQuoteCompleted,
+  ST_PRODUCTION_STAGES,
   StChangeRequest,
   StCustomerQuote,
   StProductWithStatus,
@@ -271,20 +272,24 @@ export function buildStReportWorkbook(
   summaryTotalRow.getCell(7).value = 'Dòng tổng cộng tự động';
   styleTotalRow(summaryTotalRow, 7, [3, 4, 5]);
 
-  // Live 2-milestone breakdown block in Sheet 1
+  // Live 3-stage breakdown block in Sheet 1
   const completedAllCount = productsWithStatus.filter((p) => p.isCompleted).length;
   const waitingProcessErpAllCount = productsWithStatus.filter(
     (p) => !p.isCompleted && p.currentWaitingStep === 'process_erp'
   ).length;
+  const waitingStagesAllCount = productsWithStatus.filter(
+    (p) => !p.isCompleted && p.currentWaitingStep === 'stages'
+  ).length;
   const waitingStAllCount = productsWithStatus.filter(
     (p) => !p.isCompleted && p.currentWaitingStep === 'st'
   ).length;
-  const inProgressAllCount = waitingProcessErpAllCount + waitingStAllCount;
+  const inProgressAllCount =
+    waitingProcessErpAllCount + waitingStagesAllCount + waitingStAllCount;
 
   const breakdownHeaderIdx = summaryRowIdx + 2;
   styleHeaderRow(summarySheet, breakdownHeaderIdx, [
     'STT',
-    'Phân loại tiến độ Mã hàng mới (Hiện tại)',
+    'Phân loại tiến độ Đơn giá mới (Hiện tại)',
     'Số lượng',
     'Tỷ lệ (%)',
     'Nhóm hiện trạng',
@@ -299,22 +304,28 @@ export function buildStReportWorkbook(
     note: string;
   }> = [
     {
-      label: 'Hoàn thành SX đại trà',
+      label: 'Hoàn thành',
       count: completedAllCount,
       group: 'Hoàn thành',
-      note: 'Đã hoàn thành cả Quy trình ERP và ST (có Ngày áp dụng ST)',
+      note: 'Đã hoàn thành Quy trình ERP + đủ 7 công đoạn (100%) + ST (có Ngày áp dụng)',
     },
     {
       label: 'Chưa tạo Quy trình ERP',
       count: waitingProcessErpAllCount,
-      group: 'Đang dở dang',
+      group: 'Đang làm',
       note: 'Đang chờ bộ phận tạo Quy trình ERP',
     },
     {
-      label: 'Đã có Quy trình ERP – đang chờ ST',
+      label: 'Đang thực hiện công đoạn (WIN–FIN)',
+      count: waitingStagesAllCount,
+      group: 'Đang làm',
+      note: 'Đã có Quy trình ERP, đang hoàn thiện 7 công đoạn (WIN–FIN)',
+    },
+    {
+      label: 'Đã xong QT & 7 công đoạn – chờ ST',
       count: waitingStAllCount,
-      group: 'Đang dở dang',
-      note: 'Đã có Quy trình ERP, đang chờ hoàn tất ST và Ngày áp dụng',
+      group: 'Đang làm',
+      note: 'Đã xong Quy trình ERP và 7 công đoạn (100%), đang chờ ST & Ngày áp dụng',
     },
   ];
 
@@ -339,18 +350,18 @@ export function buildStReportWorkbook(
     breakdownHeaderIdx + 1 + breakdownRows.length
   );
   breakdownTotalRow.getCell(1).value = '';
-  breakdownTotalRow.getCell(2).value = 'Tổng mã hàng mới đang theo dõi';
+  breakdownTotalRow.getCell(2).value = 'Tổng mã hàng đang theo dõi';
   breakdownTotalRow.getCell(3).value = totalProductsAll;
   breakdownTotalRow.getCell(4).value = totalProductsAll > 0 ? 100 : 0;
-  breakdownTotalRow.getCell(5).value = `Dở dang: ${inProgressAllCount}`;
+  breakdownTotalRow.getCell(5).value = `Đang làm: ${inProgressAllCount}`;
   breakdownTotalRow.getCell(6).value = 'mã';
-  breakdownTotalRow.getCell(7).value = `Chưa tạo Quy trình ERP: ${waitingProcessErpAllCount} | Đã có Quy trình ERP – đang chờ ST: ${waitingStAllCount}`;
+  breakdownTotalRow.getCell(7).value = `Chưa tạo QT ERP: ${waitingProcessErpAllCount} | Đang làm CĐ: ${waitingStagesAllCount} | Chờ ST: ${waitingStAllCount}`;
   styleTotalRow(breakdownTotalRow, 7, [3, 4]);
 
   // ==========================================
-  // SHEET 2: Mã hàng mới
+  // SHEET 2: Đơn giá mới
   // ==========================================
-  const productsSheet = workbook.addWorksheet('Mã hàng mới', {
+  const productsSheet = workbook.addWorksheet('Đơn giá mới', {
     views: [{ state: 'frozen', ySplit: 3 }],
   });
   productsSheet.columns = [
@@ -363,18 +374,20 @@ export function buildStReportWorkbook(
     { key: 'registered', width: 14 },
     { key: 'processErp', width: 16 },
     { key: 'processErpDate', width: 14 },
+    { key: 'stages', width: 30 },
+    { key: 'percent', width: 12 },
     { key: 'st', width: 14 },
     { key: 'stDate', width: 14 },
-    { key: 'status', width: 22 },
+    { key: 'status', width: 16 },
     { key: 'stage', width: 32 },
     { key: 'days', width: 18 },
     { key: 'notes', width: 28 },
   ];
   styleTitleBanner(
     productsSheet,
-    'CHI TIẾT THEO DÕI MÃ HÀNG MỚI (QUY TRÌNH ERP → ST)',
+    'CHI TIẾT THEO DÕI ĐƠN GIÁ MỚI (QT ERP → 7 CÔNG ĐOẠN → ST)',
     subtitle,
-    15
+    17
   );
   styleHeaderRow(productsSheet, 3, [
     'STT',
@@ -386,6 +399,8 @@ export function buildStReportWorkbook(
     'Ngày đăng ký',
     'Quy trình ERP',
     'Ngày tạo QT',
+    'Công đoạn (WIN–FIN)',
+    'Tỷ lệ %',
     'ST',
     'Ngày áp dụng',
     'Hiện trạng',
@@ -405,6 +420,9 @@ export function buildStReportWorkbook(
     const st = item.status;
     const hasProcessErp = Boolean(st?.has_process_erp);
     const hasSt = Boolean(st?.has_st);
+    const doneStageCodes = ST_PRODUCTION_STAGES.filter((s) =>
+      Boolean(st?.[s.boolField])
+    ).map((s) => s.code);
 
     excelRow.getCell(1).value = index + 1;
     excelRow.getCell(2).value = item.product.line_name;
@@ -415,24 +433,32 @@ export function buildStReportWorkbook(
     excelRow.getCell(7).value = formatStDateVN(item.product.created_at);
     excelRow.getCell(8).value = hasProcessErp ? 'Đã có' : 'Chờ QT ERP';
     excelRow.getCell(9).value = formatStDateVN(st?.process_erp_date);
-    excelRow.getCell(10).value = hasSt
+    excelRow.getCell(10).value =
+      doneStageCodes.length > 0
+        ? `${doneStageCodes.length}/7 (${doneStageCodes.join(', ')})`
+        : '0/7';
+    excelRow.getCell(11).value = `${item.stageProgress.percentage}%`;
+    excelRow.getCell(12).value = hasSt
       ? 'Hoàn thành'
-      : hasProcessErp
+      : hasProcessErp && item.stageProgress.allCompleted
       ? 'Chờ ST'
       : '—';
-    excelRow.getCell(11).value = formatStDateVN(st?.st_date);
-    excelRow.getCell(12).value = item.isCompleted
-      ? 'Hoàn thành SX đại trà'
-      : 'Đang dở dang';
-    excelRow.getCell(13).value = item.waitingLabel;
-    excelRow.getCell(14).value =
+    excelRow.getCell(13).value = formatStDateVN(st?.st_date);
+    excelRow.getCell(14).value = item.isCompleted ? 'Hoàn thành' : 'Đang làm';
+    excelRow.getCell(15).value = item.waitingLabel;
+    excelRow.getCell(16).value =
       item.completionDays !== null ? item.completionDays : null;
-    excelRow.getCell(15).value = st?.notes || '';
+    excelRow.getCell(17).value = st?.notes || '';
 
-    applyDataRowBorderAndFont(excelRow, 15, [1, 14]);
+    applyDataRowBorderAndFont(excelRow, 17, [1, 16]);
     excelRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
-    for (let c = 7; c <= 11; c++) {
-      excelRow.getCell(c).alignment = { vertical: 'middle', horizontal: 'center' };
+    for (let c = 7; c <= 14; c++) {
+      if (c !== 10) {
+        excelRow.getCell(c).alignment = {
+          vertical: 'middle',
+          horizontal: 'center',
+        };
+      }
     }
     productRowIdx += 1;
   });
@@ -440,12 +466,15 @@ export function buildStReportWorkbook(
   const productLastDataRow = Math.max(3, productRowIdx - 1);
   productsSheet.autoFilter = {
     from: { row: 3, column: 1 },
-    to: { row: productLastDataRow, column: 15 },
+    to: { row: productLastDataRow, column: 17 },
   };
 
   const completedTotal = sortedProducts.filter((p) => p.isCompleted).length;
   const waitingProcessErpCount = sortedProducts.filter(
     (p) => !p.isCompleted && p.currentWaitingStep === 'process_erp'
+  ).length;
+  const waitingStagesCount = sortedProducts.filter(
+    (p) => !p.isCompleted && p.currentWaitingStep === 'stages'
   ).length;
   const waitingStCount = sortedProducts.filter(
     (p) => !p.isCompleted && p.currentWaitingStep === 'st'
@@ -455,13 +484,13 @@ export function buildStReportWorkbook(
   productTotalRow.getCell(1).value = '';
   productTotalRow.getCell(2).value = 'Tổng cộng';
   productTotalRow.getCell(4).value = `${sortedProducts.length} mã`;
-  productTotalRow.getCell(12).value = `Hoàn thành: ${completedTotal} | Dở dang: ${inProgressTotal}`;
-  productTotalRow.getCell(13).value = `Chưa tạo Quy trình ERP: ${waitingProcessErpCount} | Đã có Quy trình ERP – đang chờ ST: ${waitingStCount}`;
-  productTotalRow.getCell(14).value =
+  productTotalRow.getCell(14).value = `Hoàn thành: ${completedTotal} | Đang làm: ${inProgressTotal}`;
+  productTotalRow.getCell(15).value = `Chưa QT ERP: ${waitingProcessErpCount} | Đang CĐ: ${waitingStagesCount} | Chờ ST: ${waitingStCount}`;
+  productTotalRow.getCell(16).value =
     sortedProducts.length > 0
-      ? { formula: `AVERAGE(N4:N${productLastDataRow})` }
+      ? { formula: `AVERAGE(P4:P${productLastDataRow})` }
       : 0;
-  styleTotalRow(productTotalRow, 15, [14]);
+  styleTotalRow(productTotalRow, 17, [16]);
 
   // ==========================================
   // SHEET 3: Phiếu yêu cầu

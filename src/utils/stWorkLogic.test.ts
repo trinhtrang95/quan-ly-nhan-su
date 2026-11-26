@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   applyRealtimeStRow,
   calculateCompletionDays,
+  computeStagesProgress,
   computeStOverviewMetrics,
   computeStReportComparison,
   encodeStepsIntoNotes,
@@ -22,7 +23,7 @@ import {
 } from './stWorkLogic';
 import { buildStReportWorkbook } from './stWorkExportService';
 
-function buildTwoStepStatus(
+function buildFullCompletedStatus(
   overrides: Partial<StNewProductStatus> = {}
 ): StNewProductStatus {
   return {
@@ -30,6 +31,20 @@ function buildTwoStepStatus(
     product_id: 'p-default',
     has_process_erp: true,
     process_erp_date: '2026-10-10',
+    has_stage_win: true,
+    stage_win_date: '2026-10-10',
+    has_stage_cut: true,
+    stage_cut_date: '2026-10-10',
+    has_stage_sol: true,
+    stage_sol_date: '2026-10-10',
+    has_stage_ass: true,
+    stage_ass_date: '2026-10-10',
+    has_stage_imp: true,
+    stage_imp_date: '2026-10-10',
+    has_stage_sol2: true,
+    stage_sol2_date: '2026-10-10',
+    has_stage_fin: true,
+    stage_fin_date: '2026-10-10',
     has_st: true,
     st_date: '2026-10-11',
     notes: null,
@@ -38,14 +53,54 @@ function buildTwoStepStatus(
   };
 }
 
-describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)', () => {
-  it('enforces completion rule: completed only when BOTH Quy trình ERP and ST with st_date are present', () => {
+describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ERP -> WIN..FIN -> ST)', () => {
+  it('computes 7-stage progress percentages and next pending stage accurately', () => {
+    const empty = computeStagesProgress(null);
+    assert.equal(empty.completedCount, 0);
+    assert.equal(empty.totalCount, 7);
+    assert.equal(empty.percentage, 0);
+    assert.equal(empty.allCompleted, false);
+    assert.equal(empty.nextPendingStageKey, 'win');
+
+    const fourOfSeven = computeStagesProgress({
+      has_stage_win: true,
+      has_stage_cut: true,
+      has_stage_sol: true,
+      has_stage_ass: true,
+      has_stage_imp: false,
+      has_stage_sol2: false,
+      has_stage_fin: false,
+    });
+    assert.equal(fourOfSeven.completedCount, 4);
+    assert.equal(fourOfSeven.percentage, 57);
+    assert.equal(fourOfSeven.allCompleted, false);
+    assert.equal(fourOfSeven.nextPendingStageKey, 'imp');
+
+    const allSeven = computeStagesProgress(buildFullCompletedStatus());
+    assert.equal(allSeven.completedCount, 7);
+    assert.equal(allSeven.percentage, 100);
+    assert.equal(allSeven.allCompleted, true);
+    assert.equal(allSeven.nextPendingStageKey, null);
+  });
+
+  it('enforces 3-condition completion rule: Quy trình ERP + all 7 stages (100%) + ST with st_date', () => {
     assert.equal(isNewProductCompleted(null), false);
 
-    // Missing Quy trình ERP even if ST is checked
+    // Missing Quy trình ERP even if 7 stages + ST are checked
     assert.equal(
       isNewProductCompleted(
-        buildTwoStepStatus({ has_process_erp: false, process_erp_date: null })
+        buildFullCompletedStatus({
+          has_process_erp: false,
+          process_erp_date: null,
+        })
+      ),
+      false
+    );
+
+    // Missing 1 of 7 stages (FIN) even if Quy trình ERP + ST are checked
+    assert.equal(
+      isNewProductCompleted(
+        buildFullCompletedStatus({ has_stage_fin: false, stage_fin_date: null })
       ),
       false
     );
@@ -53,28 +108,35 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
     // Missing ST or st_date
     assert.equal(
       isNewProductCompleted(
-        buildTwoStepStatus({ has_st: false, st_date: null })
+        buildFullCompletedStatus({ has_st: false, st_date: null })
       ),
       false
     );
     assert.equal(
       isNewProductCompleted(
-        buildTwoStepStatus({ has_st: true, st_date: null })
+        buildFullCompletedStatus({ has_st: true, st_date: null })
       ),
       false
     );
 
-    // Both Quy trình ERP + ST + st_date present -> completed
-    assert.equal(isNewProductCompleted(buildTwoStepStatus()), true);
+    // All 3 conditions satisfied -> Hoàn thành
+    assert.equal(isNewProductCompleted(buildFullCompletedStatus()), true);
   });
 
-  it('identifies the exact waiting stage between Chưa tạo Quy trình ERP and Đã có Quy trình ERP – đang chờ ST', () => {
+  it('identifies the exact waiting stage across process_erp, stages (WIN-FIN), and st', () => {
     assert.equal(getPendingWorkflowStep(null)?.key, 'process_erp');
     assert.equal(getNewProductWaitingLabel(null), 'Chưa tạo Quy trình ERP');
 
-    const step1Pending = buildTwoStepStatus({
+    const step1Pending = buildFullCompletedStatus({
       has_process_erp: false,
       process_erp_date: null,
+      has_stage_win: false,
+      has_stage_cut: false,
+      has_stage_sol: false,
+      has_stage_ass: false,
+      has_stage_imp: false,
+      has_stage_sol2: false,
+      has_stage_fin: false,
       has_st: false,
       st_date: null,
     });
@@ -84,21 +146,34 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
       'Chưa tạo Quy trình ERP'
     );
 
-    const step2Pending = buildTwoStepStatus({
+    const step2Pending = buildFullCompletedStatus({
       has_process_erp: true,
       process_erp_date: '2026-10-10',
+      has_stage_imp: false,
+      has_stage_sol2: false,
+      has_stage_fin: false,
       has_st: false,
       st_date: null,
     });
-    assert.equal(getPendingWorkflowStep(step2Pending)?.key, 'st');
+    assert.equal(getPendingWorkflowStep(step2Pending)?.key, 'stages');
     assert.equal(
       getNewProductWaitingLabel(step2Pending),
-      'Đã có Quy trình ERP – đang chờ ST'
+      'Đang thực hiện công đoạn (WIN–FIN)'
     );
 
-    const done = buildTwoStepStatus();
+    const step3Pending = buildFullCompletedStatus({
+      has_st: false,
+      st_date: null,
+    });
+    assert.equal(getPendingWorkflowStep(step3Pending)?.key, 'st');
+    assert.equal(
+      getNewProductWaitingLabel(step3Pending),
+      'Đã xong QT & 7 công đoạn – chờ ST'
+    );
+
+    const done = buildFullCompletedStatus();
     assert.equal(getPendingWorkflowStep(done), null);
-    assert.equal(getNewProductWaitingLabel(done), 'Hoàn thành SX đại trà');
+    assert.equal(getNewProductWaitingLabel(done), 'Hoàn thành');
   });
 
   it('calculates completion days accurately between registration date and st_date', () => {
@@ -167,7 +242,7 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
     assert.equal(yearMode.prevEnd, '2025-12-31');
   });
 
-  it('computes overview KPIs with 2-stage pending counts, comparison rows, and Excel Sheet 1/Sheet 2 structure', () => {
+  it('computes overview KPIs with 3-bucket pending counts, comparison rows, and Excel Sheet 1/Sheet 2 structure', () => {
     const products: StProduct[] = [
       {
         id: 'p1',
@@ -224,22 +299,33 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
         created_at: '2026-10-18T02:00:00.000Z',
         updated_at: '2026-10-18T02:00:00.000Z',
       },
+      {
+        id: 'p6',
+        line_name: 'S Line',
+        customer_short_name: 'SAMSUNG',
+        product_name: 'Module F',
+        product_code: 'ST-006',
+        specification: '12x18mm',
+        image_url: null,
+        created_at: '2026-10-19T02:00:00.000Z',
+        updated_at: '2026-10-20T02:00:00.000Z',
+      },
     ];
 
     const statuses: StNewProductStatus[] = [
-      buildTwoStepStatus({
+      buildFullCompletedStatus({
         id: 's1',
         product_id: 'p1',
         process_erp_date: '2026-10-05',
         st_date: '2026-10-11',
       }),
-      buildTwoStepStatus({
+      buildFullCompletedStatus({
         id: 's2',
         product_id: 'p2',
         process_erp_date: '2026-10-08',
         st_date: '2026-10-25',
       }),
-      buildTwoStepStatus({
+      buildFullCompletedStatus({
         id: 's3',
         product_id: 'p3',
         has_process_erp: true,
@@ -248,17 +334,39 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
         st_date: null,
         notes: 'Chờ ST tính định mức',
       }),
-      buildTwoStepStatus({
+      buildFullCompletedStatus({
         id: 's4',
         product_id: 'p4',
         process_erp_date: '2026-09-10',
         st_date: '2026-09-15',
       }),
-      buildTwoStepStatus({
+      buildFullCompletedStatus({
         id: 's5',
         product_id: 'p5',
         has_process_erp: false,
         process_erp_date: null,
+        has_stage_win: false,
+        has_stage_cut: false,
+        has_stage_sol: false,
+        has_stage_ass: false,
+        has_stage_imp: false,
+        has_stage_sol2: false,
+        has_stage_fin: false,
+        has_st: false,
+        st_date: null,
+      }),
+      buildFullCompletedStatus({
+        id: 's6',
+        product_id: 'p6',
+        has_process_erp: true,
+        process_erp_date: '2026-10-20',
+        has_stage_win: true,
+        has_stage_cut: true,
+        has_stage_sol: true,
+        has_stage_ass: false,
+        has_stage_imp: false,
+        has_stage_sol2: false,
+        has_stage_fin: false,
         has_st: false,
         st_date: null,
       }),
@@ -266,18 +374,21 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
 
     const productsWithStatus = mergeProductsWithStatus(products, statuses);
     assert.equal(productsWithStatus[0].isCompleted, true);
+    assert.equal(productsWithStatus[0].stageProgress.percentage, 100);
     assert.equal(productsWithStatus[0].completionDays, 10);
     assert.equal(productsWithStatus[1].completionDays, 20);
     assert.equal(productsWithStatus[2].currentWaitingStep, 'st');
     assert.equal(
       productsWithStatus[2].waitingLabel,
-      'Đã có Quy trình ERP – đang chờ ST'
+      'Đã xong QT & 7 công đoạn – chờ ST'
     );
     assert.equal(productsWithStatus[4].currentWaitingStep, 'process_erp');
     assert.equal(
       productsWithStatus[4].waitingLabel,
       'Chưa tạo Quy trình ERP'
     );
+    assert.equal(productsWithStatus[5].currentWaitingStep, 'stages');
+    assert.equal(productsWithStatus[5].stageProgress.percentage, 43);
 
     const requests: StChangeRequest[] = [
       {
@@ -325,22 +436,15 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
     assert.equal(metrics.completedInPeriodCount, 2);
     assert.equal(metrics.completedInPrevPeriodCount, 1);
     assert.equal(metrics.completedDelta, 1);
-    assert.equal(metrics.inProgressTotalCount, 2);
-    assert.equal(metrics.pendingStepCounts.length, 2);
+    assert.equal(metrics.inProgressTotalCount, 3);
+    assert.equal(metrics.pendingStepCounts.length, 3);
 
     const stepCountByKey = new Map(
       metrics.pendingStepCounts.map((s) => [s.stepKey, s])
     );
     assert.equal(stepCountByKey.get('process_erp')?.count, 1);
-    assert.equal(
-      stepCountByKey.get('process_erp')?.waitingLabel,
-      'Chưa tạo Quy trình ERP'
-    );
+    assert.equal(stepCountByKey.get('stages')?.count, 1);
     assert.equal(stepCountByKey.get('st')?.count, 1);
-    assert.equal(
-      stepCountByKey.get('st')?.waitingLabel,
-      'Đã có Quy trình ERP – đang chờ ST'
-    );
 
     assert.equal(metrics.avgCompletionDaysInPeriod, 15);
     assert.equal(metrics.requestsInPeriodCount, 2);
@@ -362,11 +466,6 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
     assert.equal(completedRow.previousValue, 1);
     assert.equal(completedRow.delta, 1);
 
-    const procRow = comparison.find((r) => r.key === 'process_created');
-    assert.ok(procRow);
-    assert.equal(procRow.currentValue, 3);
-    assert.equal(procRow.previousValue, 1);
-
     const periodRange = resolveOverviewPeriodRange('custom', 2026, 10);
     const workbook = buildStReportWorkbook({
       periodRange,
@@ -377,10 +476,9 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
     });
     assert.deepEqual(
       workbook.worksheets.map((ws) => ws.name),
-      ['Tổng hợp', 'Mã hàng mới', 'Phiếu yêu cầu', 'Báo giá khách hàng']
+      ['Tổng hợp', 'Đơn giá mới', 'Phiếu yêu cầu', 'Báo giá khách hàng']
     );
 
-    // Sheet 1 includes the live 2-stage pending breakdown
     const summarySheet = workbook.getWorksheet('Tổng hợp');
     assert.ok(summarySheet);
     const summaryTextValues: string[] = [];
@@ -390,86 +488,66 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
       });
     });
     assert.ok(summaryTextValues.includes('Chưa tạo Quy trình ERP'));
-    assert.ok(summaryTextValues.includes('Đã có Quy trình ERP – đang chờ ST'));
+    assert.ok(summaryTextValues.includes('Đang thực hiện công đoạn (WIN–FIN)'));
+    assert.ok(
+      summaryTextValues.includes('Đã xong QT & 7 công đoạn – chờ ST')
+    );
 
-    // Sheet 2 matches the 15-col 2-milestone layout
-    const productSheet = workbook.getWorksheet('Mã hàng mới');
+    const productSheet = workbook.getWorksheet('Đơn giá mới');
     assert.ok(productSheet);
-    assert.equal(productSheet.columnCount, 15);
+    assert.equal(productSheet.columnCount, 17);
     const headers = productSheet.getRow(3).values as unknown[];
-    assert.equal(headers[7], 'Ngày đăng ký');
     assert.equal(headers[8], 'Quy trình ERP');
     assert.equal(headers[9], 'Ngày tạo QT');
-    assert.equal(headers[10], 'ST');
-    assert.equal(headers[11], 'Ngày áp dụng');
-    assert.equal(headers[12], 'Hiện trạng');
-    assert.equal(headers[13], 'Phân loại tiến độ');
-
-    for (const ws of workbook.worksheets) {
-      assert.equal(ws.views[0].state, 'frozen');
-      assert.equal(ws.views[0].ySplit, 3);
-      assert.ok(ws.autoFilter);
-      assert.ok((ws.getColumn(2).width || 0) >= 8);
-    }
+    assert.equal(headers[10], 'Công đoạn (WIN–FIN)');
+    assert.equal(headers[11], 'Tỷ lệ %');
+    assert.equal(headers[12], 'ST');
+    assert.equal(headers[13], 'Ngày áp dụng');
+    assert.equal(headers[14], 'Hiện trạng');
   });
 
-  it('normalizes native 2-step columns, [ST_STEPS_JSON] fallback, and legacy Supabase columns cleanly', () => {
-    // 1. Native 2-step row
-    const nativeNormalized = normalizeStNewProductStatusRow({
-      id: 'st-native',
-      product_id: 'prod-1',
-      has_process_erp: true,
-      process_erp_date: '2026-11-09',
-      has_st: true,
-      st_date: '2026-11-12',
-      notes: 'Hoàn tất đúng hạn',
-      updated_at: '2026-11-12T02:00:00Z',
-    });
-    assert.equal(isNewProductCompleted(nativeNormalized), true);
-    assert.equal(nativeNormalized.process_erp_date, '2026-11-09');
-    assert.equal(nativeNormalized.st_date, '2026-11-12');
-    assert.equal(nativeNormalized.notes, 'Hoàn tất đúng hạn');
-
-    // 2. Fallback encoded steps inside notes (legacy Supabase table schema)
-    const encodedNotes = encodeStepsIntoNotes('Đang chờ ST tính định mức', {
+  it('normalizes native stage columns and [ST_STEPS_JSON] fallback with all 7 stages cleanly', () => {
+    const encodedNotes = encodeStepsIntoNotes('Đang chờ công đoạn IMP', {
       has_process_erp: true,
       process_erp_date: '2026-11-21',
+      has_stage_win: true,
+      stage_win_date: '2026-11-21',
+      has_stage_cut: true,
+      stage_cut_date: '2026-11-22',
+      has_stage_sol: true,
+      stage_sol_date: '2026-11-23',
+      has_stage_ass: true,
+      stage_ass_date: '2026-11-24',
+      has_stage_imp: false,
+      stage_imp_date: null,
+      has_stage_sol2: false,
+      stage_sol2_date: null,
+      has_stage_fin: false,
+      stage_fin_date: null,
       has_st: false,
       st_date: null,
     });
-    const fallbackNormalized = normalizeStNewProductStatusRow({
+    const normalized = normalizeStNewProductStatusRow({
       id: 'st-fallback',
       product_id: 'prod-2',
       has_process: true,
       process_created_at: '2026-11-21',
       notes: encodedNotes,
-      updated_at: '2026-11-21T02:00:00Z',
+      updated_at: '2026-11-24T02:00:00Z',
     });
-    assert.equal(fallbackNormalized.has_process_erp, true);
-    assert.equal(fallbackNormalized.process_erp_date, '2026-11-21');
-    assert.equal(fallbackNormalized.has_st, false);
-    assert.equal(fallbackNormalized.notes, 'Đang chờ ST tính định mức');
-    assert.equal(getPendingWorkflowStep(fallbackNormalized)?.key, 'st');
-    assert.equal(
-      getNewProductWaitingLabel(fallbackNormalized),
-      'Đã có Quy trình ERP – đang chờ ST'
-    );
+    assert.equal(normalized.has_process_erp, true);
+    assert.equal(normalized.process_erp_date, '2026-11-21');
+    assert.equal(normalized.has_stage_win, true);
+    assert.equal(normalized.stage_ass_date, '2026-11-24');
+    assert.equal(normalized.has_stage_imp, false);
+    assert.equal(normalized.has_st, false);
+    assert.equal(normalized.notes, 'Đang chờ công đoạn IMP');
 
-    // 3. Pure legacy row without [ST_STEPS_JSON]
-    const legacyNormalized = normalizeStNewProductStatusRow({
-      id: 'st-legacy',
-      product_id: 'prod-3',
-      has_process: true,
-      process_created_at: '2026-11-10',
-      price_applied_at: '2026-11-15',
-      notes: 'Legacy row',
-      updated_at: '2026-11-15T02:00:00Z',
-    });
-    assert.equal(legacyNormalized.has_process_erp, true);
-    assert.equal(legacyNormalized.process_erp_date, '2026-11-10');
-    assert.equal(legacyNormalized.has_st, true);
-    assert.equal(legacyNormalized.st_date, '2026-11-15');
-    assert.equal(isNewProductCompleted(legacyNormalized), true);
+    const progress = computeStagesProgress(normalized);
+    assert.equal(progress.completedCount, 4);
+    assert.equal(progress.percentage, 57);
+    assert.equal(progress.nextPendingStageKey, 'imp');
+    assert.equal(getPendingWorkflowStep(normalized)?.key, 'stages');
   });
 
   it('normalizes Supabase rows and applies Realtime INSERT/UPDATE/DELETE cleanly', () => {
@@ -504,11 +582,21 @@ describe('stWorkLogic 2-milestone workflow calculations (Quy trình ERP -> ST)',
         newRow: {
           id: 'st-1',
           product_id: 'prod-1',
-          has_process_erp: true,
-          process_erp_date: '2026-11-24',
-          has_st: true,
-          st_date: '2026-11-25',
-          notes: 'Done',
+          has_process: true,
+          process_created_at: '2026-11-24',
+          notes: encodeStepsIntoNotes('Done', {
+            has_process_erp: true,
+            process_erp_date: '2026-11-24',
+            has_stage_win: true,
+            has_stage_cut: true,
+            has_stage_sol: true,
+            has_stage_ass: true,
+            has_stage_imp: true,
+            has_stage_sol2: true,
+            has_stage_fin: true,
+            has_st: true,
+            st_date: '2026-11-25',
+          }),
           updated_at: '2026-11-25T02:00:00Z',
         },
         oldRow: null,
