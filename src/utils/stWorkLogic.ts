@@ -1395,3 +1395,182 @@ export function applyRealtimeStRow<T extends { id: string }>(
 
   return sortFn ? [...next].sort(sortFn) : next;
 }
+
+export type StNewProductSortMode =
+  | 'process_erp_desc'
+  | 'process_erp_asc'
+  | 'st_date_desc'
+  | 'progress_desc'
+  | 'progress_asc'
+  | 'code_asc';
+
+export const ST_NEW_PRODUCT_SORT_OPTIONS: ReadonlyArray<{
+  value: StNewProductSortMode;
+  label: string;
+}> = [
+  { value: 'process_erp_desc', label: 'Ngày tạo QT (Mới nhất trước)' },
+  { value: 'process_erp_asc', label: 'Ngày tạo QT (Cũ nhất trước)' },
+  { value: 'st_date_desc', label: 'Ngày áp dụng ST (Mới nhất trước)' },
+  { value: 'progress_desc', label: 'Tỷ lệ % hoàn thành (Cao → Thấp)' },
+  { value: 'progress_asc', label: 'Tỷ lệ % hoàn thành (Thấp → Cao)' },
+  { value: 'code_asc', label: 'Mã hàng (A → Z)' },
+] as const;
+
+export function getStNewProductFilterDate(item: StProductWithStatus): string {
+  return (
+    toIsoDateOnly(item.status?.process_erp_date) ||
+    toIsoDateOnly(item.status?.st_date) ||
+    ''
+  );
+}
+
+export function extractAvailableYearsFromNewProducts(
+  items: StProductWithStatus[]
+): number[] {
+  const yearSet = new Set<number>();
+  for (const item of items) {
+    const iso = getStNewProductFilterDate(item);
+    if (iso && iso.length >= 4) {
+      const y = Number(iso.slice(0, 4));
+      if (Number.isInteger(y) && y >= 2000 && y <= 2100) {
+        yearSet.add(y);
+      }
+    }
+  }
+  return Array.from(yearSet).sort((a, b) => b - a);
+}
+
+export interface StNewProductListFilters {
+  searchQuery?: string;
+  lineFilter?: string;
+  customerFilter?: string;
+  statusFilter?: 'all' | 'completed' | 'in_progress';
+  yearFilter?: string;
+  monthFilter?: string;
+}
+
+export function filterNewProductsList(
+  items: StProductWithStatus[],
+  filters: StNewProductListFilters
+): StProductWithStatus[] {
+  const q = (filters.searchQuery || '').trim().toLowerCase();
+  const lineFilter = filters.lineFilter || 'ALL';
+  const customerFilter = filters.customerFilter || 'ALL';
+  const statusFilter = filters.statusFilter || 'all';
+  const yearFilter = filters.yearFilter || 'ALL';
+  const monthFilter = filters.monthFilter || 'ALL';
+
+  const targetYear = yearFilter !== 'ALL' ? Number(yearFilter) : null;
+  const targetMonth = monthFilter !== 'ALL' ? Number(monthFilter) : null;
+
+  return items.filter((item) => {
+    if (lineFilter !== 'ALL' && item.product.line_name !== lineFilter) {
+      return false;
+    }
+    if (
+      customerFilter !== 'ALL' &&
+      item.product.customer_short_name !== customerFilter
+    ) {
+      return false;
+    }
+    if (statusFilter === 'completed' && !item.isCompleted) return false;
+    if (statusFilter === 'in_progress' && item.isCompleted) return false;
+
+    if (targetYear !== null || targetMonth !== null) {
+      const effectiveDate = getStNewProductFilterDate(item);
+      if (!effectiveDate) return false;
+      const [yStr, mStr] = effectiveDate.split('-');
+      if (targetYear !== null && Number(yStr) !== targetYear) return false;
+      if (targetMonth !== null && Number(mStr) !== targetMonth) return false;
+    }
+
+    if (q) {
+      const hit =
+        item.product.product_code.toLowerCase().includes(q) ||
+        item.product.product_name.toLowerCase().includes(q) ||
+        item.product.specification.toLowerCase().includes(q) ||
+        item.product.customer_short_name.toLowerCase().includes(q) ||
+        item.product.line_name.toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+
+    return true;
+  });
+}
+
+function compareCreatedAtDesc(a: StProductWithStatus, b: StProductWithStatus): number {
+  const ca = a.product.created_at || '';
+  const cb = b.product.created_at || '';
+  if (ca !== cb) return cb.localeCompare(ca);
+  return a.product.product_code.localeCompare(b.product.product_code, 'vi', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+export function sortNewProductsList(
+  items: StProductWithStatus[],
+  sortMode: StNewProductSortMode
+): StProductWithStatus[] {
+  const copy = [...items];
+  copy.sort((a, b) => {
+    switch (sortMode) {
+      case 'process_erp_desc': {
+        const da = toIsoDateOnly(a.status?.process_erp_date);
+        const db = toIsoDateOnly(b.status?.process_erp_date);
+        if (da && !db) return -1;
+        if (!da && db) return 1;
+        if (da !== db) return db.localeCompare(da);
+        return compareCreatedAtDesc(a, b);
+      }
+      case 'process_erp_asc': {
+        const da = toIsoDateOnly(a.status?.process_erp_date);
+        const db = toIsoDateOnly(b.status?.process_erp_date);
+        if (da && !db) return -1;
+        if (!da && db) return 1;
+        if (da !== db) return da.localeCompare(db);
+        return (a.product.created_at || '').localeCompare(
+          b.product.created_at || ''
+        ) || a.product.product_code.localeCompare(b.product.product_code, 'vi', {
+          numeric: true,
+          sensitivity: 'base',
+        });
+      }
+      case 'st_date_desc': {
+        const da = toIsoDateOnly(a.status?.st_date);
+        const db = toIsoDateOnly(b.status?.st_date);
+        if (da && !db) return -1;
+        if (!da && db) return 1;
+        if (da !== db) return db.localeCompare(da);
+        return compareCreatedAtDesc(a, b);
+      }
+      case 'progress_desc': {
+        const diff = b.stageProgress.percentage - a.stageProgress.percentage;
+        if (diff !== 0) return diff;
+        const compDiff = (b.isCompleted ? 1 : 0) - (a.isCompleted ? 1 : 0);
+        if (compDiff !== 0) return compDiff;
+        return compareCreatedAtDesc(a, b);
+      }
+      case 'progress_asc': {
+        const diff = a.stageProgress.percentage - b.stageProgress.percentage;
+        if (diff !== 0) return diff;
+        const compDiff = (a.isCompleted ? 1 : 0) - (b.isCompleted ? 1 : 0);
+        if (compDiff !== 0) return compDiff;
+        return a.product.product_code.localeCompare(
+          b.product.product_code,
+          'vi',
+          { numeric: true, sensitivity: 'base' }
+        );
+      }
+      case 'code_asc': {
+        return a.product.product_code.localeCompare(
+          b.product.product_code,
+          'vi',
+          { numeric: true, sensitivity: 'base' }
+        );
+      }
+    }
+  });
+  return copy;
+}
+

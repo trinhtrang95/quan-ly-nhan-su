@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowUpDown,
   Check,
   CheckCircle2,
-  CheckSquare,
+  ChevronDown,
   Clock,
   FileSpreadsheet,
   Image as ImageIcon,
@@ -10,6 +11,7 @@ import {
   Maximize2,
   PackageOpen,
   Pencil,
+  Plus,
   Search,
   X,
 } from 'lucide-react';
@@ -17,27 +19,30 @@ import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   calculateCompletionDays,
   computeStagesProgress,
+  extractAvailableYearsFromNewProducts,
+  filterNewProductsList,
   formatNumberVN,
   formatStDateVN,
   getLocalIsoDateToday,
   getPendingWorkflowStep,
   isNewProductCompleted,
+  sortNewProductsList,
+  ST_NEW_PRODUCT_SORT_OPTIONS,
   ST_PRODUCTION_STAGES,
   StCustomer,
   StLine,
+  StNewProductSortMode,
   StNewProductStatus,
+  StProduct,
   StProductWithStatus,
   StStageBoolField,
   StStageDateField,
   StWorkflowBoolField,
   StWorkflowDateField,
 } from '../../utils/stWorkLogic';
-import {
-  batchUpsertStNewProductStatuses,
-  UpsertStNewProductStatusInput,
-  upsertStNewProductStatus,
-} from '../../services/stWorkService';
+import { upsertStNewProductStatus } from '../../services/stWorkService';
 import { StNewProductProgressImportModal } from './StNewProductProgressImportModal';
+import { StNewProductQuickCreateModal } from './StNewProductQuickCreateModal';
 
 export interface StNewProductsTabProps {
   lines: StLine[];
@@ -45,6 +50,10 @@ export interface StNewProductsTabProps {
   productsWithStatus: StProductWithStatus[];
   isLoading: boolean;
   onStatusUpdated: (saved: StNewProductStatus) => void;
+  onProductAndStatusCreated?: (
+    product: StProduct,
+    status: StNewProductStatus
+  ) => void;
   onRefresh: () => Promise<void>;
   onNavigateToCatalog?: () => void;
   onShowToast?: (message: string) => void;
@@ -104,15 +113,22 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   productsWithStatus,
   isLoading,
   onStatusUpdated,
+  onProductAndStatusCreated,
   onRefresh,
   onNavigateToCatalog,
   onShowToast,
 }) => {
-  // Filter & Search state (left-to-right: Search -> Line -> Customer -> Status)
+  // Filter, Search & Sort state
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [lineFilter, setLineFilter] = useState<string>('ALL');
   const [customerFilter, setCustomerFilter] = useState<string>('ALL');
+  const [yearFilter, setYearFilter] = useState<string>('ALL');
+  const [monthFilter, setMonthFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilterMode>('all');
+  const [sortMode, setSortMode] =
+    useState<StNewProductSortMode>('process_erp_desc');
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState<boolean>(false);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Modal A: Compact Mini Progress Modal (st_new_product_status)
   const [progressModalItem, setProgressModalItem] =
@@ -132,21 +148,33 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     title: string;
   } | null>(null);
 
-  // Mechanism 1: Multi-select & Batch Progress Update Modal
-  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
-    () => new Set()
-  );
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
-  const [isBatchModalOpen, setIsBatchModalOpen] = useState<boolean>(false);
-  const [batchState, setBatchState] = useState<ModalProgressState>(() =>
-    toModalProgressState(null)
-  );
-  const [batchNotes, setBatchNotes] = useState<string>('');
-  const [isSavingBatch, setIsSavingBatch] = useState<boolean>(false);
-
-  // Mechanism 2: Import Progress from Excel/CSV Modal
+  // Modal C: Import Progress from Excel/CSV
   const [isProgressImportOpen, setIsProgressImportOpen] =
     useState<boolean>(false);
+
+  // Modal D: 2-in-1 Quick Create Product + Initial Status
+  const [isQuickCreateOpen, setIsQuickCreateOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isSortMenuOpen) return;
+    const handlePointerDown = (ev: MouseEvent) => {
+      if (
+        sortMenuRef.current &&
+        !sortMenuRef.current.contains(ev.target as Node)
+      ) {
+        setIsSortMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setIsSortMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSortMenuOpen]);
 
   const lineNames = useMemo(() => {
     const set = new Set<string>(lines.map((l) => l.name));
@@ -166,6 +194,21 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     return Array.from(set);
   }, [customers, productsWithStatus]);
 
+  const availableYears = useMemo(
+    () => extractAvailableYearsFromNewProducts(productsWithStatus),
+    [productsWithStatus]
+  );
+
+  const existingProductCodes = useMemo(
+    () =>
+      new Set(
+        productsWithStatus.map((item) =>
+          item.product.product_code.trim().toLowerCase()
+        )
+      ),
+    [productsWithStatus]
+  );
+
   const summaryCounts = useMemo(() => {
     const total = productsWithStatus.length;
     const completed = productsWithStatus.filter((i) => i.isCompleted).length;
@@ -174,37 +217,24 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   }, [productsWithStatus]);
 
   const filteredItems = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return productsWithStatus.filter((item) => {
-      if (lineFilter !== 'ALL' && item.product.line_name !== lineFilter) {
-        return false;
-      }
-      if (
-        customerFilter !== 'ALL' &&
-        item.product.customer_short_name !== customerFilter
-      ) {
-        return false;
-      }
-      if (statusFilter === 'completed' && !item.isCompleted) return false;
-      if (statusFilter === 'in_progress' && item.isCompleted) return false;
-
-      if (q) {
-        const hit =
-          item.product.product_code.toLowerCase().includes(q) ||
-          item.product.product_name.toLowerCase().includes(q) ||
-          item.product.specification.toLowerCase().includes(q) ||
-          item.product.customer_short_name.toLowerCase().includes(q) ||
-          item.product.line_name.toLowerCase().includes(q);
-        if (!hit) return false;
-      }
-      return true;
+    const filtered = filterNewProductsList(productsWithStatus, {
+      searchQuery,
+      lineFilter,
+      customerFilter,
+      statusFilter,
+      yearFilter,
+      monthFilter,
     });
+    return sortNewProductsList(filtered, sortMode);
   }, [
     productsWithStatus,
+    searchQuery,
     lineFilter,
     customerFilter,
     statusFilter,
-    searchQuery,
+    yearFilter,
+    monthFilter,
+    sortMode,
   ]);
 
   // Live preview inside Mini Progress Modal
@@ -301,349 +331,216 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     }
   };
 
-  // Multi-select helpers (Mechanism 1)
-  const validProductIdSet = useMemo(
-    () => new Set(productsWithStatus.map((item) => item.product.id)),
-    [productsWithStatus]
-  );
-
-  const activeSelectedIds = useMemo(() => {
-    const next = new Set<string>();
-    selectedProductIds.forEach((id) => {
-      if (validProductIdSet.has(id)) next.add(id);
-    });
-    return next;
-  }, [selectedProductIds, validProductIdSet]);
-
-  const selectedItems = useMemo(
+  const activeSortOption = useMemo(
     () =>
-      productsWithStatus.filter((item) =>
-        activeSelectedIds.has(item.product.id)
-      ),
-    [productsWithStatus, activeSelectedIds]
+      ST_NEW_PRODUCT_SORT_OPTIONS.find((opt) => opt.value === sortMode) ||
+      ST_NEW_PRODUCT_SORT_OPTIONS[0],
+    [sortMode]
   );
-
-  const filteredSelectedCount = useMemo(
-    () =>
-      filteredItems.filter((item) => activeSelectedIds.has(item.product.id))
-        .length,
-    [filteredItems, activeSelectedIds]
-  );
-
-  const allFilteredSelected =
-    filteredItems.length > 0 && filteredSelectedCount === filteredItems.length;
-  const someFilteredSelected =
-    filteredSelectedCount > 0 && filteredSelectedCount < filteredItems.length;
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someFilteredSelected;
-    }
-  }, [someFilteredSelected]);
-
-  const handleToggleSelectAllFiltered = (checked: boolean) => {
-    setSelectedProductIds((prev) => {
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (validProductIdSet.has(id)) next.add(id);
-      });
-      if (checked) {
-        filteredItems.forEach((item) => next.add(item.product.id));
-      } else {
-        filteredItems.forEach((item) => next.delete(item.product.id));
-      }
-      return next;
-    });
-  };
-
-  const handleToggleSelectRow = (productId: string, checked: boolean) => {
-    setSelectedProductIds((prev) => {
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (validProductIdSet.has(id)) next.add(id);
-      });
-      if (checked) next.add(productId);
-      else next.delete(productId);
-      return next;
-    });
-  };
-
-  const batchLivePreview = useMemo(() => {
-    const stageProgress = computeStagesProgress(batchState);
-    const completed = isNewProductCompleted(batchState);
-    const pendingStep = getPendingWorkflowStep(batchState);
-    return {
-      stageProgress,
-      isCompleted: completed,
-      pendingStep,
-      waitingLabel: pendingStep ? pendingStep.waitingLabel : 'Hoàn thành',
-    };
-  }, [batchState]);
-
-  const handleOpenBatchModal = () => {
-    if (selectedItems.length === 0) return;
-    const today = getLocalIsoDateToday();
-    setBatchState({
-      has_process_erp: true,
-      process_erp_date: today,
-      has_stage_win: false,
-      stage_win_date: '',
-      has_stage_cut: false,
-      stage_cut_date: '',
-      has_stage_sol: false,
-      stage_sol_date: '',
-      has_stage_ass: false,
-      stage_ass_date: '',
-      has_stage_imp: false,
-      stage_imp_date: '',
-      has_stage_sol2: false,
-      stage_sol2_date: '',
-      has_stage_fin: false,
-      stage_fin_date: '',
-      has_st: false,
-      st_date: '',
-    });
-    setBatchNotes('');
-    setIsBatchModalOpen(true);
-  };
-
-  const handleCloseBatchModal = () => {
-    if (isSavingBatch) return;
-    setIsBatchModalOpen(false);
-  };
-
-  const handleToggleBatchField = (
-    boolField: StWorkflowBoolField | StStageBoolField,
-    dateField: StWorkflowDateField | StStageDateField,
-    checked: boolean
-  ) => {
-    setBatchState((prev) => ({
-      ...prev,
-      [boolField]: checked,
-      [dateField]: checked ? prev[dateField] || getLocalIsoDateToday() : '',
-    }));
-  };
-
-  const handleChangeBatchDate = (
-    boolField: StWorkflowBoolField | StStageBoolField,
-    dateField: StWorkflowDateField | StStageDateField,
-    dateVal: string
-  ) => {
-    setBatchState((prev) => ({
-      ...prev,
-      [dateField]: dateVal,
-      ...(dateVal ? { [boolField]: true } : {}),
-    }));
-  };
-
-  const handleSelectAllSevenStagesBatch = () => {
-    const today = getLocalIsoDateToday();
-    const shouldCheckAll = !batchLivePreview.stageProgress.allCompleted;
-    setBatchState((prev) => {
-      const next = { ...prev };
-      for (const stage of ST_PRODUCTION_STAGES) {
-        next[stage.boolField] = shouldCheckAll;
-        next[stage.dateField] = shouldCheckAll
-          ? prev[stage.dateField] || today
-          : '';
-      }
-      return next;
-    });
-  };
-
-  const handleSaveBatchProgress = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedItems.length === 0 || isSavingBatch) return;
-
-    const cleanBatchNote = batchNotes.trim();
-    const payloads: UpsertStNewProductStatusInput[] = selectedItems.map(
-      (item) => ({
-        id: item.status?.id || null,
-        product_id: item.product.id,
-        has_process_erp: batchState.has_process_erp,
-        process_erp_date: batchState.process_erp_date || null,
-        has_stage_win: batchState.has_stage_win,
-        stage_win_date: batchState.stage_win_date || null,
-        has_stage_cut: batchState.has_stage_cut,
-        stage_cut_date: batchState.stage_cut_date || null,
-        has_stage_sol: batchState.has_stage_sol,
-        stage_sol_date: batchState.stage_sol_date || null,
-        has_stage_ass: batchState.has_stage_ass,
-        stage_ass_date: batchState.stage_ass_date || null,
-        has_stage_imp: batchState.has_stage_imp,
-        stage_imp_date: batchState.stage_imp_date || null,
-        has_stage_sol2: batchState.has_stage_sol2,
-        stage_sol2_date: batchState.stage_sol2_date || null,
-        has_stage_fin: batchState.has_stage_fin,
-        stage_fin_date: batchState.stage_fin_date || null,
-        has_st: batchState.has_st,
-        st_date: batchState.st_date || null,
-        unit_price: item.status?.unit_price ?? null,
-        currency: item.status?.currency || 'VND',
-        notes: cleanBatchNote ? cleanBatchNote : item.status?.notes ?? null,
-      })
-    );
-
-    setIsSavingBatch(true);
-    try {
-      await batchUpsertStNewProductStatuses(payloads);
-      await onRefresh();
-      setIsBatchModalOpen(false);
-      setSelectedProductIds(new Set());
-      onShowToast?.(
-        `Đã cập nhật đồng loạt tiến độ cho ${formatNumberVN(
-          payloads.length
-        )} mã hàng${
-          batchLivePreview.isCompleted ? ' (đã chuyển sang Hoàn thành)' : ''
-        }.`
-      );
-    } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
-    } finally {
-      setIsSavingBatch(false);
-    }
-  };
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden">
-      {/* 1. Filter Strip: Search -> Line -> Customer -> Status Pills + Nhập từ file */}
+      {/* 1. Filter Strip & Action Buttons */}
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-full sm:w-60 lg:w-64">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm mã hàng, tên hàng, quy cách..."
-            aria-label="Tìm kiếm đơn giá mới"
-            className="w-full h-8 pl-8 pr-7 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-          />
-          {searchQuery && (
+          <div className="relative w-full sm:w-52 lg:w-56">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm mã hàng, tên hàng, quy cách..."
+              aria-label="Tìm kiếm đơn giá mới"
+              className="w-full h-8 pl-8 pr-7 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Xóa từ khóa tìm kiếm"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={lineFilter}
+            onChange={(e) => setLineFilter(e.target.value)}
+            aria-label="Lọc theo Line"
+            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          >
+            <option value="ALL">Tất cả Line</option>
+            {lineNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={customerFilter}
+            onChange={(e) => setCustomerFilter(e.target.value)}
+            aria-label="Lọc theo Khách hàng"
+            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          >
+            <option value="ALL">Tất cả Khách hàng</option>
+            {customerNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            data-testid="st-new-products-year-filter"
+            value={yearFilter}
+            onChange={(e) => setYearFilter(e.target.value)}
+            aria-label="Lọc theo Năm"
+            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          >
+            <option value="ALL">Tất cả Năm</option>
+            {availableYears.map((yr) => (
+              <option key={yr} value={String(yr)}>
+                Năm {yr}
+              </option>
+            ))}
+          </select>
+
+          <select
+            data-testid="st-new-products-month-filter"
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+            aria-label="Lọc theo Tháng"
+            className="h-8 px-2 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+          >
+            <option value="ALL">Tất cả Tháng</option>
+            {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
+              <option key={m} value={String(m)}>
+                Tháng {m}
+              </option>
+            ))}
+          </select>
+
+          <div className="inline-flex items-center gap-1 p-0.5 bg-white border border-slate-300 rounded-lg">
             <button
               type="button"
-              onClick={() => setSearchQuery('')}
-              aria-label="Xóa từ khóa tìm kiếm"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              onClick={() => setStatusFilter('all')}
+              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                statusFilter === 'all'
+                  ? 'bg-[#14539E] text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <X className="w-3.5 h-3.5" />
+              Tất cả ({formatNumberVN(summaryCounts.total)})
             </button>
-          )}
-        </div>
-
-        <select
-          value={lineFilter}
-          onChange={(e) => setLineFilter(e.target.value)}
-          aria-label="Lọc theo Line"
-          className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-        >
-          <option value="ALL">Tất cả Line</option>
-          {lineNames.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={customerFilter}
-          onChange={(e) => setCustomerFilter(e.target.value)}
-          aria-label="Lọc theo Khách hàng"
-          className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-        >
-          <option value="ALL">Tất cả Khách hàng</option>
-          {customerNames.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-
-        <div className="inline-flex items-center gap-1 p-0.5 bg-white border border-slate-300 rounded-lg">
-          <button
-            type="button"
-            onClick={() => setStatusFilter('all')}
-            className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-              statusFilter === 'all'
-                ? 'bg-[#14539E] text-white'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Tất cả ({formatNumberVN(summaryCounts.total)})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter('completed')}
-            className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-              statusFilter === 'completed'
-                ? 'bg-emerald-600 text-white'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Hoàn thành ({formatNumberVN(summaryCounts.completed)})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter('in_progress')}
-            className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-              statusFilter === 'in_progress'
-                ? 'bg-amber-600 text-white'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Đang làm ({formatNumberVN(summaryCounts.inProgress)})
-          </button>
-        </div>
-        </div>
-
-        <button
-          type="button"
-          data-testid="st-new-products-import-btn"
-          onClick={() => setIsProgressImportOpen(true)}
-          className="h-8 px-3 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0"
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5" />
-          <span>Nhập từ file</span>
-        </button>
-      </div>
-
-      {/* Quick Batch Toolbar when >= 1 row is checked */}
-      {selectedItems.length > 0 && (
-        <div
-          data-testid="st-batch-selection-bar"
-          className="px-4 py-2 border-b border-blue-200 bg-blue-50/80 flex flex-wrap items-center justify-between gap-2 shrink-0"
-        >
-          <div className="flex items-center gap-2 text-xs text-slate-800">
-            <span className="inline-flex items-center gap-1.5 font-semibold text-[#14539E]">
-              <CheckSquare className="w-4 h-4" />
-              <span>
-                Đã chọn {formatNumberVN(selectedItems.length)} mã hàng
-              </span>
-            </span>
             <button
               type="button"
-              onClick={() => setSelectedProductIds(new Set())}
-              className="text-[11px] font-medium text-slate-500 hover:text-slate-800 underline cursor-pointer"
+              onClick={() => setStatusFilter('completed')}
+              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                statusFilter === 'completed'
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              Bỏ chọn
+              Hoàn thành ({formatNumberVN(summaryCounts.completed)})
             </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('in_progress')}
+              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                statusFilter === 'in_progress'
+                  ? 'bg-amber-600 text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Đang làm ({formatNumberVN(summaryCounts.inProgress)})
+            </button>
+          </div>
+        </div>
+
+        {/* Right Action Cluster: Sắp xếp theo -> Nhập từ file -> + Thêm mã hàng mới */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="relative" ref={sortMenuRef}>
+            <button
+              type="button"
+              data-testid="st-new-products-sort-btn"
+              onClick={() => setIsSortMenuOpen((prev) => !prev)}
+              aria-haspopup="menu"
+              aria-expanded={isSortMenuOpen}
+              title={`Đang sắp xếp: ${activeSortOption.label}`}
+              className="h-8 px-3 rounded-lg border border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5" />
+              <span>Sắp xếp theo</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform ${
+                  isSortMenuOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {isSortMenuOpen && (
+              <div
+                role="menu"
+                data-testid="st-new-products-sort-menu"
+                className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30"
+              >
+                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Sắp xếp danh sách
+                </div>
+                {ST_NEW_PRODUCT_SORT_OPTIONS.map((opt) => {
+                  const active = sortMode === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      data-testid={`st-sort-option-${opt.value}`}
+                      onClick={() => {
+                        setSortMode(opt.value);
+                        setIsSortMenuOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                        active
+                          ? 'bg-blue-50/80 text-[#14539E] font-semibold'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <button
             type="button"
-            data-testid="st-batch-update-open-btn"
-            onClick={handleOpenBatchModal}
+            data-testid="st-new-products-import-btn"
+            onClick={() => setIsProgressImportOpen(true)}
+            className="h-8 px-3 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Nhập từ file</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="st-new-products-add-btn"
+            onClick={() => setIsQuickCreateOpen(true)}
             className="h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
           >
-            <CheckSquare className="w-3.5 h-3.5" />
-            <span>
-              Cập nhật đồng loạt ({formatNumberVN(selectedItems.length)} mã)
-            </span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>Thêm mã hàng mới</span>
           </button>
         </div>
-      )}
+      </div>
 
-      {/* 2. Read-Only 10-Column Table + Selection Checkbox (`st_new_product_status` joined with `st_products`) */}
+      {/* 2. Read-Only 10-Column Table (`st_new_product_status` joined with `st_products`) */}
       <div
         data-testid="st-new-products-table-wrapper"
         className="flex-1 min-h-0 overflow-auto"
@@ -659,18 +556,28 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
               <PackageOpen className="w-5 h-5" />
             </div>
             <p className="text-xs text-slate-600">
-              Chưa có sản phẩm nào để theo dõi. Vui lòng thêm sản phẩm ở tab{' '}
-              <strong>Danh mục sản phẩm</strong>.
+              Chưa có sản phẩm nào để theo dõi. Vui lòng thêm sản phẩm mới hoặc
+              mở tab <strong>Danh mục sản phẩm</strong>.
             </p>
-            {onNavigateToCatalog && (
+            <div className="flex items-center justify-center gap-2">
               <button
                 type="button"
-                onClick={onNavigateToCatalog}
-                className="h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold cursor-pointer"
+                onClick={() => setIsQuickCreateOpen(true)}
+                className="h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5"
               >
-                Mở Danh mục sản phẩm
+                <Plus className="w-3.5 h-3.5" />
+                <span>Thêm mã hàng mới</span>
               </button>
-            )}
+              {onNavigateToCatalog && (
+                <button
+                  type="button"
+                  onClick={onNavigateToCatalog}
+                  className="h-8 px-3.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Mở Danh mục sản phẩm
+                </button>
+              )}
+            </div>
           </div>
         ) : filteredItems.length === 0 ? (
           <div className="p-10 text-center text-xs text-slate-500">
@@ -683,27 +590,13 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           >
             <thead className="sticky top-0 z-10 bg-slate-100 text-[10.5px] font-bold text-slate-600 uppercase tracking-tight shadow-[0_1px_0_0_rgba(203,213,225,1)]">
               <tr>
-                <th className="sticky left-0 z-20 bg-slate-100 px-1.5 py-2.5 w-9 min-w-[36px] text-center border-r border-b border-slate-200">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    data-testid="st-select-all-rows"
-                    checked={allFilteredSelected}
-                    onChange={(e) =>
-                      handleToggleSelectAllFiltered(e.target.checked)
-                    }
-                    aria-label="Chọn tất cả mã hàng đang lọc"
-                    title="Chọn tất cả các dòng đang lọc"
-                    className="w-4 h-4 accent-[#14539E] rounded cursor-pointer align-middle"
-                  />
-                </th>
-                <th className="sticky left-[36px] z-20 bg-slate-100 px-2 py-2.5 min-w-[88px] border-r border-b border-slate-200 whitespace-nowrap">
+                <th className="sticky left-0 z-20 bg-slate-100 px-2.5 py-2.5 min-w-[92px] border-r border-b border-slate-200 whitespace-nowrap">
                   MÃ HÀNG
                 </th>
                 <th className="px-2 py-2.5 w-[115px] max-w-[125px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   QUY CÁCH
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   QUY TRÌNH ERP
                 </th>
                 <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
@@ -724,7 +617,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                 <th className="px-1.5 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   HIỆN TRẠNG
                 </th>
-                <th className="px-1 py-2.5 w-[58px] text-center border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1.5 py-2.5 w-[58px] text-center border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   THAO TÁC
                 </th>
               </tr>
@@ -733,15 +626,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
               {filteredItems.map((item) => {
                 const p = item.product;
                 const st = item.status;
-                const isSelected = activeSelectedIds.has(p.id);
                 const hasProcessErp = Boolean(st?.has_process_erp);
                 const hasSt = Boolean(st?.has_st);
                 const { percentage, allCompleted, nextPendingStageKey } =
                   item.stageProgress;
                 const isWaitingSt = hasProcessErp && allCompleted && !hasSt;
-                const stickyCellBg = isSelected
-                  ? 'bg-blue-50/90 group-hover:bg-blue-100/70'
-                  : item.isCompleted
+                const stickyCellBg = item.isCompleted
                   ? 'bg-[#F4FBF7] group-hover:bg-[#EAF7F0]'
                   : 'bg-white group-hover:bg-[#F3F8FF]';
 
@@ -749,32 +639,14 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   <tr
                     key={p.id}
                     className={`group transition-colors ${
-                      isSelected
-                        ? 'bg-blue-50/70 hover:bg-blue-100/60'
-                        : item.isCompleted
+                      item.isCompleted
                         ? 'bg-[#F4FBF7] hover:bg-[#EAF7F0]'
                         : 'bg-white hover:bg-[#F3F8FF]'
                     }`}
                   >
-                    {/* 0. Checkbox chọn dòng */}
-                    <td
-                      className={`sticky left-0 z-[5] px-1.5 py-2.5 text-center border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
-                    >
-                      <input
-                        type="checkbox"
-                        data-testid={`st-row-select-${p.product_code}`}
-                        checked={isSelected}
-                        onChange={(e) =>
-                          handleToggleSelectRow(p.id, e.target.checked)
-                        }
-                        aria-label={`Chọn mã hàng ${p.product_code}`}
-                        className="w-4 h-4 accent-[#14539E] rounded cursor-pointer align-middle"
-                      />
-                    </td>
-
                     {/* 1. Mã hàng (từ st_products, link xanh đậm -> Full Product Detail Modal) */}
                     <td
-                      className={`sticky left-[36px] z-[5] px-2 py-2.5 border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                      className={`sticky left-0 z-[5] px-2.5 py-2.5 border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
                     >
                       <button
                         type="button"
@@ -1545,324 +1417,26 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           </div>
         </div>
       )}
-      {/* MODAL C: Mini Batch Update Modal (Cập nhật đồng loạt nhiều mã) */}
-      {isBatchModalOpen && selectedItems.length > 0 && (() => {
-        const pct = batchLivePreview.stageProgress.percentage;
-        const doneStages = batchLivePreview.stageProgress.completedCount;
-        const previewCodes = selectedItems
-          .slice(0, 4)
-          .map((item) => item.product.product_code)
-          .join(', ');
-
-        return (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Cập nhật tiến độ đồng loạt"
-            onClick={handleCloseBatchModal}
-            className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4"
-          >
-            <form
-              data-testid="st-batch-progress-modal"
-              onSubmit={handleSaveBatchProgress}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-2xl bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
-            >
-              {/* Header */}
-              <div className="px-4 py-3 border-b border-slate-200 flex items-start justify-between gap-2 bg-slate-50/80 shrink-0">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-[#14539E]">
-                      Cập nhật đồng loạt ({formatNumberVN(selectedItems.length)}{' '}
-                      mã)
-                    </span>
-                    {batchLivePreview.isCompleted ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold">
-                        <CheckCircle2 className="w-3 h-3" />
-                        Sẽ chuyển sang Hoàn thành
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold">
-                        <Clock className="w-3 h-3" />
-                        {batchLivePreview.waitingLabel}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] font-mono text-slate-600 mt-0.5 truncate">
-                    Áp dụng cho: {previewCodes}
-                    {selectedItems.length > 4
-                      ? ` (+${formatNumberVN(selectedItems.length - 4)} mã khác)`
-                      : ''}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCloseBatchModal}
-                  aria-label="Đóng cửa sổ cập nhật đồng loạt"
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 inline-flex items-center justify-center cursor-pointer shrink-0"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Body */}
-              <div className="p-4 overflow-y-auto space-y-3.5 text-xs">
-                {/* 1. Quy trình ERP */}
-                <div
-                  className={`rounded-lg border px-3 py-2.5 flex flex-wrap items-center justify-between gap-3 transition-colors ${
-                    batchState.has_process_erp
-                      ? 'bg-emerald-50/50 border-emerald-200'
-                      : 'bg-amber-50/50 border-amber-200'
-                  }`}
-                >
-                  <label className="inline-flex items-center gap-2.5 font-bold text-slate-900 cursor-pointer min-w-0">
-                    <input
-                      type="checkbox"
-                      data-testid="st-batch-check-process_erp"
-                      checked={batchState.has_process_erp}
-                      onChange={(e) =>
-                        handleToggleBatchField(
-                          'has_process_erp',
-                          'process_erp_date',
-                          e.target.checked
-                        )
-                      }
-                      className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
-                    />
-                    <span>1. Quy trình ERP</span>
-                  </label>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">
-                      Ngày tạo QT:
-                    </span>
-                    <input
-                      type="date"
-                      data-testid="st-batch-date-process_erp"
-                      value={batchState.process_erp_date}
-                      onChange={(e) =>
-                        handleChangeBatchDate(
-                          'has_process_erp',
-                          'process_erp_date',
-                          e.target.value
-                        )
-                      }
-                      aria-label="Ngày tạo QT đồng loạt"
-                      className="h-8 w-36 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                    />
-                  </div>
-                </div>
-
-                {/* 2. 7 công đoạn + nút Chọn đủ 7 công đoạn (100%) */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-bold text-slate-800">
-                      2. Danh sách 7 công đoạn ({doneStages}/7)
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <button
-                        type="button"
-                        data-testid="st-batch-select-all-stages-btn"
-                        onClick={handleSelectAllSevenStagesBatch}
-                        className={`h-7 px-2.5 rounded-md border text-[11px] font-semibold cursor-pointer transition-colors ${
-                          batchLivePreview.stageProgress.allCompleted
-                            ? 'bg-emerald-600 border-emerald-600 text-white'
-                            : 'bg-white border-[#14539E]/40 text-[#14539E] hover:bg-[#14539E] hover:text-white'
-                        }`}
-                      >
-                        {batchLivePreview.stageProgress.allCompleted
-                          ? 'Đã chọn đủ 7 công đoạn (100%)'
-                          : 'Chọn đủ 7 công đoạn (100%)'}
-                      </button>
-
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-20 h-2 rounded-full bg-slate-200 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-200 ${
-                              pct === 100
-                                ? 'bg-emerald-600'
-                                : pct > 0
-                                ? 'bg-[#14539E]'
-                                : 'bg-slate-300'
-                            }`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                        <span
-                          data-testid="st-batch-percent-label"
-                          className={`font-mono text-xs font-bold tabular-nums ${
-                            pct === 100
-                              ? 'text-emerald-700'
-                              : pct > 0
-                              ? 'text-[#14539E]'
-                              : 'text-slate-500'
-                          }`}
-                        >
-                          {pct}%
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    {ST_PRODUCTION_STAGES.map((stage) => {
-                      const checked = Boolean(batchState[stage.boolField]);
-                      const dateVal = batchState[stage.dateField] || '';
-                      return (
-                        <div
-                          key={stage.key}
-                          className={`rounded-lg border px-3 py-2 flex flex-wrap items-center justify-between gap-2 transition-colors ${
-                            checked
-                              ? 'bg-emerald-50/60 border-emerald-200'
-                              : 'bg-white border-slate-200'
-                          }`}
-                        >
-                          <label className="inline-flex items-center gap-2.5 font-semibold text-slate-800 cursor-pointer min-w-0 flex-1">
-                            <input
-                              type="checkbox"
-                              data-testid={`st-batch-stage-check-${stage.key}`}
-                              checked={checked}
-                              onChange={(e) =>
-                                handleToggleBatchField(
-                                  stage.boolField,
-                                  stage.dateField,
-                                  e.target.checked
-                                )
-                              }
-                              className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
-                            />
-                            <span className="font-mono text-[11px] font-bold text-[#14539E]">
-                              {stage.code}
-                            </span>
-                            <span className="text-slate-600 truncate">
-                              – {stage.name}
-                            </span>
-                          </label>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-[11px] text-slate-500 whitespace-nowrap">
-                              Ngày hoàn thành:
-                            </span>
-                            <input
-                              type="date"
-                              data-testid={`st-batch-stage-date-${stage.key}`}
-                              value={dateVal}
-                              onChange={(e) =>
-                                handleChangeBatchDate(
-                                  stage.boolField,
-                                  stage.dateField,
-                                  e.target.value
-                                )
-                              }
-                              aria-label={`Ngày hoàn thành đồng loạt ${stage.fullLabel}`}
-                              className="h-7 w-36 px-2 text-xs font-mono bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#14539E]"
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 3. ST */}
-                <div
-                  className={`rounded-lg border px-3 py-2.5 flex flex-wrap items-center justify-between gap-3 transition-colors ${
-                    batchState.has_st && batchState.st_date
-                      ? 'bg-emerald-50/50 border-emerald-200'
-                      : batchState.has_process_erp &&
-                        batchLivePreview.stageProgress.allCompleted
-                      ? 'bg-amber-50/50 border-amber-200'
-                      : 'bg-slate-50/60 border-slate-200'
-                  }`}
-                >
-                  <label className="inline-flex items-center gap-2.5 font-bold text-slate-900 cursor-pointer min-w-0">
-                    <input
-                      type="checkbox"
-                      data-testid="st-batch-check-st"
-                      checked={batchState.has_st}
-                      onChange={(e) =>
-                        handleToggleBatchField(
-                          'has_st',
-                          'st_date',
-                          e.target.checked
-                        )
-                      }
-                      className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
-                    />
-                    <span>3. ST (Áp dụng sản xuất)</span>
-                  </label>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">
-                      Ngày áp dụng:
-                    </span>
-                    <input
-                      type="date"
-                      data-testid="st-batch-date-st"
-                      value={batchState.st_date}
-                      onChange={(e) =>
-                        handleChangeBatchDate(
-                          'has_st',
-                          'st_date',
-                          e.target.value
-                        )
-                      }
-                      aria-label="Ngày áp dụng đồng loạt"
-                      className="h-8 w-36 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                    />
-                  </div>
-                </div>
-
-                {/* Ghi chú tùy chọn */}
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Ghi chú chung (tùy chọn)
-                  </label>
-                  <input
-                    type="text"
-                    value={batchNotes}
-                    onChange={(e) => setBatchNotes(e.target.value)}
-                    placeholder="Để trống nếu muốn giữ nguyên ghi chú riêng của từng mã..."
-                    className="w-full h-8 px-3 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  disabled={isSavingBatch}
-                  onClick={handleCloseBatchModal}
-                  className="h-8 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold cursor-pointer hover:bg-slate-50"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingBatch}
-                  data-testid="st-batch-save-btn"
-                  className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  {isSavingBatch ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" />
-                  )}
-                  <span>Lưu cập nhật đồng loạt</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        );
-      })()}
-
-      {/* MODAL D: Nhập tiến độ từ file Excel/CSV */}
+      {/* MODAL C: Nhập tiến độ từ file Excel/CSV */}
       <StNewProductProgressImportModal
         isOpen={isProgressImportOpen}
         productsWithStatus={productsWithStatus}
         onClose={() => setIsProgressImportOpen(false)}
         onImported={onRefresh}
+        onShowToast={onShowToast}
+      />
+
+      {/* MODAL D: Thêm mã hàng mới (2-trong-1: st_products + st_new_product_status) */}
+      <StNewProductQuickCreateModal
+        isOpen={isQuickCreateOpen}
+        lines={lines}
+        customers={customers}
+        existingProductCodes={existingProductCodes}
+        onClose={() => setIsQuickCreateOpen(false)}
+        onCreated={(product, status) => {
+          onProductAndStatusCreated?.(product, status);
+        }}
+        onRefresh={onRefresh}
         onShowToast={onShowToast}
       />
     </div>

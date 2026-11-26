@@ -2,6 +2,7 @@ import { getOvertimeSupabaseClient, overtimeSupabase } from './supabaseClient';
 import {
   encodeStepsIntoNotes,
   extractEncodedStepsFromNotes,
+  getLocalIsoDateToday,
   isNewProductCompleted,
   normalizeStChangeRequestRow,
   normalizeStCustomerQuoteRow,
@@ -469,6 +470,48 @@ export async function createStProduct(input: {
         updated_at: nowIso,
       },
   };
+}
+
+export async function createStProductWithInitialStatus(input: {
+  line_name: string;
+  customer_short_name: string;
+  product_name: string;
+  product_code: string;
+  specification?: string;
+  image_url?: string | null;
+  has_process_erp: boolean;
+  process_erp_date?: string | null;
+  notes?: string | null;
+}): Promise<{ product: StProduct; status: StNewProductStatus }> {
+  const { product, status: initialStatus } = await createStProduct({
+    line_name: input.line_name,
+    customer_short_name: input.customer_short_name,
+    product_name: input.product_name,
+    product_code: input.product_code,
+    specification: input.specification,
+    image_url: input.image_url,
+  });
+
+  const cleanDate = input.has_process_erp
+    ? input.process_erp_date?.trim() || getLocalIsoDateToday()
+    : input.process_erp_date?.trim() || null;
+  const cleanNotes = input.notes?.trim() || null;
+
+  if (!input.has_process_erp && !cleanDate && !cleanNotes) {
+    return { product, status: initialStatus };
+  }
+
+  const updatedStatus = await upsertStNewProductStatus({
+    id: initialStatus.id || null,
+    product_id: product.id,
+    has_process_erp: Boolean(input.has_process_erp),
+    process_erp_date: cleanDate,
+    has_st: false,
+    st_date: null,
+    notes: cleanNotes,
+  });
+
+  return { product, status: updatedStatus };
 }
 
 export async function updateStProduct(

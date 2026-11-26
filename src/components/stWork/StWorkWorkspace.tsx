@@ -232,6 +232,19 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
     });
   }, []);
 
+  const handleProductAndStatusCreated = useCallback(
+    (product: StProduct, status: StNewProductStatus) => {
+      setProducts((prev) => {
+        const exists = prev.some((p) => p.id === product.id);
+        return exists
+          ? prev.map((p) => (p.id === product.id ? product : p))
+          : [product, ...prev];
+      });
+      handleStatusUpdated(status);
+    },
+    [handleStatusUpdated]
+  );
+
   const currentMeta = SUB_TAB_META[activeTab];
   const HeaderIcon = currentMeta.icon;
 
@@ -319,6 +332,7 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
             productsWithStatus={productsWithStatus}
             isLoading={isLoading}
             onStatusUpdated={handleStatusUpdated}
+            onProductAndStatusCreated={handleProductAndStatusCreated}
             onRefresh={() => loadSnapshot(true)}
             onNavigateToCatalog={() => handleSelectTab('products_catalog')}
             onShowToast={onShowToast}

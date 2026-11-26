@@ -7,6 +7,8 @@ import {
   computeStOverviewMetrics,
   computeStReportComparison,
   encodeStepsIntoNotes,
+  extractAvailableYearsFromNewProducts,
+  filterNewProductsList,
   getNewProductWaitingLabel,
   getPendingWorkflowStep,
   isNewProductCompleted,
@@ -16,6 +18,7 @@ import {
   normalizeStProductRow,
   resolveOverviewPeriodRange,
   resolveReportPeriodRange,
+  sortNewProductsList,
   type StChangeRequest,
   type StCustomerQuote,
   type StNewProductStatus,
@@ -633,4 +636,140 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
     );
     assert.equal(reqs.length, 0);
   });
+
+  it('filters by Year/Month using process_erp_date with st_date fallback and sorts across all 6 modes', () => {
+    const products: StProduct[] = [
+      {
+        id: 'pa',
+        line_name: 'S Line',
+        customer_short_name: 'LG',
+        product_name: 'SP A',
+        product_code: 'CODE-B',
+        specification: 'S1',
+        image_url: null,
+        created_at: '2026-10-01T00:00:00Z',
+        updated_at: '2026-10-01T00:00:00Z',
+      },
+      {
+        id: 'pb',
+        line_name: 'M Line',
+        customer_short_name: 'SAMSUNG',
+        product_name: 'SP B',
+        product_code: 'CODE-A',
+        specification: 'S2',
+        image_url: null,
+        created_at: '2026-11-20T00:00:00Z',
+        updated_at: '2026-11-20T00:00:00Z',
+      },
+      {
+        id: 'pc',
+        line_name: 'E Line',
+        customer_short_name: 'LG',
+        product_name: 'SP C',
+        product_code: 'CODE-C',
+        specification: 'S3',
+        image_url: null,
+        created_at: '2025-12-01T00:00:00Z',
+        updated_at: '2025-12-01T00:00:00Z',
+      },
+    ];
+
+    const statuses: StNewProductStatus[] = [
+      // pa: no process_erp_date, fallback to st_date 2026-08-15, 100% stages
+      buildFullCompletedStatus({
+        id: 'sa',
+        product_id: 'pa',
+        has_process_erp: false,
+        process_erp_date: null,
+        st_date: '2026-08-15',
+      }),
+      // pb: process_erp_date 2026-11-20, 29% (WIN+CUT), no st_date
+      buildFullCompletedStatus({
+        id: 'sb',
+        product_id: 'pb',
+        has_process_erp: true,
+        process_erp_date: '2026-11-20',
+        has_stage_win: true,
+        has_stage_cut: true,
+        has_stage_sol: false,
+        has_stage_ass: false,
+        has_stage_imp: false,
+        has_stage_sol2: false,
+        has_stage_fin: false,
+        has_st: false,
+        st_date: null,
+      }),
+      // pc: process_erp_date 2025-12-10, 0% stages, st_date 2026-01-05
+      buildFullCompletedStatus({
+        id: 'sc',
+        product_id: 'pc',
+        has_process_erp: true,
+        process_erp_date: '2025-12-10',
+        has_stage_win: false,
+        has_stage_cut: false,
+        has_stage_sol: false,
+        has_stage_ass: false,
+        has_stage_imp: false,
+        has_stage_sol2: false,
+        has_stage_fin: false,
+        has_st: true,
+        st_date: '2026-01-05',
+      }),
+    ];
+
+    const merged = mergeProductsWithStatus(products, statuses);
+
+    assert.deepEqual(extractAvailableYearsFromNewProducts(merged), [2026, 2025]);
+
+    assert.deepEqual(
+      filterNewProductsList(merged, { yearFilter: '2026', monthFilter: '8' }).map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-B']
+    );
+    assert.deepEqual(
+      filterNewProductsList(merged, { yearFilter: '2025', monthFilter: 'ALL' }).map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-C']
+    );
+
+    assert.deepEqual(
+      sortNewProductsList(merged, 'process_erp_desc').map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-A', 'CODE-C', 'CODE-B']
+    );
+    assert.deepEqual(
+      sortNewProductsList(merged, 'process_erp_asc').map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-C', 'CODE-A', 'CODE-B']
+    );
+    assert.deepEqual(
+      sortNewProductsList(merged, 'st_date_desc').map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-B', 'CODE-C', 'CODE-A']
+    );
+    assert.deepEqual(
+      sortNewProductsList(merged, 'progress_desc').map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-B', 'CODE-A', 'CODE-C']
+    );
+    assert.deepEqual(
+      sortNewProductsList(merged, 'progress_asc').map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-C', 'CODE-A', 'CODE-B']
+    );
+    assert.deepEqual(
+      sortNewProductsList(merged, 'code_asc').map(
+        (x) => x.product.product_code
+      ),
+      ['CODE-A', 'CODE-B', 'CODE-C']
+    );
+  });
 });
+

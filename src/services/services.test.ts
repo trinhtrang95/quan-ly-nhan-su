@@ -28,6 +28,7 @@ test('services layer exposes HR, Settings, and ST Work CRUD & Realtime APIs', ()
   assert.equal(typeof stWorkService.createStLine, 'function');
   assert.equal(typeof stWorkService.createStCustomer, 'function');
   assert.equal(typeof stWorkService.createStProduct, 'function');
+  assert.equal(typeof stWorkService.createStProductWithInitialStatus, 'function');
   assert.equal(typeof stWorkService.upsertStNewProductStatus, 'function');
   assert.equal(typeof stWorkService.createStChangeRequest, 'function');
   assert.equal(typeof stWorkService.subscribeToStWorkRealtime, 'function');
