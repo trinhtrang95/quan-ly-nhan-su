@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ArrowRight,
   Check,
   CheckCircle2,
   Clock,
@@ -55,14 +54,6 @@ export interface StNewProductsTabProps {
 type StatusFilterMode = 'all' | 'completed' | 'in_progress';
 
 interface ModalStepState {
-  has_quote: boolean;
-  quote_date: string;
-  has_bom_erp: boolean;
-  bom_erp_date: string;
-  has_spec_erp: boolean;
-  spec_erp_date: string;
-  has_khsx: boolean;
-  khsx_date: string;
   has_process_erp: boolean;
   process_erp_date: string;
   has_st: boolean;
@@ -71,14 +62,6 @@ interface ModalStepState {
 
 function toModalStepState(status: StNewProductStatus | null): ModalStepState {
   return {
-    has_quote: Boolean(status?.has_quote),
-    quote_date: status?.quote_date || '',
-    has_bom_erp: Boolean(status?.has_bom_erp),
-    bom_erp_date: status?.bom_erp_date || '',
-    has_spec_erp: Boolean(status?.has_spec_erp),
-    spec_erp_date: status?.spec_erp_date || '',
-    has_khsx: Boolean(status?.has_khsx),
-    khsx_date: status?.khsx_date || '',
     has_process_erp: Boolean(status?.has_process_erp),
     process_erp_date: status?.process_erp_date || '',
     has_st: Boolean(status?.has_st),
@@ -124,7 +107,16 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [quickCustNotes, setQuickCustNotes] = useState<string>('');
   const [isSavingQuickCust, setIsSavingQuickCust] = useState<boolean>(false);
 
-  // Unified Detail & 6-Step Progress Update Modal state (safe draft, saves only on button click)
+  // Modal A: Compact Mini Progress Modal (opened by clicking Action icon in table)
+  const [progressModalItem, setProgressModalItem] =
+    useState<StProductWithStatus | null>(null);
+  const [miniSteps, setMiniSteps] = useState<ModalStepState>(() =>
+    toModalStepState(null)
+  );
+  const [miniNotes, setMiniNotes] = useState<string>('');
+  const [isSavingMini, setIsSavingMini] = useState<boolean>(false);
+
+  // Modal B: Full Product Detail & Progress Modal (opened by clicking Mã hàng link)
   const [activeModalItem, setActiveModalItem] =
     useState<StProductWithStatus | null>(null);
   const [modalLine, setModalLine] = useState<string>('');
@@ -140,11 +132,10 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [isUploadingModalImg, setIsUploadingModalImg] = useState<boolean>(false);
   const [isSavingModal, setIsSavingModal] = useState<boolean>(false);
 
-  // Delete confirmation & image preview/error state
-  const [confirmDeleteProdId, setConfirmDeleteProdId] = useState<string | null>(
-    null
-  );
-  const [deletingProdId, setDeletingProdId] = useState<string | null>(null);
+  // Delete confirmation (inside Full Detail Modal) & image preview state
+  const [confirmDeleteInDetail, setConfirmDeleteInDetail] =
+    useState<boolean>(false);
+  const [isDeletingProduct, setIsDeletingProduct] = useState<boolean>(false);
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [previewImage, setPreviewImage] = useState<{
     url: string;
@@ -213,13 +204,37 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     return Array.from(set);
   }, [customers, productsWithStatus]);
 
-  // Live preview status inside Detail & Stepper Modal
+  // Live preview status inside Mini Progress Modal
+  const miniLivePreview = useMemo(() => {
+    if (!progressModalItem) {
+      return {
+        isCompleted: false,
+        pendingStep: null,
+        waitingLabel: 'Chưa tạo Quy trình ERP',
+      };
+    }
+    const statusCandidate = {
+      ...miniSteps,
+      st_date: miniSteps.st_date || null,
+    };
+    const completed = isNewProductCompleted(statusCandidate);
+    const pendingStep = getPendingWorkflowStep(statusCandidate);
+    return {
+      isCompleted: completed,
+      pendingStep,
+      waitingLabel: pendingStep
+        ? pendingStep.waitingLabel
+        : 'Hoàn thành SX đại trà',
+    };
+  }, [progressModalItem, miniSteps]);
+
+  // Live preview status inside Full Detail Modal
   const modalLivePreview = useMemo(() => {
     if (!activeModalItem) {
       return {
         isCompleted: false,
         pendingStep: null,
-        waitingLabel: 'Chờ Báo giá',
+        waitingLabel: 'Chưa tạo Quy trình ERP',
         completionDays: null as number | null,
       };
     }
@@ -308,7 +323,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       setNewProdSpec('');
       setNewProdImageUrl('');
       onShowToast?.(
-        `Đã đăng ký mã hàng "${product.product_code}" và khởi tạo chuỗi 6 bước theo dõi.`
+        `Đã đăng ký mã hàng "${product.product_code}" và khởi tạo tiến độ theo dõi (Quy trình ERP → ST).`
       );
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
@@ -374,10 +389,79 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     }
   };
 
-  // Open unified Detail & 6-Step Progress Update Modal
+  // Modal A handlers: Compact Mini Progress Modal
+  const handleOpenProgressModal = (item: StProductWithStatus) => {
+    setProgressModalItem(item);
+    setMiniSteps(toModalStepState(item.status));
+    setMiniNotes(item.status?.notes || '');
+  };
+
+  const handleCloseProgressModal = () => {
+    if (isSavingMini) return;
+    setProgressModalItem(null);
+  };
+
+  const handleToggleMiniStep = (
+    boolField: StWorkflowBoolField,
+    dateField: StWorkflowDateField,
+    checked: boolean
+  ) => {
+    setMiniSteps((prev) => ({
+      ...prev,
+      [boolField]: checked,
+      [dateField]: checked ? prev[dateField] || getLocalIsoDateToday() : '',
+    }));
+  };
+
+  const handleChangeMiniStepDate = (
+    boolField: StWorkflowBoolField,
+    dateField: StWorkflowDateField,
+    dateVal: string
+  ) => {
+    setMiniSteps((prev) => ({
+      ...prev,
+      [dateField]: dateVal,
+      ...(dateVal ? { [boolField]: true } : {}),
+    }));
+  };
+
+  const handleSaveMiniProgress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!progressModalItem) return;
+
+    const pid = progressModalItem.product.id;
+    setIsSavingMini(true);
+    try {
+      const savedStatus = await upsertStNewProductStatus({
+        id: progressModalItem.status?.id || null,
+        product_id: pid,
+        has_process_erp: miniSteps.has_process_erp,
+        process_erp_date: miniSteps.process_erp_date || null,
+        has_st: miniSteps.has_st,
+        st_date: miniSteps.st_date || null,
+        unit_price: progressModalItem.status?.unit_price ?? null,
+        currency: progressModalItem.status?.currency || 'VND',
+        notes: miniNotes.trim() || null,
+      });
+
+      onStatusUpdated(savedStatus);
+      await onRefresh();
+      onShowToast?.(
+        `Đã lưu tiến độ mã hàng "${progressModalItem.product.product_code}".`
+      );
+      setProgressModalItem(null);
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setIsSavingMini(false);
+    }
+  };
+
+  // Modal B handlers: Full Product Detail & Progress Modal
   const handleOpenDetailModal = (item: StProductWithStatus) => {
     const p = item.product;
     setActiveModalItem(item);
+    setConfirmDeleteInDetail(false);
     setModalLine(p.line_name);
     setModalCustomer(p.customer_short_name);
     setModalCode(p.product_code);
@@ -389,7 +473,8 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   };
 
   const handleCloseDetailModal = () => {
-    if (isSavingModal) return;
+    if (isSavingModal || isDeletingProduct) return;
+    setConfirmDeleteInDetail(false);
     setActiveModalItem(null);
   };
 
@@ -443,14 +528,6 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       const savedStatus = await upsertStNewProductStatus({
         id: activeModalItem.status?.id || null,
         product_id: pid,
-        has_quote: modalSteps.has_quote,
-        quote_date: modalSteps.quote_date || null,
-        has_bom_erp: modalSteps.has_bom_erp,
-        bom_erp_date: modalSteps.bom_erp_date || null,
-        has_spec_erp: modalSteps.has_spec_erp,
-        spec_erp_date: modalSteps.spec_erp_date || null,
-        has_khsx: modalSteps.has_khsx,
-        khsx_date: modalSteps.khsx_date || null,
         has_process_erp: modalSteps.has_process_erp,
         process_erp_date: modalSteps.process_erp_date || null,
         has_st: modalSteps.has_st,
@@ -479,19 +556,20 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   };
 
   const handleDeleteProduct = async (p: StProduct) => {
-    setDeletingProdId(p.id);
+    setIsDeletingProduct(true);
     try {
       await deleteStProduct(p.id);
       await onRefresh();
-      setConfirmDeleteProdId(null);
-      if (activeModalItem?.product.id === p.id) {
-        setActiveModalItem(null);
+      setConfirmDeleteInDetail(false);
+      setActiveModalItem(null);
+      if (progressModalItem?.product.id === p.id) {
+        setProgressModalItem(null);
       }
       onShowToast?.(`Đã xóa mã hàng "${p.product_code}".`);
     } catch (err) {
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
-      setDeletingProdId(null);
+      setIsDeletingProduct(false);
     }
   };
 
@@ -756,7 +834,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
         </div>
       </div>
 
-      {/* 3. Read-Only 12-Column Table with Pinned Left Columns & 6-Step Sequential Pipeline */}
+      {/* 3. Read-Only 13-Column Table with Single-Row Sticky Header */}
       <div className="flex-1 min-h-0 overflow-auto">
         {isLoading && productsWithStatus.length === 0 ? (
           <div className="p-10 flex items-center justify-center gap-2 text-xs text-slate-500">
@@ -777,72 +855,48 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             Không có mã hàng nào khớp bộ lọc hiện tại.
           </div>
         ) : (
-          <table className="w-full min-w-[1100px] border-collapse text-left">
-            <thead className="sticky top-0 z-30 bg-slate-100 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+          <table className="w-full min-w-[980px] border-collapse text-left">
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[10.5px] font-bold text-slate-600 uppercase tracking-tight shadow-[0_1px_0_0_rgba(203,213,225,1)]">
               <tr>
-                <th
-                  rowSpan={2}
-                  className="sticky left-0 z-40 bg-slate-100 px-1.5 py-2 w-10 min-w-[40px] max-w-[40px] text-center border-r border-b border-slate-200"
-                >
+                <th className="sticky left-0 z-20 bg-slate-100 px-1.5 py-2.5 w-9 min-w-[36px] max-w-[36px] text-center border-r border-b border-slate-200 whitespace-nowrap">
                   STT
                 </th>
-                <th
-                  rowSpan={2}
-                  className="sticky left-10 z-40 bg-slate-100 px-2 py-2 w-28 min-w-[112px] border-r border-b border-slate-200 shadow-[2px_0_5px_-2px_rgba(15,23,42,0.12)]"
-                >
-                  Mã hàng
+                <th className="px-1.5 py-2.5 w-14 min-w-[52px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  LINE
                 </th>
-                <th
-                  rowSpan={2}
-                  className="px-2 py-2 min-w-[130px] border-r border-b border-slate-200 bg-slate-100"
-                >
-                  Tên hàng
+                <th className="px-1.5 py-2.5 w-20 min-w-[74px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  KHÁCH HÀNG
                 </th>
-                <th
-                  rowSpan={2}
-                  className="px-2 py-2 w-24 min-w-[92px] border-r border-b border-slate-200 bg-slate-100"
-                >
-                  Quy cách
+                <th className="px-2 py-2.5 w-24 min-w-[88px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  MÃ HÀNG
                 </th>
-                <th
-                  colSpan={6}
-                  className="px-2 py-1.5 text-center bg-blue-50/95 text-[#14539E] border-r border-b border-blue-200/80 tracking-wider"
-                >
-                  TIẾN ĐỘ TUẦN TỰ CÔNG VIỆC
+                <th className="px-2 py-2.5 min-w-[96px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  TÊN HÀNG
                 </th>
-                <th
-                  rowSpan={2}
-                  className="px-2 py-2 min-w-[100px] border-r border-b border-slate-200 bg-slate-100"
-                >
-                  Ghi chú
+                <th className="px-1.5 py-2.5 w-18 min-w-[68px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  QUY CÁCH
                 </th>
-                <th
-                  rowSpan={2}
-                  className="px-1.5 py-2 w-[112px] min-w-[112px] text-center border-b border-slate-200 bg-slate-100"
-                >
-                  Thao tác
+                <th className="px-1.5 py-2.5 w-24 min-w-[90px] text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  QUY TRÌNH ERP
                 </th>
-              </tr>
-              <tr>
-                {ST_WORKFLOW_STEPS.map((step, stepIdx) => {
-                  const hasNext = stepIdx < ST_WORKFLOW_STEPS.length - 1;
-                  return (
-                    <th
-                      key={step.key}
-                      className="relative px-1.5 py-1.5 w-[88px] min-w-[84px] text-center bg-slate-100 border-r border-b border-slate-200 text-[10px] font-bold text-slate-700 whitespace-nowrap"
-                    >
-                      <span>{step.label}</span>
-                      {hasNext && (
-                        <span
-                          aria-hidden="true"
-                          className="absolute -right-2 top-1/2 -translate-y-1/2 z-10 w-3.5 h-3.5 rounded-full bg-white border border-blue-200 text-[#14539E] inline-flex items-center justify-center shadow-2xs pointer-events-none"
-                        >
-                          <ArrowRight className="w-2.5 h-2.5" />
-                        </span>
-                      )}
-                    </th>
-                  );
-                })}
+                <th className="px-1.5 py-2.5 w-22 min-w-[84px] text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  NGÀY TẠO QT
+                </th>
+                <th className="px-1.5 py-2.5 w-12 min-w-[44px] text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  ST
+                </th>
+                <th className="px-1.5 py-2.5 w-22 min-w-[84px] text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  NGÀY ÁP DỤNG
+                </th>
+                <th className="px-1.5 py-2.5 w-32 min-w-[128px] text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  HIỆN TRẠNG
+                </th>
+                <th className="px-1.5 py-2.5 min-w-[64px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  GHI CHÚ
+                </th>
+                <th className="px-1.5 py-2.5 w-[68px] min-w-[68px] text-center border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  THAO TÁC
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-xs">
@@ -850,7 +904,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                 const p = item.product;
                 const pid = p.id;
                 const st = item.status;
-                const isDeleting = deletingProdId === pid;
+                const hasProcessErp = Boolean(st?.has_process_erp);
+                const hasSt = Boolean(st?.has_st);
+                const isWaitingSt = !hasSt && hasProcessErp;
                 const stickyCellBg = item.isCompleted
                   ? 'bg-[#F4FBF7] group-hover:bg-[#EAF7F0]'
                   : 'bg-white group-hover:bg-[#F3F8FF]';
@@ -866,74 +922,118 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   >
                     {/* 1. STT (pinned left) */}
                     <td
-                      className={`sticky left-0 z-10 px-1.5 py-2.5 w-10 min-w-[40px] max-w-[40px] text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                      className={`sticky left-0 z-[5] px-1.5 py-2.5 w-9 min-w-[36px] max-w-[36px] text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
                     >
                       {formatNumberVN(idx + 1)}
                     </td>
 
-                    {/* 2. Mã hàng (pinned left, #14539E, hover underline, click opens Detail/Update Modal) */}
-                    <td
-                      className={`sticky left-10 z-10 px-2 py-2.5 w-28 min-w-[112px] border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(15,23,42,0.12)] transition-colors ${stickyCellBg}`}
-                    >
+                    {/* 2. LINE */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-slate-700 font-medium whitespace-nowrap">
+                      {p.line_name || '—'}
+                    </td>
+
+                    {/* 3. KHÁCH HÀNG */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-slate-700 font-medium whitespace-nowrap">
+                      {p.customer_short_name || '—'}
+                    </td>
+
+                    {/* 4. MÃ HÀNG (#14539E, hover underline, click opens Full Detail Modal) */}
+                    <td className="px-2 py-2.5 border-r border-slate-100">
                       <button
                         type="button"
                         data-testid={`st-product-code-btn-${p.product_code}`}
                         onClick={() => handleOpenDetailModal(item)}
-                        title="Bấm để xem chi tiết & cập nhật tiến độ mã hàng"
-                        className="font-mono font-bold text-[#14539E] hover:underline cursor-pointer text-left break-all"
+                        title="Bấm để xem chi tiết thông tin mã hàng"
+                        className="font-mono font-bold text-[#14539E] hover:underline cursor-pointer text-left whitespace-nowrap"
                       >
                         {p.product_code}
                       </button>
                     </td>
 
-                    {/* 3. Tên hàng (Read-only) */}
+                    {/* 5. TÊN HÀNG */}
                     <td className="px-2 py-2.5 border-r border-slate-100 text-slate-900 font-medium">
                       {p.product_name}
                     </td>
 
-                    {/* 4. Quy cách (Read-only) */}
-                    <td className="px-2 py-2.5 border-r border-slate-100 text-slate-600">
+                    {/* 6. QUY CÁCH */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-slate-600">
                       {p.specification || '—'}
                     </td>
 
-                    {/* 5..10. Dải tuần tự 6 bước (Read-only) */}
-                    {ST_WORKFLOW_STEPS.map((step) => {
-                      const isDone = Boolean(st?.[step.boolField]);
-                      const rawDate = st?.[step.dateField] || null;
-                      const isWaiting =
-                        !isDone && item.currentWaitingStep === step.key;
-
-                      return (
-                        <td
-                          key={step.key}
-                          className="px-1.5 py-2 border-r border-slate-100 text-center align-middle"
+                    {/* 7. QUY TRÌNH ERP (Icon-only) */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center align-middle">
+                      {hasProcessErp ? (
+                        <span
+                          title="Đã có Quy trình ERP"
+                          aria-label="Quy trình ERP: Đã có"
+                          className="inline-flex items-center justify-center"
                         >
-                          {isDone ? (
-                            <div className="inline-flex flex-col items-center gap-0.5">
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold whitespace-nowrap">
-                                <CheckCircle2 className="w-2.5 h-2.5" />
-                                Đã xong
-                              </span>
-                              <span className="text-[10px] font-mono text-slate-600 tabular-nums">
-                                {rawDate ? formatStDateVN(rawDate) : '—'}
-                              </span>
-                            </div>
-                          ) : isWaiting ? (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold whitespace-nowrap">
-                              <Clock className="w-2.5 h-2.5" />
-                              Đang chờ
-                            </span>
-                          ) : (
-                            <span className="text-slate-300 font-medium select-none">
-                              —
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        </span>
+                      ) : (
+                        <span
+                          title="Đang chờ Quy trình ERP"
+                          aria-label="Quy trình ERP: Đang chờ"
+                          className="inline-flex items-center justify-center"
+                        >
+                          <Clock className="w-4 h-4 text-amber-500" />
+                        </span>
+                      )}
+                    </td>
 
-                    {/* 11. Ghi chú (Read-only plain text) */}
-                    <td className="px-2.5 py-2.5 border-r border-slate-100 text-slate-600">
+                    {/* 8. NGÀY TẠO QT */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
+                      {formatStDateVN(st?.process_erp_date)}
+                    </td>
+
+                    {/* 9. ST (Icon-only) */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center align-middle">
+                      {hasSt ? (
+                        <span
+                          title="Đã hoàn thành ST"
+                          aria-label="ST: Đã hoàn thành"
+                          className="inline-flex items-center justify-center"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        </span>
+                      ) : isWaitingSt ? (
+                        <span
+                          title="Đã có Quy trình ERP – đang chờ ST"
+                          aria-label="ST: Đang chờ"
+                          className="inline-flex items-center justify-center"
+                        >
+                          <Clock className="w-4 h-4 text-amber-500" />
+                        </span>
+                      ) : (
+                        <span
+                          aria-label="ST: Chưa tới lượt"
+                          className="text-slate-300 font-medium select-none"
+                        >
+                          —
+                        </span>
+                      )}
+                    </td>
+
+                    {/* 10. NGÀY ÁP DỤNG */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
+                      {formatStDateVN(st?.st_date)}
+                    </td>
+
+                    {/* 11. HIỆN TRẠNG (Auto Badge) */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-center align-middle whitespace-nowrap">
+                      {item.isCompleted ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold whitespace-nowrap">
+                          Hoàn thành SX đại trà
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold whitespace-nowrap">
+                          Đang dở dang
+                        </span>
+                      )}
+                    </td>
+
+                    {/* 12. GHI CHÚ */}
+                    <td className="px-1.5 py-2.5 border-r border-slate-100 text-slate-600">
                       <div
                         className="line-clamp-2 break-words"
                         title={st?.notes || ''}
@@ -942,50 +1042,18 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       </div>
                     </td>
 
-                    {/* 12. Thao tác (Cập nhật + Xóa) */}
-                    <td className="px-2 py-2 text-center">
-                      {confirmDeleteProdId === pid ? (
-                        <div className="inline-flex items-center justify-center gap-1">
-                          <button
-                            type="button"
-                            disabled={isDeleting}
-                            onClick={() => void handleDeleteProduct(p)}
-                            className="h-7 px-2 rounded-md bg-rose-600 text-white text-[11px] font-semibold cursor-pointer"
-                          >
-                            Xóa
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteProdId(null)}
-                            className="h-7 px-2 rounded-md border border-slate-300 text-slate-600 text-[11px] cursor-pointer"
-                          >
-                            Hủy
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="inline-flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            data-testid={`st-product-update-btn-${p.product_code}`}
-                            onClick={() => handleOpenDetailModal(item)}
-                            aria-label={`Cập nhật mã hàng ${p.product_code}`}
-                            title="Mở chi tiết & cập nhật tiến độ"
-                            className="h-7 px-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:border-[#14539E] hover:text-[#14539E] text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            <span>Cập nhật</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteProdId(pid)}
-                            aria-label={`Xóa mã hàng ${p.product_code}`}
-                            title="Xóa mã hàng"
-                            className="w-7 h-7 rounded-md border border-red-200 text-red-500 hover:bg-red-50 inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
+                    {/* 13. THAO TÁC (Icon-only Cập nhật tiến độ, NO delete button) */}
+                    <td className="px-1.5 py-2 text-center align-middle">
+                      <button
+                        type="button"
+                        data-testid={`st-product-progress-btn-${p.product_code}`}
+                        onClick={() => handleOpenProgressModal(item)}
+                        title="Cập nhật tiến độ"
+                        aria-label="Cập nhật tiến độ"
+                        className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] hover:bg-blue-50/50 inline-flex items-center justify-center cursor-pointer transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 );
@@ -1165,7 +1233,166 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
         </div>
       )}
 
-      {/* Unified Detail & 6-Step Progress Update Modal (Saves ONLY on Lưu cập nhật) */}
+      {/* MODAL A: Compact Mini Progress Update Modal (opened from Action icon in table) */}
+      {progressModalItem && (() => {
+        const mp = progressModalItem.product;
+
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Cập nhật tiến độ mã hàng ${mp.product_code}`}
+            onClick={handleCloseProgressModal}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          >
+            <form
+              data-testid="st-mini-progress-modal"
+              onSubmit={handleSaveMiniProgress}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              {/* Compact Header: Mã hàng & Tên hàng */}
+              <div className="px-4 py-3 border-b border-slate-200 flex items-start justify-between gap-2 bg-slate-50/80 shrink-0">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-bold text-[#14539E]">
+                      {mp.product_code}
+                    </span>
+                    {miniLivePreview.isCompleted ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Hoàn thành SX đại trà
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold">
+                        <Clock className="w-3 h-3" />
+                        {miniLivePreview.waitingLabel}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-medium text-slate-700 mt-0.5 truncate">
+                    {mp.product_name}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseProgressModal}
+                  aria-label="Đóng cửa sổ cập nhật tiến độ"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 inline-flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body: 2 Milestones (Quy trình ERP & ST) + Notes */}
+              <div className="p-4 overflow-y-auto space-y-3 text-xs">
+                <div className="space-y-2.5">
+                  {ST_WORKFLOW_STEPS.map((step) => {
+                    const checked = miniSteps[step.boolField];
+                    const dateVal = miniSteps[step.dateField];
+                    const dateLabel =
+                      step.key === 'process_erp' ? 'Ngày tạo QT' : 'Ngày áp dụng';
+                    const isWaiting =
+                      !checked && miniLivePreview.pendingStep?.key === step.key;
+
+                    return (
+                      <div
+                        key={step.key}
+                        className={`rounded-lg border px-3 py-2.5 flex items-center justify-between gap-3 transition-colors ${
+                          checked
+                            ? 'bg-emerald-50/50 border-emerald-200'
+                            : isWaiting
+                            ? 'bg-amber-50/60 border-amber-200'
+                            : 'bg-slate-50/50 border-slate-200'
+                        }`}
+                      >
+                        <label className="inline-flex items-center gap-2.5 font-semibold text-slate-900 cursor-pointer min-w-0 flex-1">
+                          <input
+                            type="checkbox"
+                            data-testid={`st-mini-check-${step.key}`}
+                            checked={checked}
+                            onChange={(e) =>
+                              handleToggleMiniStep(
+                                step.boolField,
+                                step.dateField,
+                                e.target.checked
+                              )
+                            }
+                            className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
+                          />
+                          <span className="truncate">
+                            Bước {step.order}: {step.label}
+                          </span>
+                        </label>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
+                            {dateLabel}:
+                          </span>
+                          <input
+                            type="date"
+                            data-testid={`st-mini-date-${step.key}`}
+                            value={dateVal}
+                            onChange={(e) =>
+                              handleChangeMiniStepDate(
+                                step.boolField,
+                                step.dateField,
+                                e.target.value
+                              )
+                            }
+                            aria-label={dateLabel}
+                            className="h-8 w-36 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] shrink-0"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-1">
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Ghi chú
+                  </label>
+                  <textarea
+                    rows={2}
+                    data-testid="st-mini-notes"
+                    value={miniNotes}
+                    onChange={(e) => setMiniNotes(e.target.value)}
+                    placeholder="Nhập ghi chú xử lý..."
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Footer: Hủy / Lưu tiến độ */}
+              <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCloseProgressModal}
+                  className="h-8 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold cursor-pointer hover:bg-slate-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingMini}
+                  data-testid="st-mini-save-btn"
+                  className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingMini ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>Lưu tiến độ</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
+
+      {/* MODAL B: Full Product Detail & Progress Modal (opened by clicking Mã hàng link) */}
       {activeModalItem && (() => {
         const dp = activeModalItem.product;
         const imgBroken = Boolean(brokenImages[dp.id]);
@@ -1174,11 +1401,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`Chi tiết và cập nhật mã hàng ${dp.product_code}`}
+            aria-label={`Chi tiết thông tin mã hàng ${dp.product_code}`}
             onClick={handleCloseDetailModal}
             className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
           >
             <form
+              data-testid="st-full-detail-modal"
               onSubmit={handleSaveModalUpdates}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-4xl bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
@@ -1213,7 +1441,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
 
               {/* Modal Body: 2 Clear Parts */}
               <div className="p-5 overflow-y-auto space-y-5 text-xs">
-                {/* PART 1: Product Information (Image + Editable Metadata + Registration/Completion Metrics) */}
+                {/* PART 1: Product Information */}
                 <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">
@@ -1408,21 +1636,25 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   </div>
                 </section>
 
-                {/* PART 2: 6-Step Sequential Progress Stepper & Notes */}
+                {/* PART 2: 2-Milestone Completion History (Quy trình ERP -> ST) */}
                 <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">
-                      2. Bảng điều khiển dải tuần tự 6 bước (Stepper)
+                      2. Tiến độ 2 mốc (Quy trình ERP → ST)
                     </h4>
                     <span className="text-[11px] text-slate-500">
-                      Báo giá → BOM ERP → SPEC ERP → KHSX → Quy trình ERP → ST
+                      Hoàn thành SX đại trà khi cả Quy trình ERP và ST (có Ngày áp dụng) đều hoàn tất
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {ST_WORKFLOW_STEPS.map((step) => {
                       const checked = modalSteps[step.boolField];
                       const dateVal = modalSteps[step.dateField];
+                      const dateLabel =
+                        step.key === 'process_erp'
+                          ? 'Ngày tạo QT'
+                          : 'Ngày áp dụng';
                       const isWaiting =
                         !checked &&
                         modalLivePreview.pendingStep?.key === step.key;
@@ -1439,10 +1671,10 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <label className="inline-flex items-center gap-2 font-bold text-slate-900 cursor-pointer">
+                            <label className="inline-flex items-center gap-2 font-bold text-slate-900 cursor-pointer min-w-0">
                               <input
                                 type="checkbox"
-                                data-testid={`st-stepper-check-${step.key}`}
+                                data-testid={`st-detail-check-${step.key}`}
                                 checked={checked}
                                 onChange={(e) =>
                                   handleToggleModalStep(
@@ -1451,35 +1683,21 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                                     e.target.checked
                                   )
                                 }
-                                className="w-4 h-4 accent-[#14539E] rounded cursor-pointer"
+                                className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
                               />
-                              <span>
-                                {step.order}. {step.label}
+                              <span className="truncate text-xs">
+                                Bước {step.order}: {step.label}
                               </span>
                             </label>
-
-                            {checked ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-semibold whitespace-nowrap">
-                                Hoàn thành
-                              </span>
-                            ) : isWaiting ? (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-semibold whitespace-nowrap">
-                                Đang chờ
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-slate-400">
-                                Chưa tới lượt
-                              </span>
-                            )}
                           </div>
 
-                          <div>
-                            <label className="block text-[10px] font-medium text-slate-500 mb-1">
-                              Ngày hoàn thành
-                            </label>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-medium text-slate-600">
+                              {dateLabel}:
+                            </span>
                             <input
                               type="date"
-                              data-testid={`st-stepper-date-${step.key}`}
+                              data-testid={`st-detail-date-${step.key}`}
                               value={dateVal}
                               onChange={(e) =>
                                 handleChangeModalStepDate(
@@ -1488,8 +1706,8 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                                   e.target.value
                                 )
                               }
-                              aria-label={`Ngày hoàn thành bước ${step.label}`}
-                              className="w-full h-8 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                              aria-label={dateLabel}
+                              className="w-40 h-8 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
                             />
                           </div>
                         </div>
@@ -1512,12 +1730,44 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                 </section>
               </div>
 
-              {/* Modal Footer */}
-              <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
-                <span className="text-[11px] text-slate-500">
-                  Mọi thay đổi chỉ được lưu xuống hệ thống khi bấm{' '}
-                  <strong className="text-slate-700">Lưu cập nhật</strong>.
-                </span>
+              {/* Modal Footer (includes safe inline delete inside Detail modal) */}
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div>
+                  {confirmDeleteInDetail ? (
+                    <div className="inline-flex items-center gap-2">
+                      <span className="text-[11px] font-semibold text-rose-700">
+                        Xác nhận xóa mã hàng này?
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isDeletingProduct}
+                        data-testid="st-detail-confirm-delete-btn"
+                        onClick={() => void handleDeleteProduct(dp)}
+                        className="h-7 px-2.5 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                      >
+                        {isDeletingProduct ? 'Đang xóa...' : 'Xóa vĩnh viễn'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteInDetail(false)}
+                        className="h-7 px-2.5 rounded-md border border-slate-300 bg-white text-slate-600 text-[11px] cursor-pointer"
+                      >
+                        Hủy
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid="st-detail-delete-trigger"
+                      onClick={() => setConfirmDeleteInDetail(true)}
+                      className="h-8 px-2.5 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa mã hàng</span>
+                    </button>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-2">
                   <button
                     type="button"

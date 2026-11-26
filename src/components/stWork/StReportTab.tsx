@@ -80,6 +80,23 @@ export const StReportTab: React.FC<StReportTabProps> = ({
     [productsWithStatus, changeRequests, customerQuotes, periodRange]
   );
 
+  const liveProductBreakdown = useMemo(() => {
+    const completed = productsWithStatus.filter((p) => p.isCompleted).length;
+    const waitingProcessErp = productsWithStatus.filter(
+      (p) => !p.isCompleted && p.currentWaitingStep === 'process_erp'
+    ).length;
+    const waitingSt = productsWithStatus.filter(
+      (p) => !p.isCompleted && p.currentWaitingStep === 'st'
+    ).length;
+    return {
+      total: productsWithStatus.length,
+      completed,
+      inProgress: waitingProcessErp + waitingSt,
+      waitingProcessErp,
+      waitingSt,
+    };
+  }, [productsWithStatus]);
+
   const yearOptions = useMemo(() => {
     const start = Math.min(2024, nowYM.year - 2);
     const end = Math.max(2028, nowYM.year + 2);
@@ -323,6 +340,42 @@ export const StReportTab: React.FC<StReportTabProps> = ({
           So sánh với: <strong>{periodRange.prevLabel}</strong> (
           {formatStDateVN(periodRange.prevStart)} –{' '}
           {formatStDateVN(periodRange.prevEnd)})
+        </div>
+      </div>
+
+      {/* Live New-Product Pipeline Breakdown */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0">
+        <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-600">
+            Hoàn thành SX đại trà
+          </span>
+          <span className="font-mono text-sm font-bold text-emerald-700 tabular-nums">
+            {formatNumberVN(liveProductBreakdown.completed)}
+          </span>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-600">
+            Tổng đang dở dang
+          </span>
+          <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
+            {formatNumberVN(liveProductBreakdown.inProgress)}
+          </span>
+        </div>
+        <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-700">
+            Chưa tạo Quy trình ERP
+          </span>
+          <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
+            {formatNumberVN(liveProductBreakdown.waitingProcessErp)}
+          </span>
+        </div>
+        <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-700">
+            Đã có Quy trình ERP – đang chờ ST
+          </span>
+          <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
+            {formatNumberVN(liveProductBreakdown.waitingSt)}
+          </span>
         </div>
       </div>
 

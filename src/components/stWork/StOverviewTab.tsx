@@ -242,15 +242,15 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
             </span>
           </div>
 
-          <div className="pt-2.5 border-t border-slate-100 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+          <div className="pt-2.5 border-t border-slate-100 space-y-1.5 text-[11px]">
             {metrics.pendingStepCounts.map((step) => (
               <div
                 key={step.stepKey}
-                className="flex items-center justify-between gap-1 text-slate-600"
+                className="flex items-center justify-between gap-2 text-slate-600"
               >
-                <span className="truncate">{step.waitingLabel}</span>
+                <span className="leading-snug">{step.waitingLabel}</span>
                 <span
-                  className={`font-mono font-bold tabular-nums ${
+                  className={`font-mono font-bold tabular-nums shrink-0 ${
                     step.count > 0 ? 'text-amber-700' : 'text-slate-400'
                   }`}
                 >

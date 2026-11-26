@@ -78,6 +78,10 @@ export async function fetchStNewProductStatuses(): Promise<StNewProductStatus[]>
   const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
     'st_new_product_status?select=*&order=updated_at.desc'
   );
+  if (Array.isArray(rows) && rows.length > 0) {
+    supportsNativeTwoStepColumns =
+      'has_process_erp' in rows[0] && 'has_st' in rows[0];
+  }
   return Array.isArray(rows)
     ? rows.map(normalizeStNewProductStatusRow)
     : [];
@@ -327,6 +331,9 @@ export async function createStProduct(input: {
   );
 
   if (Array.isArray(existingStatusRows) && existingStatusRows[0]) {
+    supportsNativeTwoStepColumns =
+      'has_process_erp' in existingStatusRows[0] &&
+      'has_st' in existingStatusRows[0];
     createdStatus = normalizeStNewProductStatusRow(existingStatusRows[0]);
   } else {
     const baseLegacyPayload = {
@@ -343,7 +350,7 @@ export async function createStProduct(input: {
     };
 
     let statusRows: Record<string, unknown>[] = [];
-    if (supportsNativeSixStepColumns !== false) {
+    if (supportsNativeTwoStepColumns !== false) {
       try {
         statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
           'st_new_product_status?select=*',
@@ -352,14 +359,6 @@ export async function createStProduct(input: {
             headers: { Prefer: 'return=representation' },
             body: JSON.stringify({
               ...baseLegacyPayload,
-              has_quote: false,
-              quote_date: null,
-              has_bom_erp: false,
-              bom_erp_date: null,
-              has_spec_erp: false,
-              spec_erp_date: null,
-              has_khsx: false,
-              khsx_date: null,
               has_process_erp: false,
               process_erp_date: null,
               has_st: false,
@@ -367,17 +366,17 @@ export async function createStProduct(input: {
             }),
           }
         );
-        supportsNativeSixStepColumns = true;
+        supportsNativeTwoStepColumns = true;
       } catch (err) {
-        if (isMissingSixStepColumnError(err)) {
-          supportsNativeSixStepColumns = false;
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeTwoStepColumns = false;
         } else {
           throw err;
         }
       }
     }
 
-    if (supportsNativeSixStepColumns === false) {
+    if (supportsNativeTwoStepColumns === false) {
       statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
         'st_new_product_status?select=*',
         {
@@ -399,14 +398,6 @@ export async function createStProduct(input: {
       createdStatus || {
         id: '',
         product_id: createdProduct.id,
-        has_quote: false,
-        quote_date: null,
-        has_bom_erp: false,
-        bom_erp_date: null,
-        has_spec_erp: false,
-        spec_erp_date: null,
-        has_khsx: false,
-        khsx_date: null,
         has_process_erp: false,
         process_erp_date: null,
         has_st: false,
@@ -485,9 +476,9 @@ export async function deleteStProduct(id: string): Promise<void> {
 // 4. ST NEW PRODUCT STATUS (`st_new_product_status`)
 // ==========================================
 
-let supportsNativeSixStepColumns: boolean | null = null;
+let supportsNativeTwoStepColumns: boolean | null = null;
 
-function isMissingSixStepColumnError(err: unknown): boolean {
+function isMissingWorkflowColumnError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err || '');
   return (
     msg.includes('42703') ||
@@ -500,18 +491,18 @@ function isMissingSixStepColumnError(err: unknown): boolean {
 export interface UpsertStNewProductStatusInput {
   id?: string | null;
   product_id: string;
-  has_quote: boolean;
-  quote_date: string | null;
-  has_bom_erp: boolean;
-  bom_erp_date: string | null;
-  has_spec_erp: boolean;
-  spec_erp_date: string | null;
-  has_khsx: boolean;
-  khsx_date: string | null;
   has_process_erp: boolean;
   process_erp_date: string | null;
   has_st: boolean;
   st_date: string | null;
+  has_bom_erp?: boolean;
+  bom_erp_date?: string | null;
+  has_spec_erp?: boolean;
+  spec_erp_date?: string | null;
+  has_khsx?: boolean;
+  khsx_date?: string | null;
+  has_quote?: boolean;
+  quote_date?: string | null;
   unit_price?: number | null;
   currency?: string;
   notes: string | null;
@@ -521,28 +512,20 @@ export async function upsertStNewProductStatus(
   input: UpsertStNewProductStatusInput
 ): Promise<StNewProductStatus> {
   const nowIso = new Date().toISOString();
-  const sixStepValues = {
-    has_quote: Boolean(input.has_quote),
-    quote_date: input.quote_date || null,
-    has_bom_erp: Boolean(input.has_bom_erp),
-    bom_erp_date: input.bom_erp_date || null,
-    has_spec_erp: Boolean(input.has_spec_erp),
-    spec_erp_date: input.spec_erp_date || null,
-    has_khsx: Boolean(input.has_khsx),
-    khsx_date: input.khsx_date || null,
+  const twoStepValues = {
     has_process_erp: Boolean(input.has_process_erp),
     process_erp_date: input.process_erp_date || null,
     has_st: Boolean(input.has_st),
     st_date: input.st_date || null,
   };
-  const completed = isNewProductCompleted(sixStepValues);
+  const completed = isNewProductCompleted(twoStepValues);
   const cleanUserNotes = input.notes?.trim() || null;
 
   const legacyBasePayload = {
     product_id: input.product_id,
-    has_process: Boolean(sixStepValues.has_process_erp),
-    process_created_at: sixStepValues.process_erp_date || null,
-    has_unit_price: Boolean(sixStepValues.has_quote),
+    has_process: Boolean(twoStepValues.has_process_erp),
+    process_created_at: twoStepValues.process_erp_date || null,
+    has_unit_price: Boolean(input.has_quote),
     unit_price:
       input.unit_price !== null &&
       input.unit_price !== undefined &&
@@ -550,20 +533,34 @@ export async function upsertStNewProductStatus(
         ? Number(input.unit_price)
         : null,
     currency: (input.currency || 'VND').trim() || 'VND',
-    price_created_at: sixStepValues.quote_date || null,
-    price_applied_at: completed ? sixStepValues.st_date || null : null,
+    price_created_at: input.quote_date || null,
+    price_applied_at: completed ? twoStepValues.st_date || null : null,
     updated_at: nowIso,
   };
 
   const nativePayload = {
     ...legacyBasePayload,
-    ...sixStepValues,
+    ...twoStepValues,
     notes: cleanUserNotes,
   };
 
   const fallbackPayload = {
     ...legacyBasePayload,
-    notes: encodeStepsIntoNotes(cleanUserNotes, sixStepValues),
+    notes: encodeStepsIntoNotes(cleanUserNotes, {
+      ...twoStepValues,
+      ...(typeof input.has_bom_erp === 'boolean'
+        ? { has_bom_erp: input.has_bom_erp, bom_erp_date: input.bom_erp_date || null }
+        : {}),
+      ...(typeof input.has_spec_erp === 'boolean'
+        ? { has_spec_erp: input.has_spec_erp, spec_erp_date: input.spec_erp_date || null }
+        : {}),
+      ...(typeof input.has_khsx === 'boolean'
+        ? { has_khsx: input.has_khsx, khsx_date: input.khsx_date || null }
+        : {}),
+      ...(typeof input.has_quote === 'boolean'
+        ? { has_quote: input.has_quote, quote_date: input.quote_date || null }
+        : {}),
+    }),
   };
 
   let targetId = input.id || '';
@@ -607,14 +604,14 @@ export async function upsertStNewProductStatus(
     return normalizeStNewProductStatusRow(inserted[0]);
   };
 
-  if (supportsNativeSixStepColumns !== false) {
+  if (supportsNativeTwoStepColumns !== false) {
     try {
       const saved = await sendSave(nativePayload);
-      supportsNativeSixStepColumns = true;
+      supportsNativeTwoStepColumns = true;
       return saved;
     } catch (err) {
-      if (isMissingSixStepColumnError(err)) {
-        supportsNativeSixStepColumns = false;
+      if (isMissingWorkflowColumnError(err)) {
+        supportsNativeTwoStepColumns = false;
       } else {
         throw err;
       }

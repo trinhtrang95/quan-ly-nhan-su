@@ -88,29 +88,11 @@ export interface StProduct {
   updated_at: string;
 }
 
-export type StWorkflowStepKey =
-  | 'quote'
-  | 'bom_erp'
-  | 'spec_erp'
-  | 'khsx'
-  | 'process_erp'
-  | 'st';
+export type StWorkflowStepKey = 'process_erp' | 'st';
 
-export type StWorkflowBoolField =
-  | 'has_quote'
-  | 'has_bom_erp'
-  | 'has_spec_erp'
-  | 'has_khsx'
-  | 'has_process_erp'
-  | 'has_st';
+export type StWorkflowBoolField = 'has_process_erp' | 'has_st';
 
-export type StWorkflowDateField =
-  | 'quote_date'
-  | 'bom_erp_date'
-  | 'spec_erp_date'
-  | 'khsx_date'
-  | 'process_erp_date'
-  | 'st_date';
+export type StWorkflowDateField = 'process_erp_date' | 'st_date';
 
 export interface StWorkflowStepMeta {
   key: StWorkflowStepKey;
@@ -123,50 +105,18 @@ export interface StWorkflowStepMeta {
 
 export const ST_WORKFLOW_STEPS: readonly StWorkflowStepMeta[] = [
   {
-    key: 'quote',
-    order: 1,
-    label: 'Báo giá',
-    waitingLabel: 'Chờ Báo giá',
-    boolField: 'has_quote',
-    dateField: 'quote_date',
-  },
-  {
-    key: 'bom_erp',
-    order: 2,
-    label: 'BOM ERP',
-    waitingLabel: 'Chờ BOM ERP',
-    boolField: 'has_bom_erp',
-    dateField: 'bom_erp_date',
-  },
-  {
-    key: 'spec_erp',
-    order: 3,
-    label: 'SPEC ERP',
-    waitingLabel: 'Chờ SPEC ERP',
-    boolField: 'has_spec_erp',
-    dateField: 'spec_erp_date',
-  },
-  {
-    key: 'khsx',
-    order: 4,
-    label: 'KHSX',
-    waitingLabel: 'Chờ KHSX',
-    boolField: 'has_khsx',
-    dateField: 'khsx_date',
-  },
-  {
     key: 'process_erp',
-    order: 5,
+    order: 1,
     label: 'Quy trình ERP',
-    waitingLabel: 'Chờ Quy trình ERP',
+    waitingLabel: 'Chưa tạo Quy trình ERP',
     boolField: 'has_process_erp',
     dateField: 'process_erp_date',
   },
   {
     key: 'st',
-    order: 6,
+    order: 2,
     label: 'ST',
-    waitingLabel: 'Chờ ST',
+    waitingLabel: 'Đã có Quy trình ERP – đang chờ ST',
     boolField: 'has_st',
     dateField: 'st_date',
   },
@@ -175,19 +125,19 @@ export const ST_WORKFLOW_STEPS: readonly StWorkflowStepMeta[] = [
 export interface StNewProductStatus {
   id: string;
   product_id: string;
-  has_quote: boolean;
-  quote_date: string | null;
-  has_bom_erp: boolean;
-  bom_erp_date: string | null;
-  has_spec_erp: boolean;
-  spec_erp_date: string | null;
-  has_khsx: boolean;
-  khsx_date: string | null;
   has_process_erp: boolean;
   process_erp_date: string | null;
   has_st: boolean;
   st_date: string | null;
-  // Legacy compatibility fields (kept optional/synced with Supabase)
+  // Optional/legacy compatibility fields
+  has_quote?: boolean;
+  quote_date?: string | null;
+  has_bom_erp?: boolean;
+  bom_erp_date?: string | null;
+  has_spec_erp?: boolean;
+  spec_erp_date?: string | null;
+  has_khsx?: boolean;
+  khsx_date?: string | null;
   has_process?: boolean;
   process_created_at?: string | null;
   has_unit_price?: boolean;
@@ -399,11 +349,7 @@ export function isNewProductCompleted(
 ): boolean {
   if (!status) return false;
   return Boolean(
-    status.has_quote &&
-      status.has_bom_erp &&
-      status.has_spec_erp &&
-      status.has_khsx &&
-      status.has_process_erp &&
+    status.has_process_erp &&
       status.has_st &&
       toIsoDateOnly(status.st_date)
   );
@@ -413,13 +359,10 @@ export function getPendingWorkflowStep(
   status?: Partial<StNewProductStatus> | null
 ): StWorkflowStepMeta | null {
   if (isNewProductCompleted(status)) return null;
-  for (const step of ST_WORKFLOW_STEPS) {
-    if (!status?.[step.boolField]) {
-      return step;
-    }
+  if (!status?.has_process_erp) {
+    return ST_WORKFLOW_STEPS[0];
   }
-  // If all 6 booleans are true but st_date is still missing, it is waiting on ST date
-  return ST_WORKFLOW_STEPS[ST_WORKFLOW_STEPS.length - 1];
+  return ST_WORKFLOW_STEPS[1];
 }
 
 export function getNewProductWaitingLabel(
@@ -652,7 +595,7 @@ export function computeStOverviewMetrics(params: {
     pendingStepMap.set(step.key, 0);
   }
   for (const item of inProgressItems) {
-    const stepKey = item.currentWaitingStep || 'quote';
+    const stepKey = item.currentWaitingStep || 'process_erp';
     pendingStepMap.set(stepKey, (pendingStepMap.get(stepKey) || 0) + 1);
   }
   const pendingStepCounts: StPendingStepMetric[] = ST_WORKFLOW_STEPS.map(
@@ -857,12 +800,12 @@ export function computeStReportComparison(params: {
     },
     {
       key: 'process_created',
-      label: 'Mã hàng hoàn thành Quy trình ERP',
+      label: 'Mã hàng đã tạo Quy trình ERP',
       currentValue: procCur,
       previousValue: procPrev,
       delta: procCur - procPrev,
       unit: 'mã',
-      note: 'Tính theo ngày hoàn thành bước Quy trình ERP',
+      note: 'Tính theo Ngày tạo QT (Quy trình ERP)',
     },
     {
       key: 'mass_production_completed',
@@ -871,7 +814,7 @@ export function computeStReportComparison(params: {
       previousValue: donePrevList.length,
       delta: doneCurList.length - donePrevList.length,
       unit: 'mã',
-      note: 'Hoàn thành đủ 6 bước tuần tự tới bước cuối ST',
+      note: 'Hoàn thành cả Quy trình ERP và ST (theo Ngày áp dụng ST)',
     },
     {
       key: 'avg_completion_days',
@@ -880,7 +823,7 @@ export function computeStReportComparison(params: {
       previousValue: avgDaysPrev,
       delta: Number((avgDaysCur - avgDaysPrev).toFixed(1)),
       unit: 'ngày',
-      note: 'Trung bình từ ngày đăng ký đến ngày hoàn thành ST',
+      note: 'Trung bình từ ngày đăng ký đến Ngày áp dụng ST',
     },
     {
       key: 'change_requests_received',
@@ -1009,14 +952,14 @@ export function extractEncodedStepsFromNotes(rawNotes: string | null | undefined
 export function encodeStepsIntoNotes(
   userNotes: string | null | undefined,
   status: {
-    has_quote: boolean;
-    quote_date: string | null;
-    has_bom_erp: boolean;
-    bom_erp_date: string | null;
-    has_spec_erp: boolean;
-    spec_erp_date: string | null;
-    has_khsx: boolean;
-    khsx_date: string | null;
+    has_quote?: boolean;
+    quote_date?: string | null;
+    has_bom_erp?: boolean;
+    bom_erp_date?: string | null;
+    has_spec_erp?: boolean;
+    spec_erp_date?: string | null;
+    has_khsx?: boolean;
+    khsx_date?: string | null;
     has_process_erp: boolean;
     process_erp_date: string | null;
     has_st: boolean;
@@ -1025,14 +968,10 @@ export function encodeStepsIntoNotes(
 ): string {
   const clean = (userNotes || '').trim();
   const payload: StEncodedStepsPayload = {
-    hq: Boolean(status.has_quote),
-    qd: status.quote_date || null,
-    hb: Boolean(status.has_bom_erp),
-    bd: status.bom_erp_date || null,
-    hs: Boolean(status.has_spec_erp),
-    sd: status.spec_erp_date || null,
-    hk: Boolean(status.has_khsx),
-    kd: status.khsx_date || null,
+    ...(status.has_quote ? { hq: true, qd: status.quote_date || null } : {}),
+    ...(status.has_bom_erp ? { hb: true, bd: status.bom_erp_date || null } : {}),
+    ...(status.has_spec_erp ? { hs: true, sd: status.spec_erp_date || null } : {}),
+    ...(status.has_khsx ? { hk: true, kd: status.khsx_date || null } : {}),
     hp: Boolean(status.has_process_erp),
     pd: status.process_erp_date || null,
     hst: Boolean(status.has_st),
@@ -1055,85 +994,64 @@ export function normalizeStNewProductStatusRow(
     typeof row.notes === 'string' ? row.notes : null
   );
 
-  const hasNativeSixSteps =
-    'has_quote' in row ||
-    'has_bom_erp' in row ||
-    'has_spec_erp' in row ||
-    'has_khsx' in row ||
+  const hasNativeWorkflowColumns =
     'has_process_erp' in row ||
-    'has_st' in row;
+    'has_st' in row ||
+    'process_erp_date' in row ||
+    'st_date' in row;
 
   const normDate = (val: unknown): string | null =>
     toIsoDateOnly(typeof val === 'string' ? val : null) || null;
 
-  const has_quote = hasNativeSixSteps
-    ? Boolean(row.has_quote)
-    : Boolean(encodedSteps?.hq);
-  const quote_date = hasNativeSixSteps
-    ? normDate(row.quote_date)
-    : normDate(encodedSteps?.qd);
-
-  const has_bom_erp = hasNativeSixSteps
-    ? Boolean(row.has_bom_erp)
-    : Boolean(encodedSteps?.hb);
-  const bom_erp_date = hasNativeSixSteps
-    ? normDate(row.bom_erp_date)
-    : normDate(encodedSteps?.bd);
-
-  const has_spec_erp = hasNativeSixSteps
-    ? Boolean(row.has_spec_erp)
-    : Boolean(encodedSteps?.hs);
-  const spec_erp_date = hasNativeSixSteps
-    ? normDate(row.spec_erp_date)
-    : normDate(encodedSteps?.sd);
-
-  const has_khsx = hasNativeSixSteps
-    ? Boolean(row.has_khsx)
-    : Boolean(encodedSteps?.hk);
-  const khsx_date = hasNativeSixSteps
-    ? normDate(row.khsx_date)
-    : normDate(encodedSteps?.kd);
-
-  const has_process_erp = hasNativeSixSteps
+  const has_process_erp = hasNativeWorkflowColumns
     ? Boolean(row.has_process_erp)
-    : Boolean(encodedSteps?.hp);
-  const process_erp_date = hasNativeSixSteps
+    : encodedSteps
+    ? Boolean(encodedSteps.hp)
+    : Boolean(row.has_process);
+  const process_erp_date = hasNativeWorkflowColumns
     ? normDate(row.process_erp_date)
-    : normDate(encodedSteps?.pd);
+    : encodedSteps
+    ? normDate(encodedSteps.pd)
+    : normDate(row.process_created_at);
 
-  const has_st = hasNativeSixSteps
+  const legacyAppliedDate = normDate(row.price_applied_at);
+  const has_st = hasNativeWorkflowColumns
     ? Boolean(row.has_st)
-    : Boolean(encodedSteps?.hst);
-  const st_date = hasNativeSixSteps
+    : encodedSteps
+    ? Boolean(encodedSteps.hst)
+    : Boolean(has_process_erp && legacyAppliedDate);
+  const st_date = hasNativeWorkflowColumns
     ? normDate(row.st_date)
-    : normDate(encodedSteps?.std);
+    : encodedSteps
+    ? normDate(encodedSteps.std)
+    : legacyAppliedDate;
 
   return {
     id: String(row.id || ''),
     product_id: String(row.product_id || ''),
-    has_quote,
-    quote_date,
-    has_bom_erp,
-    bom_erp_date,
-    has_spec_erp,
-    spec_erp_date,
-    has_khsx,
-    khsx_date,
     has_process_erp,
     process_erp_date,
     has_st,
     st_date,
+    has_quote: Boolean(row.has_quote ?? encodedSteps?.hq ?? row.has_unit_price),
+    quote_date: normDate(row.quote_date) || normDate(encodedSteps?.qd) || normDate(row.price_created_at),
+    has_bom_erp: Boolean(row.has_bom_erp ?? encodedSteps?.hb),
+    bom_erp_date: normDate(row.bom_erp_date) || normDate(encodedSteps?.bd),
+    has_spec_erp: Boolean(row.has_spec_erp ?? encodedSteps?.hs),
+    spec_erp_date: normDate(row.spec_erp_date) || normDate(encodedSteps?.sd),
+    has_khsx: Boolean(row.has_khsx ?? encodedSteps?.hk),
+    khsx_date: normDate(row.khsx_date) || normDate(encodedSteps?.kd),
     has_process: Boolean(row.has_process ?? has_process_erp),
     process_created_at: normDate(row.process_created_at) || process_erp_date,
-    has_unit_price: Boolean(row.has_unit_price ?? has_quote),
+    has_unit_price: Boolean(row.has_unit_price ?? row.has_quote),
     unit_price:
       parsedPrice !== null && !Number.isNaN(parsedPrice) ? parsedPrice : null,
     currency:
       typeof row.currency === 'string' && row.currency.trim()
         ? row.currency.trim()
         : 'VND',
-    price_created_at: normDate(row.price_created_at) || quote_date,
-    price_applied_at: normDate(row.price_applied_at) || st_date,
+    price_created_at: normDate(row.price_created_at),
+    price_applied_at: legacyAppliedDate || st_date,
     notes: cleanNotes,
     updated_at:
       typeof row.updated_at === 'string' && row.updated_at
