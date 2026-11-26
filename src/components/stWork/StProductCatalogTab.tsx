@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Check,
+  FileSpreadsheet,
   Image as ImageIcon,
   Loader2,
   Maximize2,
@@ -12,6 +13,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import { StProductImportModal } from './StProductImportModal';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   formatNumberVN,
@@ -88,6 +90,9 @@ export const StProductCatalogTab: React.FC<StProductCatalogTabProps> = ({
   // Delete confirmation modal
   const [deleteTarget, setDeleteTarget] = useState<StProduct | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+
+  // Import from Excel/CSV modal
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
 
   // Image preview & broken image fallback
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
@@ -383,17 +388,29 @@ export const StProductCatalogTab: React.FC<StProductCatalogTabProps> = ({
           </select>
         </div>
 
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs text-slate-600 font-mono tabular-nums">
-          <span>Tổng:</span>
-          <strong className="text-[#14539E]">
-            {formatNumberVN(filteredProducts.length)}
-          </strong>
-          {filteredProducts.length !== products.length && (
-            <span className="text-slate-400">
-              / {formatNumberVN(products.length)}
-            </span>
-          )}
-          <span>sản phẩm</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs text-slate-600 font-mono tabular-nums">
+            <span>Tổng:</span>
+            <strong className="text-[#14539E]">
+              {formatNumberVN(filteredProducts.length)}
+            </strong>
+            {filteredProducts.length !== products.length && (
+              <span className="text-slate-400">
+                / {formatNumberVN(products.length)}
+              </span>
+            )}
+            <span>sản phẩm</span>
+          </div>
+
+          <button
+            type="button"
+            data-testid="st-catalog-import-btn"
+            onClick={() => setIsImportModalOpen(true)}
+            className="h-8 px-3 rounded-lg border border-[#14539E]/35 bg-white hover:bg-[#14539E] text-[#14539E] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Nhập từ file</span>
+          </button>
         </div>
       </div>
 
@@ -1211,6 +1228,16 @@ export const StProductCatalogTab: React.FC<StProductCatalogTabProps> = ({
           </div>
         </div>
       )}
+      {/* Excel / CSV Batch Import Modal */}
+      <StProductImportModal
+        isOpen={isImportModalOpen}
+        lines={lines}
+        customers={customers}
+        existingProducts={products}
+        onClose={() => setIsImportModalOpen(false)}
+        onImported={onRefresh}
+        onShowToast={onShowToast}
+      />
     </div>
   );
 };

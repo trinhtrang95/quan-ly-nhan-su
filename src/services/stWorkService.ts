@@ -1,6 +1,7 @@
 import { getOvertimeSupabaseClient, overtimeSupabase } from './supabaseClient';
 import {
   encodeStepsIntoNotes,
+  extractEncodedStepsFromNotes,
   isNewProductCompleted,
   normalizeStChangeRequestRow,
   normalizeStCustomerQuoteRow,
@@ -489,6 +490,281 @@ export async function deleteStProduct(id: string): Promise<void> {
     `st_products?id=eq.${encodeURIComponent(id)}`,
     { method: 'DELETE' }
   );
+}
+
+export interface StProductBatchImportItem {
+  line_name: string;
+  customer_short_name: string;
+  product_code: string;
+  product_name: string;
+  specification: string;
+  notes: string;
+}
+
+export interface StProductBatchUpdateItem extends StProductBatchImportItem {
+  existing_id: string;
+  existing_image_url: string | null;
+  existing_created_at: string;
+}
+
+export interface BatchImportStProductsResult {
+  insertedCount: number;
+  updatedCount: number;
+  insertedProducts: StProduct[];
+  updatedProducts: StProduct[];
+}
+
+function chunkArray<T>(items: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+export async function batchImportStProducts(input: {
+  rowsToInsert: StProductBatchImportItem[];
+  rowsToUpdate: StProductBatchUpdateItem[];
+}): Promise<BatchImportStProductsResult> {
+  const nowIso = new Date().toISOString();
+  const insertedProducts: StProduct[] = [];
+  const updatedProducts: StProduct[] = [];
+
+  // 1. Batch insert new products
+  for (const chunk of chunkArray(input.rowsToInsert, 50)) {
+    if (chunk.length === 0) continue;
+    const payload = chunk.map((item) => ({
+      line_name: item.line_name.trim(),
+      customer_short_name: item.customer_short_name.trim(),
+      product_name: item.product_name.trim(),
+      product_code: item.product_code.trim(),
+      specification: item.specification.trim(),
+      image_url: null,
+      created_at: nowIso,
+      updated_at: nowIso,
+    }));
+
+    const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+      'st_products?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const createdChunk = Array.isArray(rows)
+      ? rows.map(normalizeStProductRow)
+      : [];
+    insertedProducts.push(...createdChunk);
+
+    // Initialize linked st_new_product_status rows for newly inserted products
+    if (createdChunk.length > 0) {
+      const notesByCode = new Map<string, string>();
+      chunk.forEach((item) => {
+        const cleanNote = item.notes.trim();
+        if (cleanNote) {
+          notesByCode.set(item.product_code.trim().toLowerCase(), cleanNote);
+        }
+      });
+
+      const createdIds = createdChunk.map((p) => p.id).filter(Boolean);
+      const existingStatusByProductId = new Map<string, Record<string, unknown>>();
+      if (createdIds.length > 0) {
+        const inFilter = createdIds.map((id) => encodeURIComponent(id)).join(',');
+        const existingRows = await overtimeSupabase
+          .request<Record<string, unknown>[]>(
+            `st_new_product_status?product_id=in.(${inFilter})&select=*`
+          )
+          .catch(() => []);
+        if (Array.isArray(existingRows)) {
+          existingRows.forEach((r) => {
+            if (r.product_id) {
+              existingStatusByProductId.set(String(r.product_id), r);
+            }
+          });
+        }
+      }
+
+      const missingStatusPayloads: Record<string, unknown>[] = [];
+      for (const prod of createdChunk) {
+        const noteText = notesByCode.get(prod.product_code.trim().toLowerCase()) || null;
+        const existingRow = existingStatusByProductId.get(prod.id);
+        if (!existingRow) {
+          missingStatusPayloads.push({
+            product_id: prod.id,
+            has_process: false,
+            process_created_at: null,
+            has_unit_price: false,
+            unit_price: null,
+            currency: 'VND',
+            price_created_at: null,
+            price_applied_at: null,
+            notes: noteText,
+            updated_at: nowIso,
+            ...(supportsNativeTwoStepColumns !== false
+              ? {
+                  has_process_erp: false,
+                  process_erp_date: null,
+                  has_st: false,
+                  st_date: null,
+                }
+              : {}),
+          });
+        } else if (noteText) {
+          const parsedExisting = normalizeStNewProductStatusRow(existingRow);
+          const { steps } = extractEncodedStepsFromNotes(
+            typeof existingRow.notes === 'string' ? existingRow.notes : null
+          );
+          const finalNotes =
+            supportsNativeStageColumns === false || steps
+              ? encodeStepsIntoNotes(noteText, parsedExisting)
+              : noteText;
+          await overtimeSupabase.request<void>(
+            `st_new_product_status?id=eq.${encodeURIComponent(parsedExisting.id)}`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({ notes: finalNotes, updated_at: nowIso }),
+            }
+          );
+        }
+      }
+
+      if (missingStatusPayloads.length > 0) {
+        try {
+          await overtimeSupabase.request<Record<string, unknown>[]>(
+            'st_new_product_status',
+            {
+              method: 'POST',
+              body: JSON.stringify(missingStatusPayloads),
+            }
+          );
+          if (supportsNativeTwoStepColumns !== false) {
+            supportsNativeTwoStepColumns = true;
+          }
+        } catch (err) {
+          if (isMissingWorkflowColumnError(err)) {
+            supportsNativeTwoStepColumns = false;
+            const legacyPayloads = missingStatusPayloads.map((p) => ({
+              product_id: p.product_id,
+              has_process: false,
+              process_created_at: null,
+              has_unit_price: false,
+              unit_price: null,
+              currency: 'VND',
+              price_created_at: null,
+              price_applied_at: null,
+              notes: p.notes ?? null,
+              updated_at: nowIso,
+            }));
+            await overtimeSupabase.request<Record<string, unknown>[]>(
+              'st_new_product_status',
+              {
+                method: 'POST',
+                body: JSON.stringify(legacyPayloads),
+              }
+            );
+          } else {
+            throw err;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Batch upsert overwritten products on PK id
+  for (const chunk of chunkArray(input.rowsToUpdate, 50)) {
+    if (chunk.length === 0) continue;
+    const payload = chunk.map((item) => ({
+      id: item.existing_id,
+      line_name: item.line_name.trim(),
+      customer_short_name: item.customer_short_name.trim(),
+      product_name: item.product_name.trim(),
+      product_code: item.product_code.trim(),
+      specification: item.specification.trim(),
+      image_url: item.existing_image_url,
+      created_at: item.existing_created_at,
+      updated_at: nowIso,
+    }));
+
+    const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+      'st_products?on_conflict=id&select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const updatedChunk = Array.isArray(rows)
+      ? rows.map(normalizeStProductRow)
+      : [];
+    updatedProducts.push(...updatedChunk);
+
+    // Sync non-empty notes onto linked st_new_product_status if provided
+    const notesTargets = chunk.filter((item) => item.notes.trim());
+    if (notesTargets.length > 0) {
+      const targetIds = notesTargets
+        .map((item) => encodeURIComponent(item.existing_id))
+        .join(',');
+      const statusRows = await overtimeSupabase
+        .request<Record<string, unknown>[]>(
+          `st_new_product_status?product_id=in.(${targetIds})&select=*`
+        )
+        .catch(() => []);
+      const statusMap = new Map<string, Record<string, unknown>>();
+      if (Array.isArray(statusRows)) {
+        statusRows.forEach((r) => {
+          if (r.product_id) statusMap.set(String(r.product_id), r);
+        });
+      }
+
+      for (const item of notesTargets) {
+        const cleanNote = item.notes.trim();
+        const existingStatus = statusMap.get(item.existing_id);
+        if (existingStatus) {
+          const parsedStatus = normalizeStNewProductStatusRow(existingStatus);
+          const { steps } = extractEncodedStepsFromNotes(
+            typeof existingStatus.notes === 'string' ? existingStatus.notes : null
+          );
+          const finalNotes =
+            supportsNativeStageColumns === false || steps
+              ? encodeStepsIntoNotes(cleanNote, parsedStatus)
+              : cleanNote;
+          await overtimeSupabase.request<void>(
+            `st_new_product_status?id=eq.${encodeURIComponent(parsedStatus.id)}`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({ notes: finalNotes, updated_at: nowIso }),
+            }
+          );
+        } else {
+          await overtimeSupabase.request<void>('st_new_product_status', {
+            method: 'POST',
+            body: JSON.stringify({
+              product_id: item.existing_id,
+              has_process: false,
+              process_created_at: null,
+              has_unit_price: false,
+              unit_price: null,
+              currency: 'VND',
+              price_created_at: null,
+              price_applied_at: null,
+              notes: cleanNote,
+              updated_at: nowIso,
+            }),
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    insertedCount: insertedProducts.length,
+    updatedCount: updatedProducts.length,
+    insertedProducts,
+    updatedProducts,
+  };
 }
 
 // ==========================================
