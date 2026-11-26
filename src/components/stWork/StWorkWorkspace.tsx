@@ -6,7 +6,6 @@ import {
   FileSpreadsheet,
   LayoutGrid,
   PackageCheck,
-  RefreshCw,
 } from 'lucide-react';
 import { DepartmentGroup } from '../../types/hr';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
@@ -60,8 +59,7 @@ const SUB_TAB_META: Record<
   },
   new_products: {
     title: 'Danh mục Mã hàng',
-    subtitle:
-      'Đăng ký sản phẩm mới và theo dõi trực tiếp quy trình, đơn giá, ngày áp dụng SX đại trà',
+    subtitle: '',
     icon: PackageCheck,
   },
   change_requests: {
@@ -102,13 +100,11 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
   const [customerQuotes, setCustomerQuotes] = useState<StCustomerQuote[]>([]);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
 
   const loadSnapshot = useCallback(async (silent: boolean = false) => {
-    if (silent) setIsRefreshing(true);
-    else setIsLoading(true);
+    if (!silent) setIsLoading(true);
 
     try {
       const snapshot = await fetchAllStWorkData();
@@ -123,7 +119,6 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
       setLoadError(getFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
-      setIsRefreshing(false);
     }
   }, []);
 
@@ -236,33 +231,34 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
     <div className="flex-1 h-full min-h-0 flex flex-col bg-slate-50 overflow-hidden">
       {/* Compact Header (No Horizontal Sub-Tab Bar — Sidebar Accordion handles navigation) */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-5 py-2.5 shrink-0">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200/80 text-[#14539E] flex items-center justify-center shrink-0">
-              <HeaderIcon className="w-4 h-4" />
+            <span
+              className={`rounded-lg bg-blue-50 border border-blue-200/80 text-[#14539E] flex items-center justify-center shrink-0 ${
+                activeTab === 'new_products' ? 'w-9 h-9' : 'w-8 h-8'
+              }`}
+            >
+              <HeaderIcon
+                className={activeTab === 'new_products' ? 'w-5 h-5' : 'w-4 h-4'}
+              />
             </span>
             <div className="min-w-0">
-              <h1 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate">
+              <h1
+                className={`font-bold text-slate-900 tracking-tight truncate ${
+                  activeTab === 'new_products'
+                    ? 'text-2xl leading-tight'
+                    : 'text-sm sm:text-base'
+                }`}
+              >
                 {currentMeta.title}
               </h1>
-              <p className="text-[11px] sm:text-xs text-slate-500 truncate">
-                {currentMeta.subtitle}
-              </p>
+              {currentMeta.subtitle && (
+                <p className="text-[11px] sm:text-xs text-slate-500 truncate">
+                  {currentMeta.subtitle}
+                </p>
+              )}
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => void loadSnapshot(true)}
-            disabled={isRefreshing}
-            title="Làm mới dữ liệu từ Supabase"
-            className="h-8 px-3 rounded-lg bg-white border border-slate-300 hover:border-[#14539E] text-slate-700 hover:text-[#14539E] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 shrink-0"
-          >
-            <RefreshCw
-              className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
-            />
-            <span>Làm mới</span>
-          </button>
         </div>
       </div>
 

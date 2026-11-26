@@ -87,7 +87,6 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [customerFilter, setCustomerFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilterMode>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showRegistrationBar, setShowRegistrationBar] = useState<boolean>(true);
 
   // Registration bar state (merged Danh mục sản phẩm)
   const [newProdLine, setNewProdLine] = useState<string>('');
@@ -519,115 +518,97 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden">
       {/* Filter & KPI Strip */}
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={lineFilter}
-            onChange={(e) => setLineFilter(e.target.value)}
-            aria-label="Lọc theo Line"
-            className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Line</option>
-            {lineNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={customerFilter}
-            onChange={(e) => setCustomerFilter(e.target.value)}
-            aria-label="Lọc theo Khách hàng"
-            className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Khách hàng</option>
-            {customerNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-
-          <div className="inline-flex items-center gap-1 p-0.5 bg-white border border-slate-300 rounded-lg">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center gap-2 shrink-0">
+        <div className="relative w-full sm:w-64 lg:w-72">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Tìm mã hàng, tên hàng, quy cách..."
+            aria-label="Tìm kiếm mã hàng mới"
+            className="w-full h-8 pl-8 pr-7 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+          />
+          {searchQuery && (
             <button
               type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'all'
-                  ? 'bg-[#14539E] text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setSearchQuery('')}
+              aria-label="Xóa từ khóa"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
             >
-              Tất cả ({formatNumberVN(summaryCounts.total)})
+              <X className="w-3.5 h-3.5" />
             </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('completed')}
-              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'completed'
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Hoàn thành SX đại trà ({formatNumberVN(summaryCounts.completed)})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('in_progress')}
-              className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                statusFilter === 'in_progress'
-                  ? 'bg-amber-600 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Đang dở dang ({formatNumberVN(summaryCounts.inProgress)})
-            </button>
-          </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-60">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm mã hàng, tên hàng, quy cách..."
-              aria-label="Tìm kiếm mã hàng mới"
-              className="w-full h-8 pl-8 pr-7 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Xóa từ khóa"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+        <select
+          value={lineFilter}
+          onChange={(e) => setLineFilter(e.target.value)}
+          aria-label="Lọc theo Line"
+          className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+        >
+          <option value="ALL">Tất cả Line</option>
+          {lineNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
 
+        <select
+          value={customerFilter}
+          onChange={(e) => setCustomerFilter(e.target.value)}
+          aria-label="Lọc theo Khách hàng"
+          className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
+        >
+          <option value="ALL">Tất cả Khách hàng</option>
+          {customerNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+
+        <div className="inline-flex items-center gap-1 p-0.5 bg-white border border-slate-300 rounded-lg">
           <button
             type="button"
-            onClick={() => setShowRegistrationBar((prev) => !prev)}
-            className={`h-8 px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              showRegistrationBar
-                ? 'bg-[#14539E] text-white border-[#14539E]'
-                : 'bg-white text-[#14539E] border-[#14539E]/40 hover:bg-blue-50'
+            onClick={() => setStatusFilter('all')}
+            className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'all'
+                ? 'bg-[#14539E] text-white'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{showRegistrationBar ? 'Ẩn khung thêm' : 'Thêm Mã hàng'}</span>
+            Tất cả ({formatNumberVN(summaryCounts.total)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('completed')}
+            className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'completed'
+                ? 'bg-emerald-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Hoàn thành SX đại trà ({formatNumberVN(summaryCounts.completed)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('in_progress')}
+            className={`h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'in_progress'
+                ? 'bg-amber-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Đang dở dang ({formatNumberVN(summaryCounts.inProgress)})
           </button>
         </div>
       </div>
 
-      {/* Product Registration Bar (Merged from Danh mục sản phẩm) */}
-      {showRegistrationBar && (
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-white shrink-0">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200">
+      {/* Product Registration Bar (Always visible, merged from Danh mục sản phẩm) */}
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-white shrink-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-center p-2 rounded-xl bg-slate-50 border border-slate-200">
             {/* Line + quick "+" button */}
             <div className="lg:col-span-2 flex items-center gap-1">
               <select
@@ -791,10 +772,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                 )}
                 <span>Thêm</span>
               </button>
-            </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Main High-Density Unified Table */}
       <div className="flex-1 min-h-0 overflow-auto">
