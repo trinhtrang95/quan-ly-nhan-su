@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Plus, Trash2, FolderCog } from 'lucide-react';
-import { DepartmentGroup, Employee } from '../types/hr';
+import { DepartmentGroup, Employee } from '../../types/hr';
 
 interface GroupManageModalProps {
   isOpen: boolean;

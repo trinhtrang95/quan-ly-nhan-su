@@ -9,13 +9,13 @@ import {
   X,
   AlertTriangle,
 } from 'lucide-react';
-import { Employee, LeaveRecord } from '../types/hr';
+import { Employee, LeaveRecord } from '../../types/hr';
 import {
   downloadOpeningLeaveBalanceTemplate,
   OpeningBalanceImportRow,
   parseOpeningLeaveBalanceFile,
-} from '../utils/exportUtils';
-import { getYearMonth, parseComparableDate } from '../utils/hrCalculations';
+} from '../../utils/exportUtils';
+import { getYearMonth, parseComparableDate } from '../../utils/hrCalculations';
 
 interface OpeningBalanceImportModalProps {
   isOpen: boolean;

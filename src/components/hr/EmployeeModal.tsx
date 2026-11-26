@@ -14,16 +14,16 @@ import {
   Gender,
   PositionItem,
   WorkStatus,
-} from '../types/hr';
-import { createAvatarSvgDataUri, INITIAL_POSITIONS } from '../data/mockData';
-import { uploadImageToHrBucket } from '../utils/supabaseService';
+} from '../../types/hr';
+import { createAvatarSvgDataUri, INITIAL_POSITIONS } from '../../data/mockData';
+import { uploadImageToHrBucket } from '../../utils/supabaseService';
 import {
   ALL_COMMUNES_SUGGESTIONS,
   ALL_PROVINCE_OPTIONS,
   composeAddressFromParts,
   fetchCommunesForProvince,
   parseAddressIntoParts,
-} from '../utils/vnAddressData';
+} from '../../utils/vnAddressData';
 
 interface EmployeeModalProps {
   isOpen: boolean;

@@ -26,20 +26,20 @@ import {
   Employee,
   LeaveRecord,
   LeaveRecordType,
-} from '../types/hr';
+} from '../../types/hr';
 import {
   formatDateVN,
   LEAVE_TYPE_META,
-} from '../utils/hrCalculations';
+} from '../../utils/hrCalculations';
 import {
   compressImageClientSide,
   uploadImageToHrBucket,
-} from '../utils/supabaseService';
-import { useAttendanceSymbols } from '../contexts/AttendanceSymbolsContext';
+} from '../../utils/supabaseService';
+import { useAttendanceSymbols } from '../../contexts/AttendanceSymbolsContext';
 import {
   getSymbolBadgeClasses,
   getSymbolColorToken,
-} from '../utils/attendanceSymbolsLogic';
+} from '../../utils/attendanceSymbolsLogic';
 
 interface LeaveLateLogViewProps {
   records: LeaveRecord[];

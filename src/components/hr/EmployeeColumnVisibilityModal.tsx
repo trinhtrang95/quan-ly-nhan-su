@@ -7,7 +7,7 @@ import {
   EMPLOYEE_COLUMN_GROUPS,
   EmployeeColumnGroupDef,
   EmployeeColumnId,
-} from '../utils/employeeColumns';
+} from '../../utils/employeeColumns';
 
 interface EmployeeColumnVisibilityModalProps {
   isOpen: boolean;

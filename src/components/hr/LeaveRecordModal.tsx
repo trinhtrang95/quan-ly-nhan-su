@@ -19,24 +19,24 @@ import {
   LeaveRecordType,
   RegimeSubtype,
   UserAccount,
-} from '../types/hr';
+} from '../../types/hr';
 import {
   calculateLeaveAccrualBreakdown,
   sortEmployees,
-} from '../utils/hrCalculations';
+} from '../../utils/hrCalculations';
 import {
   compressImageClientSide,
   deleteImageFromHrBucket,
   uploadImageToHrBucket,
-} from '../utils/supabaseService';
-import { useAttendanceSymbols } from '../contexts/AttendanceSymbolsContext';
+} from '../../utils/supabaseService';
+import { useAttendanceSymbols } from '../../contexts/AttendanceSymbolsContext';
 import {
   getSymbolBadgeClasses,
   mapSymbolToLeaveRecordType,
   resolveSymbolByCode,
   resolveSymbolForLeaveRecord,
   resolveSymbolForSystemKey,
-} from '../utils/attendanceSymbolsLogic';
+} from '../../utils/attendanceSymbolsLogic';
 
 interface LeaveRecordModalProps {
   isOpen: boolean;

@@ -4,13 +4,13 @@ import {
   Employee,
   EmployeeAnnualMatrixRow,
   MatrixViewMode,
-} from '../types/hr';
+} from '../../types/hr';
 import {
   ALL_EMPLOYEE_COLUMNS,
   EmployeeColumnDef,
   EmployeeColumnId,
   getEmployeeColumnTextValue,
-} from '../utils/employeeColumns';
+} from '../../utils/employeeColumns';
 
 export type ReportPrintType = 'employees' | 'employees_sign' | 'annual_matrix';
 

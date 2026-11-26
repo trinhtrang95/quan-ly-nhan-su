@@ -14,12 +14,12 @@ import {
   Trash2,
   AlertTriangle,
 } from 'lucide-react';
-import { Employee, LeaveRecord, WorkStatus } from '../types/hr';
+import { Employee, LeaveRecord, WorkStatus } from '../../types/hr';
 import {
   calculateAnnualMatrixReport,
   formatDateVN,
   LEAVE_TYPE_META,
-} from '../utils/hrCalculations';
+} from '../../utils/hrCalculations';
 
 interface EmployeeProfileDrawerProps {
   employee: Employee | null;

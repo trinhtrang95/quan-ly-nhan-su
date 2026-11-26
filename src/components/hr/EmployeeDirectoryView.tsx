@@ -14,14 +14,14 @@ import {
   ChevronDown,
   Eye,
 } from 'lucide-react';
-import { DepartmentGroup, Employee, LeaveRecord } from '../types/hr';
+import { DepartmentGroup, Employee, LeaveRecord } from '../../types/hr';
 import {
   EmployeeSortField,
   filterEmployees,
   getDepartmentPriorityRank,
   SortDirection,
   sortEmployees,
-} from '../utils/hrCalculations';
+} from '../../utils/hrCalculations';
 import {
   ALL_EMPLOYEE_COLUMNS,
   calculateSeniorityLabel,
@@ -31,7 +31,7 @@ import {
   getEmployeeColumnTextValue,
   loadVisibleEmployeeColumns,
   saveVisibleEmployeeColumns,
-} from '../utils/employeeColumns';
+} from '../../utils/employeeColumns';
 import {
   EmployeeProfileDrawer,
   renderStatusBadge,

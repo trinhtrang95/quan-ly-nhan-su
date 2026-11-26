@@ -4,11 +4,11 @@ import {
   CompanyUnit,
   LeaveAccrualMode,
   LeavePolicyConfig,
-} from '../types/hr';
+} from '../../types/hr';
 import {
   loadLeavePolicyConfig,
   saveLeavePolicyConfig,
-} from '../utils/hrCalculations';
+} from '../../utils/hrCalculations';
 
 interface AnnualLeaveRulesViewProps {
   companyUnits: CompanyUnit[];
