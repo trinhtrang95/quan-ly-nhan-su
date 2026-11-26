@@ -68,26 +68,49 @@ export async function fetchStCustomers(): Promise<StCustomer[]> {
   return Array.isArray(rows) ? rows.map(normalizeStCustomerRow) : [];
 }
 
+async function fetchAllPaginatedRows(
+  tableQueryWithoutRange: string,
+  pageSize: number = 1000
+): Promise<Record<string, unknown>[]> {
+  const allRows: Record<string, unknown>[] = [];
+  let offset = 0;
+
+  while (true) {
+    const sep = tableQueryWithoutRange.includes('?') ? '&' : '?';
+    const batch = await overtimeSupabase.request<Record<string, unknown>[]>(
+      `${tableQueryWithoutRange}${sep}limit=${pageSize}&offset=${offset}`
+    );
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
+    allRows.push(...batch);
+    if (batch.length < pageSize) {
+      break;
+    }
+    offset += pageSize;
+  }
+
+  return allRows;
+}
+
 export async function fetchStProducts(): Promise<StProduct[]> {
-  const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
-    'st_products?select=*&order=created_at.desc'
+  const rows = await fetchAllPaginatedRows(
+    'st_products?select=*&order=created_at.desc,product_code.asc'
   );
-  return Array.isArray(rows) ? rows.map(normalizeStProductRow) : [];
+  return rows.map(normalizeStProductRow);
 }
 
 export async function fetchStNewProductStatuses(): Promise<StNewProductStatus[]> {
-  const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+  const rows = await fetchAllPaginatedRows(
     'st_new_product_status?select=*&order=updated_at.desc'
   );
-  if (Array.isArray(rows) && rows.length > 0) {
+  if (rows.length > 0) {
     supportsNativeTwoStepColumns =
       'has_process_erp' in rows[0] && 'has_st' in rows[0];
     supportsNativeStageColumns =
       'has_stage_win' in rows[0] && 'has_stage_fin' in rows[0];
   }
-  return Array.isArray(rows)
-    ? rows.map(normalizeStNewProductStatusRow)
-    : [];
+  return rows.map(normalizeStNewProductStatusRow);
 }
 
 export async function fetchStChangeRequests(): Promise<StChangeRequest[]> {
@@ -121,11 +144,24 @@ export async function fetchAllStWorkData(): Promise<StWorkSnapshot> {
     fetchStCustomerQuotes(),
   ]);
 
+  let syncedStatuses = newProductStatuses;
+  try {
+    const missingCreated = await ensureMissingStNewProductStatuses(
+      products,
+      newProductStatuses
+    );
+    if (missingCreated.length > 0) {
+      syncedStatuses = [...missingCreated, ...newProductStatuses];
+    }
+  } catch {
+    // Non-fatal: UI still renders every st_products row via mergeProductsWithStatus
+  }
+
   return {
     lines,
     customers,
     products,
-    newProductStatuses,
+    newProductStatuses: syncedStatuses,
     changeRequests,
     customerQuotes,
   };
@@ -954,6 +990,304 @@ export async function upsertStNewProductStatus(
   }
 
   return sendSave(fallbackPayload);
+}
+
+function buildStatusPayloads(
+  input: UpsertStNewProductStatusInput,
+  nowIso: string
+): {
+  nativePayload: Record<string, unknown>;
+  fallbackPayload: Record<string, unknown>;
+} {
+  const stageFields = {
+    has_stage_win: Boolean(input.has_stage_win),
+    stage_win_date: input.stage_win_date || null,
+    has_stage_cut: Boolean(input.has_stage_cut),
+    stage_cut_date: input.stage_cut_date || null,
+    has_stage_sol: Boolean(input.has_stage_sol),
+    stage_sol_date: input.stage_sol_date || null,
+    has_stage_ass: Boolean(input.has_stage_ass),
+    stage_ass_date: input.stage_ass_date || null,
+    has_stage_imp: Boolean(input.has_stage_imp),
+    stage_imp_date: input.stage_imp_date || null,
+    has_stage_sol2: Boolean(input.has_stage_sol2),
+    stage_sol2_date: input.stage_sol2_date || null,
+    has_stage_fin: Boolean(input.has_stage_fin),
+    stage_fin_date: input.stage_fin_date || null,
+  };
+  const twoStepValues = {
+    has_process_erp: Boolean(input.has_process_erp),
+    process_erp_date: input.process_erp_date || null,
+    has_st: Boolean(input.has_st),
+    st_date: input.st_date || null,
+  };
+  const completed = isNewProductCompleted({
+    ...twoStepValues,
+    ...stageFields,
+  });
+  const cleanUserNotes = input.notes?.trim() || null;
+
+  const legacyBasePayload = {
+    product_id: input.product_id,
+    has_process: Boolean(twoStepValues.has_process_erp),
+    process_created_at: twoStepValues.process_erp_date || null,
+    has_unit_price: Boolean(input.has_quote),
+    unit_price:
+      input.unit_price !== null &&
+      input.unit_price !== undefined &&
+      !Number.isNaN(Number(input.unit_price))
+        ? Number(input.unit_price)
+        : null,
+    currency: (input.currency || 'VND').trim() || 'VND',
+    price_created_at: input.quote_date || null,
+    price_applied_at: completed ? twoStepValues.st_date || null : null,
+    updated_at: nowIso,
+  };
+
+  const nativePayload = {
+    ...legacyBasePayload,
+    ...twoStepValues,
+    ...stageFields,
+    notes: cleanUserNotes,
+  };
+
+  const fallbackPayload = {
+    ...legacyBasePayload,
+    notes: encodeStepsIntoNotes(cleanUserNotes, {
+      ...twoStepValues,
+      ...stageFields,
+      ...(typeof input.has_bom_erp === 'boolean'
+        ? { has_bom_erp: input.has_bom_erp, bom_erp_date: input.bom_erp_date || null }
+        : {}),
+      ...(typeof input.has_spec_erp === 'boolean'
+        ? { has_spec_erp: input.has_spec_erp, spec_erp_date: input.spec_erp_date || null }
+        : {}),
+      ...(typeof input.has_khsx === 'boolean'
+        ? { has_khsx: input.has_khsx, khsx_date: input.khsx_date || null }
+        : {}),
+      ...(typeof input.has_quote === 'boolean'
+        ? { has_quote: input.has_quote, quote_date: input.quote_date || null }
+        : {}),
+    }),
+  };
+
+  return { nativePayload, fallbackPayload };
+}
+
+export async function ensureMissingStNewProductStatuses(
+  products: StProduct[],
+  statuses: StNewProductStatus[]
+): Promise<StNewProductStatus[]> {
+  if (products.length === 0) return [];
+  const existingProductIds = new Set(
+    statuses.map((s) => s.product_id).filter(Boolean)
+  );
+  const missingProducts = products.filter(
+    (p) => p.id && !existingProductIds.has(p.id)
+  );
+  if (missingProducts.length === 0) return [];
+
+  const nowIso = new Date().toISOString();
+  const created: StNewProductStatus[] = [];
+
+  for (const chunk of chunkArray(missingProducts, 50)) {
+    const legacyPayloads = chunk.map((p) => ({
+      product_id: p.id,
+      has_process: false,
+      process_created_at: null,
+      has_unit_price: false,
+      unit_price: null,
+      currency: 'VND',
+      price_created_at: null,
+      price_applied_at: null,
+      notes: null,
+      updated_at: nowIso,
+    }));
+
+    const tryPost = async (withTwoStep: boolean) => {
+      const body = withTwoStep
+        ? legacyPayloads.map((p) => ({
+            ...p,
+            has_process_erp: false,
+            process_erp_date: null,
+            has_st: false,
+            st_date: null,
+          }))
+        : legacyPayloads;
+      const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+        'st_new_product_status?select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(body),
+        }
+      );
+      return Array.isArray(rows) ? rows.map(normalizeStNewProductStatusRow) : [];
+    };
+
+    if (supportsNativeTwoStepColumns !== false) {
+      try {
+        const res = await tryPost(true);
+        supportsNativeTwoStepColumns = true;
+        created.push(...res);
+        continue;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeTwoStepColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const res = await tryPost(false);
+    created.push(...res);
+  }
+
+  return created;
+}
+
+export async function batchUpsertStNewProductStatuses(
+  inputs: UpsertStNewProductStatusInput[]
+): Promise<StNewProductStatus[]> {
+  if (inputs.length === 0) return [];
+  const nowIso = new Date().toISOString();
+
+  // Resolve existing st_new_product_status ids for any items missing input.id
+  const idByProductId = new Map<string, string>();
+  const unresolvedProductIds: string[] = [];
+  for (const item of inputs) {
+    if (item.id) {
+      idByProductId.set(item.product_id, item.id);
+    } else if (item.product_id) {
+      unresolvedProductIds.push(item.product_id);
+    }
+  }
+
+  for (const idChunk of chunkArray(unresolvedProductIds, 50)) {
+    const inFilter = idChunk.map((pid) => encodeURIComponent(pid)).join(',');
+    const existingRows = await overtimeSupabase
+      .request<Record<string, unknown>[]>(
+        `st_new_product_status?product_id=in.(${inFilter})&select=id,product_id`
+      )
+      .catch(() => []);
+    if (Array.isArray(existingRows)) {
+      existingRows.forEach((r) => {
+        if (r.product_id && r.id) {
+          idByProductId.set(String(r.product_id), String(r.id));
+        }
+      });
+    }
+  }
+
+  const toUpdate: UpsertStNewProductStatusInput[] = [];
+  const toInsert: UpsertStNewProductStatusInput[] = [];
+
+  for (const item of inputs) {
+    const resolvedId = item.id || idByProductId.get(item.product_id) || '';
+    if (resolvedId) {
+      toUpdate.push({ ...item, id: resolvedId });
+    } else {
+      toInsert.push(item);
+    }
+  }
+
+  const savedAll: StNewProductStatus[] = [];
+
+  const sendBatchUpdate = async (
+    chunk: UpsertStNewProductStatusInput[],
+    useNative: boolean
+  ): Promise<StNewProductStatus[]> => {
+    const payload = chunk.map((item) => {
+      const { nativePayload, fallbackPayload } = buildStatusPayloads(
+        item,
+        nowIso
+      );
+      return {
+        id: item.id,
+        ...(useNative ? nativePayload : fallbackPayload),
+      };
+    });
+    const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+      'st_new_product_status?on_conflict=id&select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(payload),
+      }
+    );
+    return Array.isArray(rows) ? rows.map(normalizeStNewProductStatusRow) : [];
+  };
+
+  const sendBatchInsert = async (
+    chunk: UpsertStNewProductStatusInput[],
+    useNative: boolean
+  ): Promise<StNewProductStatus[]> => {
+    const payload = chunk.map((item) => {
+      const { nativePayload, fallbackPayload } = buildStatusPayloads(
+        item,
+        nowIso
+      );
+      return useNative ? nativePayload : fallbackPayload;
+    });
+    const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+      'st_new_product_status?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(payload),
+      }
+    );
+    return Array.isArray(rows) ? rows.map(normalizeStNewProductStatusRow) : [];
+  };
+
+  for (const chunk of chunkArray(toUpdate, 50)) {
+    if (
+      supportsNativeTwoStepColumns !== false &&
+      supportsNativeStageColumns !== false
+    ) {
+      try {
+        const res = await sendBatchUpdate(chunk, true);
+        supportsNativeTwoStepColumns = true;
+        supportsNativeStageColumns = true;
+        savedAll.push(...res);
+        continue;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeStageColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+    const res = await sendBatchUpdate(chunk, false);
+    savedAll.push(...res);
+  }
+
+  for (const chunk of chunkArray(toInsert, 50)) {
+    if (
+      supportsNativeTwoStepColumns !== false &&
+      supportsNativeStageColumns !== false
+    ) {
+      try {
+        const res = await sendBatchInsert(chunk, true);
+        supportsNativeTwoStepColumns = true;
+        supportsNativeStageColumns = true;
+        savedAll.push(...res);
+        continue;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeStageColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+    const res = await sendBatchInsert(chunk, false);
+    savedAll.push(...res);
+  }
+
+  return savedAll;
 }
 
 // ==========================================
