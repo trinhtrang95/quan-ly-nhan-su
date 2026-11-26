@@ -14,19 +14,19 @@ import {
   LeaveRecordType,
   RegimeSubtype,
   UserAccount,
-} from '../../types/hr';
+} from '../../../types/hr';
 import {
   calculateAnnualMatrixReport,
   formatDateVN,
   sortEmployees,
-} from '../../utils/hrCalculations';
-import { useAttendanceSymbols } from '../../contexts/AttendanceSymbolsContext';
+} from '../../../utils/hrCalculations';
+import { useAttendanceSymbols } from '../../../contexts/AttendanceSymbolsContext';
 import {
   mapSymbolToLeaveRecordType,
   resolveSymbolByCode,
   resolveSymbolForLeaveRecord,
   resolveSymbolForSystemKey,
-} from '../../utils/attendanceSymbolsLogic';
+} from '../../../utils/attendanceSymbolsLogic';
 
 interface BulkLeaveRecordModalProps {
   isOpen: boolean;

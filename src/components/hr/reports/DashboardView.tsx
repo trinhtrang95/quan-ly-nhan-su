@@ -23,8 +23,8 @@ import {
   EmployeeAnnualMatrixRow,
   LeaveRecord,
   UserAccount,
-} from '../../types/hr';
-import { formatDateVN, isDateInRange, LEAVE_TYPE_META } from '../../utils/hrCalculations';
+} from '../../../types/hr';
+import { formatDateVN, isDateInRange, LEAVE_TYPE_META } from '../../../utils/hrCalculations';
 
 interface DashboardViewProps {
   currentUser: UserAccount | null;

@@ -26,7 +26,7 @@ import {
   createStChangeRequest,
   deleteStChangeRequest,
   updateStChangeRequest,
-} from '../../utils/stWorkSupabase';
+} from '../../services/stWorkService';
 
 export interface StChangeRequestsTabProps {
   changeRequests: StChangeRequest[];

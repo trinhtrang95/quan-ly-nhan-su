@@ -14,7 +14,6 @@ import {
   X,
 } from 'lucide-react';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
-import { uploadImageToHrBucket } from '../../utils/supabaseService';
 import {
   formatNumberVN,
   StCustomer,
@@ -32,7 +31,8 @@ import {
   updateStCustomer,
   updateStLine,
   updateStProduct,
-} from '../../utils/stWorkSupabase';
+  uploadImageToHrBucket,
+} from '../../services/stWorkService';
 
 export interface StGeneralSetupTabProps {
   lines: StLine[];

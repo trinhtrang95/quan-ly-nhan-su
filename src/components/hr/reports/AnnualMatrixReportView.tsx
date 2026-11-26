@@ -18,7 +18,7 @@ import {
   LeaveRecord,
   LeaveRecordType,
   MatrixViewMode,
-} from '../../types/hr';
+} from '../../../types/hr';
 import {
   calculateAnnualMatrixReport,
   calculateMonthlyAttendanceMatrix,
@@ -27,17 +27,17 @@ import {
   LEAVE_TYPE_META,
   loadLeavePolicyConfig,
   MonthlyDayBadge,
-} from '../../utils/hrCalculations';
-import { exportMonthlyAttendanceMatrixToExcel } from '../../utils/exportUtils';
-import { formatNumberVN } from '../../utils/errorAndSecurityService';
-import { ReportSubTab } from '../Sidebar';
-import { useAttendanceSymbols } from '../../contexts/AttendanceSymbolsContext';
+} from '../../../utils/hrCalculations';
+import { exportMonthlyAttendanceMatrixToExcel } from '../../../utils/exportUtils';
+import { formatNumberVN } from '../../../utils/errorAndSecurityService';
+import { ReportSubTab } from '../../Sidebar';
+import { useAttendanceSymbols } from '../../../contexts/AttendanceSymbolsContext';
 import {
   getSymbolBadgeClasses,
   getSymbolColorToken,
   resolveSymbolForLeaveRecord,
   sortAttendanceSymbols,
-} from '../../utils/attendanceSymbolsLogic';
+} from '../../../utils/attendanceSymbolsLogic';
 
 interface AnnualMatrixReportViewProps {
   employees: Employee[];

@@ -6,12 +6,12 @@ import {
   EmployeeAnnualMatrixRow,
   LeaveRecord,
   MatrixViewMode,
-} from '../../types/hr';
-import { OpeningBalanceImportRow } from '../../utils/exportUtils';
+} from '../../../types/hr';
+import { OpeningBalanceImportRow } from '../../../utils/exportUtils';
 import { AnnualMatrixReportView } from './AnnualMatrixReportView';
-import { AnnualLeaveFundView } from './AnnualLeaveFundView';
+import { AnnualLeaveFundView } from '../leave/AnnualLeaveFundView';
 import { OvertimeHoursReportView } from '../overtime/OvertimeHoursReportView';
-import { ReportSubTab } from '../Sidebar';
+import { ReportSubTab } from '../../Sidebar';
 
 interface ReportDashboardProps {
   employees: Employee[];

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Lock, User, LogIn, Eye, EyeOff, Loader2, Check } from 'lucide-react';
 import { CompanyUnit, UserAccount } from '../types/hr';
-import { authenticateAppUserInSupabase } from '../utils/supabaseService';
+import { authenticateAppUserInSupabase } from '../services/settingsService';
 
 export const SAVED_CREDENTIALS_KEY = 'hr_pro_saved_credentials_v2';
 

@@ -21,7 +21,7 @@ import {
   StProductWithStatus,
   StWorkSubTab,
 } from '../../utils/stWorkLogic';
-import { upsertStNewProductStatus } from '../../utils/stWorkSupabase';
+import { upsertStNewProductStatus } from '../../services/stWorkService';
 
 export interface StNewProductsTabProps {
   lines: StLine[];

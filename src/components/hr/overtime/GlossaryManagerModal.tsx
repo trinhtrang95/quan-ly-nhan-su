@@ -13,8 +13,8 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { DepartmentGroup } from '../../types/hr';
-import { formatNumberVN, getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
+import { DepartmentGroup } from '../../../types/hr';
+import { formatNumberVN, getFriendlyErrorMessage } from '../../../utils/errorAndSecurityService';
 import {
   approveGlossaryEntry,
   areTargetGroupsEqual,
@@ -27,7 +27,7 @@ import {
   OvertimeGlossaryEntry,
   suggestFactoryKoreanTranslation,
   updateGlossaryEntry,
-} from '../../utils/overtimeGlossaryService';
+} from '../../../services/hrService';
 
 export interface GlossaryManagerModalProps {
   isActive?: boolean;

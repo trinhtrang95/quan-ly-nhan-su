@@ -22,7 +22,7 @@ import {
   readLocalAttendanceSymbols,
   subscribeToAttendanceSymbolsRealtime,
   upsertAttendanceSymbol,
-} from '../utils/attendanceSymbolsService';
+} from '../services/settingsService';
 import { LeaveRecord } from '../types/hr';
 
 export interface AttendanceSymbolsContextValue {

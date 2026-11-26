@@ -31,7 +31,7 @@ import {
 import {
   fetchAllStWorkData,
   subscribeToStWorkRealtime,
-} from '../../utils/stWorkSupabase';
+} from '../../services/stWorkService';
 import { StChangeRequestsTab } from './StChangeRequestsTab';
 import { StCustomerQuotesTab } from './StCustomerQuotesTab';
 import { StGeneralSetupTab } from './StGeneralSetupTab';

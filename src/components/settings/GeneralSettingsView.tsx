@@ -42,7 +42,7 @@ import {
   subscribeToOvertimeSettingsRealtime,
   subscribeToWorkShiftsRealtime,
   SUPABASE_GENERAL_SETTINGS_SQL,
-} from '../../utils/workScheduleSupabase';
+} from '../../services/settingsService';
 import { CompanyHolidaysTab } from './CompanyHolidaysTab';
 import { OvertimeSettingsTab } from './OvertimeSettingsTab';
 import { WorkShiftsTab } from './WorkShiftsTab';

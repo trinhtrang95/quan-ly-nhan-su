@@ -41,45 +41,47 @@ import {
 import {
   bulkCreateEmployeesInSupabase,
   bulkCreateLeaveLogsInSupabase,
+  createEmployeeInSupabase,
+  createLeaveLogInSupabase,
+  deleteEmployeesFromSupabase,
+  deleteLeaveLogFromSupabase,
+  loadOrSeedSupabaseData,
+  syncLocalLeaveLogsToSupabase,
+  updateEmployeeInSupabase,
+  updateLeaveLogInSupabase,
+} from './services/hrService';
+import {
   clearAllDataInSupabase,
   createAppUserInSupabase,
   createCompanyInSupabase,
   createDepartmentInSupabase,
-  createEmployeeInSupabase,
-  createLeaveLogInSupabase,
   createPositionInSupabase,
   deleteAppUserFromSupabase,
   deleteCompanyFromSupabase,
   deleteDepartmentFromSupabase,
-  deleteEmployeesFromSupabase,
-  deleteLeaveLogFromSupabase,
   deletePositionFromSupabase,
-  loadOrSeedSupabaseData,
   reorderDepartmentsInSupabase,
   restoreFromBackupInSupabase,
-  syncLocalLeaveLogsToSupabase,
   updateAppUserRoleInSupabase,
   updateCompanyInSupabase,
   updateDepartmentInSupabase,
-  updateEmployeeInSupabase,
-  updateLeaveLogInSupabase,
   updatePositionInSupabase,
-} from './utils/supabaseService';
+} from './services/settingsService';
 import { LoginView } from './components/LoginView';
 import { Sidebar, LeaveSubTab, ReportSubTab } from './components/Sidebar';
 import { TopBannerHeader } from './components/TopBannerHeader';
-import { DashboardView } from './components/hr/DashboardView';
-import { EmployeeDirectoryView } from './components/hr/EmployeeDirectoryView';
-import { EmployeeModal } from './components/hr/EmployeeModal';
-import { GroupManageModal } from './components/hr/GroupManageModal';
-import { LeaveLateLogView } from './components/hr/LeaveLateLogView';
-import { LeaveRecordModal } from './components/hr/LeaveRecordModal';
-import { BulkLeaveRecordModal } from './components/hr/BulkLeaveRecordModal';
-import { ReportDashboard } from './components/hr/ReportDashboard';
+import { DashboardView } from './components/hr/reports/DashboardView';
+import { EmployeeDirectoryView } from './components/hr/employees/EmployeeDirectoryView';
+import { EmployeeModal } from './components/hr/employees/EmployeeModal';
+import { GroupManageModal } from './components/hr/employees/GroupManageModal';
+import { LeaveLateLogView } from './components/hr/leave/LeaveLateLogView';
+import { LeaveRecordModal } from './components/hr/leave/LeaveRecordModal';
+import { BulkLeaveRecordModal } from './components/hr/leave/BulkLeaveRecordModal';
+import { ReportDashboard } from './components/hr/reports/ReportDashboard';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { LightboxModal } from './components/LightboxModal';
-import { PrintReportModal, ReportPrintType } from './components/hr/PrintReportModal';
-import { OvertimeWorkspace } from './components/overtime/OvertimeWorkspace';
+import { PrintReportModal, ReportPrintType } from './components/hr/reports/PrintReportModal';
+import { OvertimeWorkspace } from './components/hr/overtime/OvertimeWorkspace';
 import { GeneralSettingsView } from './components/settings/GeneralSettingsView';
 import { StWorkWorkspace } from './components/stWork/StWorkWorkspace';
 import { EmployeeColumnId } from './utils/employeeColumns';

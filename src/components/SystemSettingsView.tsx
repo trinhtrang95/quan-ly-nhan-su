@@ -45,7 +45,7 @@ import {
 import {
   SUPABASE_LEAVE_LOGS_SQL,
   uploadImageToHrBucket,
-} from '../utils/supabaseService';
+} from '../services/settingsService';
 import { usePWAInstall } from '../utils/pwaInstall';
 import {
   composeAddressFromParts,

@@ -8,43 +8,41 @@ import {
   Pencil,
   Plus,
 } from 'lucide-react';
-import { DepartmentGroup, Employee, LeaveRecord } from '../../types/hr';
+import { DepartmentGroup, Employee, LeaveRecord } from '../../../types/hr';
 import {
   formatNumberVN,
   getFriendlyErrorMessage,
-} from '../../utils/errorAndSecurityService';
-import { formatDateToFormStyle } from '../../utils/overtimeExportService';
+} from '../../../utils/errorAndSecurityService';
+import { formatDateToFormStyle } from '../../../utils/overtimeExportService';
 import {
+  applyRealtimeGlossaryPayload,
   createOrOpenOvertimeShell,
   DEFAULT_OVERTIME_DEPARTMENT,
   fetchActiveLeaveRecordsForOvertimeCheck,
   fetchOvertimeFormById,
   fetchOvertimeForms,
+  fetchOvertimeGlossary,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
   lockOvertimeForm,
   OvertimeFormWithItems,
+  OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
   resolveOvertimeMainDepartment,
   softDeleteOvertimeForms,
+  subscribeToOvertimeGlossaryRealtime,
   unlockOvertimeForm,
   updateOvertimeFormInHistory,
-} from '../../utils/overtimeFormsService';
-import {
-  applyRealtimeGlossaryPayload,
-  fetchOvertimeGlossary,
-  OvertimeGlossaryEntry,
-  subscribeToOvertimeGlossaryRealtime,
-} from '../../utils/overtimeGlossaryService';
+} from '../../../services/hrService';
 import {
   CompanyHoliday,
   createDefaultAdminShift,
   DEFAULT_OVERTIME_SETTINGS,
   OvertimeSettings,
   WorkShift,
-} from '../../utils/workScheduleLogic';
+} from '../../../utils/workScheduleLogic';
 import {
   applyRealtimeHolidayPayload,
   applyRealtimeWorkShiftPayload,
@@ -56,7 +54,7 @@ import {
   subscribeToOvertimeSettingsRealtime,
   subscribeToWorkShiftsRealtime,
   SupabaseOvertimeSettingsRow,
-} from '../../utils/workScheduleSupabase';
+} from '../../../services/settingsService';
 import {
   CreateOvertimeForm,
   CreateOvertimeFormPayload,

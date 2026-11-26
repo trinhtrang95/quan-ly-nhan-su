@@ -1,0 +1,138 @@
+export {
+  getOvertimeSupabaseClient,
+  getSupabaseClient,
+  HR_IMAGES_BUCKET,
+  overtimeSupabase,
+  SUPABASE_ANON_KEY,
+  SUPABASE_URL,
+} from './supabaseClient';
+
+// ==========================================
+// HR: NHÂN SỰ, ĐƠN NGHỈ, PHÉP NĂM & HÌNH ẢNH
+// ==========================================
+export {
+  bulkCreateEmployeesInSupabase,
+  bulkCreateLeaveLogsInSupabase,
+  compressImageClientSide,
+  createEmployeeInSupabase,
+  createLeaveLogInSupabase,
+  deleteEmployeesFromSupabase,
+  deleteImageFromHrBucket,
+  deleteLeaveLogFromSupabase,
+  flattenOvertimeBlocksToRecords,
+  insertOvertimeRecords,
+  loadOrSeedSupabaseData,
+  mapSupabaseRowToEmployee,
+  mapSupabaseRowToLeaveRecord,
+  seedInitialDataToSupabase,
+  SUPABASE_LEAVE_LOGS_SQL,
+  syncLocalLeaveLogsToSupabase,
+  updateEmployeeInSupabase,
+  updateLeaveLogInSupabase,
+  uploadImageToHrBucket,
+} from '../utils/supabaseService';
+export type {
+  OvertimeBlockForFlatten,
+  OvertimeParticipantForFlatten,
+  OvertimeRecord,
+  SupabaseEmployeeRow,
+  SupabaseLeaveLogRow,
+} from '../utils/supabaseService';
+
+// ==========================================
+// TĂNG CA (OVERTIME FORMS & REALTIME)
+// ==========================================
+export {
+  buildMergedEmployeesForExport,
+  buildOvertimeFormItemsFromBlocks,
+  buildOnLeaveEmployeeMapForDate,
+  buildPrintableDateGroupsFromItems,
+  buildUpdatedOvertimeForm,
+  calculateHoursBetween,
+  createOrOpenOvertimeShell,
+  DEFAULT_OVERTIME_DEPARTMENT,
+  evaluateOvertimeDateConflict,
+  extractActiveFormWorkDates,
+  extractUniqueBlockDates,
+  fetchActiveLeaveRecordsForOvertimeCheck,
+  fetchOvertimeFormById,
+  fetchOvertimeForms,
+  filterOvertimeForms,
+  findActiveFormsByDate,
+  formatCreatedAtVN,
+  formatOvertimeDepartmentHeaderLabel,
+  formatOvertimeFormCodeDisplay,
+  generateOvertimeFormCode,
+  getLeaveTypeShortLabel,
+  getLocalTodayIsoDate,
+  isLeaveRecordCoveringDate,
+  isOvertimeFormLocked,
+  isOvertimeTimeBold,
+  lockOvertimeForm,
+  normalizeDepartmentKey,
+  OvertimeSupabaseActionError,
+  reconstructBlocksFromItems,
+  resolveDefaultPrimaryOvertimeDate,
+  resolveDepartmentLabel,
+  resolveOvertimeMainDepartment,
+  resolveRepresentativeOvertimeDate,
+  saveOvertimeFormToHistory,
+  softDeleteOvertimeForm,
+  softDeleteOvertimeForms,
+  subscribeToLeaveLogsRealtime,
+  subscribeToOvertimeRealtime,
+  SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL,
+  unlockOvertimeForm,
+  updateOvertimeFormInHistory,
+} from '../utils/overtimeFormsService';
+export type {
+  CreateOrOpenOvertimeShellResult,
+  CreateOrOpenShellAction,
+  EvaluateOvertimeDateConflictParams,
+  OvertimeBlockInput,
+  OvertimeDateConflictEvaluation,
+  OvertimeDateConflictMatch,
+  OvertimeDateConflictMode,
+  OvertimeFormItemRecord,
+  OvertimeFormRecord,
+  OvertimeFormWithItems,
+  OvertimeLeaveCheckEntry,
+  OvertimeParticipantInput,
+  OvertimeRealtimeChangeEvent,
+  PrintableOvertimeDateGroup,
+  PrintableOvertimeRow,
+  SaveOvertimeFormInput,
+  SoftDeleteOvertimeResult,
+} from '../utils/overtimeFormsService';
+
+// ==========================================
+// TỪ ĐIỂN TĂNG CA VIỆT - HÀN (OVERTIME GLOSSARY)
+// ==========================================
+export {
+  applyRealtimeGlossaryPayload,
+  approveGlossaryEntry,
+  areTargetGroupsEqual,
+  createManualGlossaryEntry,
+  deleteGlossaryEntry,
+  fetchOvertimeGlossary,
+  filterAndSortGlossaryForCombobox,
+  findExactGlossaryMatch,
+  formatGlossaryDateDDMMYYYY,
+  isGlossaryEntryVerified,
+  loadOvertimeGlossary,
+  mapSupabaseGlossaryRowToEntry,
+  normalizeGlossaryKey,
+  normalizeGlossaryRow,
+  normalizeTargetGroups,
+  serializeTargetGroupsForSupabase,
+  subscribeToOvertimeGlossaryRealtime,
+  suggestFactoryKoreanTranslation,
+  updateGlossaryEntry,
+  updateGlossaryEntryKr,
+  upsertOvertimeGlossaryEntry,
+} from '../utils/overtimeGlossaryService';
+export type {
+  OvertimeGlossaryEntry,
+  OvertimeGlossaryRealtimeEvent,
+  SupabaseGlossaryRow,
+} from '../utils/overtimeGlossaryService';

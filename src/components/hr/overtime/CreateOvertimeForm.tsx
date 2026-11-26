@@ -20,43 +20,41 @@ import {
   Trash2,
   X,
 } from 'lucide-react';  
-import { DepartmentGroup, Employee, LeaveRecord } from '../../types/hr';
-import { INITIAL_DEPARTMENT_GROUPS, INITIAL_EMPLOYEES } from '../../data/mockData';
+import { DepartmentGroup, Employee, LeaveRecord } from '../../../types/hr';
+import { INITIAL_DEPARTMENT_GROUPS, INITIAL_EMPLOYEES } from '../../../data/mockData';
 import {
   formatNumberVN,
   getFriendlyErrorMessage,
-} from '../../utils/errorAndSecurityService';
+} from '../../../utils/errorAndSecurityService';
 import {
   buildOnLeaveEmployeeMapForDate,
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
   fetchActiveLeaveRecordsForOvertimeCheck,
+  fetchOvertimeGlossary,
+  filterAndSortGlossaryForCombobox,
+  findExactGlossaryMatch,
   formatOvertimeFormCodeDisplay,
   generateOvertimeFormCode,
   getLeaveTypeShortLabel,
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
+  normalizeTargetGroups,
   OvertimeFormWithItems,
+  OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
   reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
-} from '../../utils/overtimeFormsService';
-import {
-  fetchOvertimeGlossary,
-  filterAndSortGlossaryForCombobox,
-  findExactGlossaryMatch,
-  normalizeTargetGroups,
-  OvertimeGlossaryEntry,
   suggestFactoryKoreanTranslation,
   upsertOvertimeGlossaryEntry,
-} from '../../utils/overtimeGlossaryService';
+} from '../../../services/hrService';
 import {
   buildCombinedReasonText,
   formatDateToFormStyle,
   formatDepartmentHeaderLabel,
   formatTimeToFormStyle,
   overtimeExportService,
-} from '../../utils/overtimeExportService';
+} from '../../../utils/overtimeExportService';
 import {
   calculateActualOvertimeHours,
   type CompanyHoliday,
@@ -69,7 +67,7 @@ import {
   type OvertimeSettings,
   sanitize24hTimeInput,
   type WorkShift,
-} from '../../utils/workScheduleLogic';
+} from '../../../utils/workScheduleLogic';
 
 export interface OvertimeParticipant {
   employeeId: string;
