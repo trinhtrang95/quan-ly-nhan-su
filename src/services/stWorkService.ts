@@ -3,7 +3,6 @@ import {
   encodeStepsIntoNotes,
   extractEncodedStepsFromNotes,
   getLocalIsoDateToday,
-  isNewProductCompleted,
   normalizeStChangeRequestRow,
   normalizeStCustomerQuoteRow,
   normalizeStCustomerRow,
@@ -398,7 +397,7 @@ export async function createStProduct(input: {
     };
 
     let statusRows: Record<string, unknown>[] = [];
-    if (supportsNativeTwoStepColumns !== false) {
+    if (supportsNativeTwoStepColumns === true) {
       try {
         statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
           'st_new_product_status?select=*',
@@ -407,6 +406,9 @@ export async function createStProduct(input: {
             headers: { Prefer: 'return=representation' },
             body: JSON.stringify({
               ...baseLegacyPayload,
+              ...(supportsNativeSigningColumns !== false
+                ? { has_signing: false, signing_date: null }
+                : {}),
               has_process_erp: false,
               process_erp_date: null,
               has_st: false,
@@ -424,15 +426,36 @@ export async function createStProduct(input: {
       }
     }
 
-    if (supportsNativeTwoStepColumns === false) {
-      statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
-        'st_new_product_status?select=*',
-        {
-          method: 'POST',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify(baseLegacyPayload),
+    if (supportsNativeTwoStepColumns !== true) {
+      try {
+        statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
+          'st_new_product_status?select=*',
+          {
+            method: 'POST',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({
+              ...baseLegacyPayload,
+              ...(supportsNativeSigningColumns !== false
+                ? { has_signing: false, signing_date: null }
+                : {}),
+            }),
+          }
+        );
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err) && supportsNativeSigningColumns !== false) {
+          supportsNativeSigningColumns = false;
+          statusRows = await overtimeSupabase.request<Record<string, unknown>[]>(
+            'st_new_product_status?select=*',
+            {
+              method: 'POST',
+              headers: { Prefer: 'return=representation' },
+              body: JSON.stringify(baseLegacyPayload),
+            }
+          );
+        } else {
+          throw err;
         }
-      );
+      }
     }
 
     if (Array.isArray(statusRows) && statusRows[0]) {
@@ -688,7 +711,10 @@ export async function batchImportStProducts(input: {
             price_applied_at: null,
             notes: noteText,
             updated_at: nowIso,
-            ...(supportsNativeTwoStepColumns !== false
+            ...(supportsNativeSigningColumns !== false
+              ? { has_signing: false, signing_date: null }
+              : {}),
+            ...(supportsNativeTwoStepColumns === true
               ? {
                   has_process_erp: false,
                   process_erp_date: null,
@@ -727,12 +753,10 @@ export async function batchImportStProducts(input: {
               body: JSON.stringify(missingStatusPayloads),
             }
           );
-          if (supportsNativeTwoStepColumns !== false) {
-            supportsNativeTwoStepColumns = true;
-          }
         } catch (err) {
           if (isMissingWorkflowColumnError(err)) {
             supportsNativeTwoStepColumns = false;
+            supportsNativeSigningColumns = false;
             const legacyPayloads = missingStatusPayloads.map((p) => ({
               product_id: p.product_id,
               has_process: false,
@@ -861,6 +885,31 @@ export async function batchImportStProducts(input: {
 // 4. ST NEW PRODUCT STATUS (`st_new_product_status`)
 // ==========================================
 
+export const SUPABASE_ST_NEW_PRODUCT_STATUS_SQL = `-- 1. Đảm bảo bảng st_new_product_status có đầy đủ cột Trình ký (has_signing, signing_date)
+ALTER TABLE public.st_new_product_status
+  ADD COLUMN IF NOT EXISTS has_signing BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS signing_date TEXT DEFAULT NULL;
+
+-- 2. Đồng bộ trạng thái Trình ký cho các mã hàng đã hoàn thành ST trước đây (nếu chưa có)
+UPDATE public.st_new_product_status
+SET
+  has_signing = TRUE,
+  signing_date = COALESCE(signing_date, price_applied_at)
+WHERE price_applied_at IS NOT NULL
+  AND COALESCE(has_signing, FALSE) = FALSE;
+
+-- 3. Chuẩn hóa RLS & Realtime cho bảng st_new_product_status
+ALTER TABLE public.st_new_product_status ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public full access on st_new_product_status" ON public.st_new_product_status;
+CREATE POLICY "Allow public full access on st_new_product_status"
+  ON public.st_new_product_status
+  FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE public.st_new_product_status REPLICA IDENTITY FULL;`;
+
 let supportsNativeTwoStepColumns: boolean | null = null;
 let supportsNativeStageColumns: boolean | null = null;
 let supportsNativeSigningColumns: boolean | null = null;
@@ -873,6 +922,19 @@ function isMissingWorkflowColumnError(err: unknown): boolean {
     msg.includes('does not exist') ||
     msg.includes('Could not find the')
   );
+}
+
+function isOnConflictConstraintError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return (
+    msg.includes('42P10') ||
+    msg.includes('no unique or exclusion constraint matching the ON CONFLICT')
+  );
+}
+
+function isUniqueViolationError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return msg.includes('23505') || msg.includes('duplicate key value');
 }
 
 export interface UpsertStNewProductStatusInput {
@@ -914,24 +976,29 @@ export interface UpsertStNewProductStatusInput {
 export async function upsertStNewProductStatus(
   input: UpsertStNewProductStatusInput
 ): Promise<StNewProductStatus> {
+  if (!input.product_id) {
+    throw new Error('Thiếu mã định danh sản phẩm (product_id) để lưu tiến độ.');
+  }
+
   const nowIso = new Date().toISOString();
   const {
-    nativeWithSigningPayload,
-    nativeWithoutSigningPayload,
-    fallbackPayload,
+    nativeFullPayload,
+    actualSchemaPayload,
+    legacyWithoutSigningPayload,
   } = buildStatusPayloads(input, nowIso);
 
-  let targetId = input.id || '';
-  if (!targetId) {
+  const findExistingStatusId = async (): Promise<string> => {
     const existing = await overtimeSupabase.request<Record<string, unknown>[]>(
       `st_new_product_status?product_id=eq.${encodeURIComponent(
         input.product_id
       )}&select=id&limit=1`
     );
-    if (Array.isArray(existing) && existing[0]?.id) {
-      targetId = String(existing[0].id);
-    }
-  }
+    return Array.isArray(existing) && existing[0]?.id
+      ? String(existing[0].id)
+      : '';
+  };
+
+  let targetId = input.id || (await findExistingStatusId());
 
   const sendSave = async (bodyPayload: Record<string, unknown>) => {
     if (targetId) {
@@ -946,49 +1013,97 @@ export async function upsertStNewProductStatus(
       if (Array.isArray(rows) && rows[0]) {
         return normalizeStNewProductStatusRow(rows[0]);
       }
-    }
-
-    const inserted = await overtimeSupabase.request<Record<string, unknown>[]>(
-      'st_new_product_status?select=*',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(bodyPayload),
-      }
-    );
-    if (!Array.isArray(inserted) || !inserted[0]) {
-      throw new Error('Không thể lưu trạng thái Đơn giá mới.');
-    }
-    return normalizeStNewProductStatusRow(inserted[0]);
-  };
-
-  if (
-    supportsNativeTwoStepColumns !== false &&
-    supportsNativeStageColumns !== false
-  ) {
-    if (supportsNativeSigningColumns !== false) {
-      try {
-        const saved = await sendSave(nativeWithSigningPayload);
-        supportsNativeTwoStepColumns = true;
-        supportsNativeStageColumns = true;
-        supportsNativeSigningColumns = true;
-        return saved;
-      } catch (err) {
-        if (isMissingWorkflowColumnError(err)) {
-          supportsNativeSigningColumns = false;
-        } else {
-          throw err;
+      // Fallback if targetId was stale: re-check by product_id
+      const refreshedId = await findExistingStatusId();
+      if (refreshedId && refreshedId !== targetId) {
+        targetId = refreshedId;
+        const retryRows = await overtimeSupabase.request<
+          Record<string, unknown>[]
+        >(
+          `st_new_product_status?id=eq.${encodeURIComponent(
+            targetId
+          )}&select=*`,
+          {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify(bodyPayload),
+          }
+        );
+        if (Array.isArray(retryRows) && retryRows[0]) {
+          return normalizeStNewProductStatusRow(retryRows[0]);
         }
       }
     }
 
+    // No existing record found -> upsert by product_id (or insert + fallback PATCH on duplicate)
     try {
-      const saved = await sendSave(nativeWithoutSigningPayload);
-      supportsNativeTwoStepColumns = true;
-      supportsNativeStageColumns = true;
-      return saved;
+      const upserted = await overtimeSupabase.request<
+        Record<string, unknown>[]
+      >('st_new_product_status?on_conflict=product_id&select=*', {
+        method: 'POST',
+        headers: {
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(bodyPayload),
+      });
+      if (Array.isArray(upserted) && upserted[0]) {
+        return normalizeStNewProductStatusRow(upserted[0]);
+      }
+    } catch (err) {
+      if (!isOnConflictConstraintError(err)) {
+        throw err;
+      }
+    }
+
+    try {
+      const inserted = await overtimeSupabase.request<
+        Record<string, unknown>[]
+      >('st_new_product_status?select=*', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(bodyPayload),
+      });
+      if (Array.isArray(inserted) && inserted[0]) {
+        return normalizeStNewProductStatusRow(inserted[0]);
+      }
+    } catch (err) {
+      if (isUniqueViolationError(err)) {
+        const existingId = await findExistingStatusId();
+        if (existingId) {
+          targetId = existingId;
+          const patched = await overtimeSupabase.request<
+            Record<string, unknown>[]
+          >(
+            `st_new_product_status?id=eq.${encodeURIComponent(
+              existingId
+            )}&select=*`,
+            {
+              method: 'PATCH',
+              headers: { Prefer: 'return=representation' },
+              body: JSON.stringify(bodyPayload),
+            }
+          );
+          if (Array.isArray(patched) && patched[0]) {
+            return normalizeStNewProductStatusRow(patched[0]);
+          }
+        }
+      }
+      throw err;
+    }
+
+    throw new Error('Supabase không trả về bản ghi sau khi lưu tiến độ.');
+  };
+
+  if (
+    supportsNativeTwoStepColumns === true &&
+    supportsNativeStageColumns === true &&
+    supportsNativeSigningColumns !== false
+  ) {
+    try {
+      return await sendSave(nativeFullPayload);
     } catch (err) {
       if (isMissingWorkflowColumnError(err)) {
+        supportsNativeTwoStepColumns = false;
         supportsNativeStageColumns = false;
       } else {
         throw err;
@@ -996,16 +1111,30 @@ export async function upsertStNewProductStatus(
     }
   }
 
-  return sendSave(fallbackPayload);
+  if (supportsNativeSigningColumns !== false) {
+    try {
+      const saved = await sendSave(actualSchemaPayload);
+      supportsNativeSigningColumns = true;
+      return saved;
+    } catch (err) {
+      if (isMissingWorkflowColumnError(err)) {
+        supportsNativeSigningColumns = false;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  return sendSave(legacyWithoutSigningPayload);
 }
 
 function buildStatusPayloads(
   input: UpsertStNewProductStatusInput,
   nowIso: string
 ): {
-  nativeWithSigningPayload: Record<string, unknown>;
-  nativeWithoutSigningPayload: Record<string, unknown>;
-  fallbackPayload: Record<string, unknown>;
+  nativeFullPayload: Record<string, unknown>;
+  actualSchemaPayload: Record<string, unknown>;
+  legacyWithoutSigningPayload: Record<string, unknown>;
 } {
   const stageFields = {
     has_stage_win: Boolean(input.has_stage_win),
@@ -1033,18 +1162,13 @@ function buildStatusPayloads(
     has_st: Boolean(input.has_st),
     st_date: input.st_date || null,
   };
-  const completed = isNewProductCompleted({
-    ...twoStepValues,
-    ...stageFields,
-    ...signingFields,
-  });
   const cleanUserNotes = input.notes?.trim() || null;
 
-  const legacyBasePayload = {
+  const actualBaseWithoutSigning = {
     product_id: input.product_id,
     has_process: Boolean(twoStepValues.has_process_erp),
     process_created_at: twoStepValues.process_erp_date || null,
-    has_unit_price: Boolean(input.has_quote),
+    has_unit_price: Boolean(twoStepValues.has_st || input.has_quote),
     unit_price:
       input.unit_price !== null &&
       input.unit_price !== undefined &&
@@ -1053,7 +1177,7 @@ function buildStatusPayloads(
         : null,
     currency: (input.currency || 'VND').trim() || 'VND',
     price_created_at: input.quote_date || null,
-    price_applied_at: completed ? twoStepValues.st_date || null : null,
+    price_applied_at: twoStepValues.st_date || null,
     updated_at: nowIso,
   };
 
@@ -1075,30 +1199,29 @@ function buildStatusPayloads(
       : {}),
   });
 
-  const nativeWithSigningPayload = {
-    ...legacyBasePayload,
-    ...twoStepValues,
-    ...stageFields,
+  const actualSchemaPayload = {
+    ...actualBaseWithoutSigning,
     ...signingFields,
-    notes: cleanUserNotes,
-  };
-
-  const nativeWithoutSigningPayload = {
-    ...legacyBasePayload,
-    ...twoStepValues,
-    ...stageFields,
     notes: encodedNotes,
   };
 
-  const fallbackPayload = {
-    ...legacyBasePayload,
+  const nativeFullPayload = {
+    ...actualBaseWithoutSigning,
+    ...twoStepValues,
+    ...stageFields,
+    ...signingFields,
+    notes: encodedNotes,
+  };
+
+  const legacyWithoutSigningPayload = {
+    ...actualBaseWithoutSigning,
     notes: encodedNotes,
   };
 
   return {
-    nativeWithSigningPayload,
-    nativeWithoutSigningPayload,
-    fallbackPayload,
+    nativeFullPayload,
+    actualSchemaPayload,
+    legacyWithoutSigningPayload,
   };
 }
 
@@ -1132,16 +1255,26 @@ export async function ensureMissingStNewProductStatuses(
       updated_at: nowIso,
     }));
 
-    const tryPost = async (withTwoStep: boolean) => {
-      const body = withTwoStep
-        ? legacyPayloads.map((p) => ({
-            ...p,
-            has_process_erp: false,
-            process_erp_date: null,
-            has_st: false,
-            st_date: null,
-          }))
-        : legacyPayloads;
+    const tryPost = async (mode: 'two_step' | 'with_signing' | 'legacy') => {
+      const body =
+        mode === 'two_step'
+          ? legacyPayloads.map((p) => ({
+              ...p,
+              ...(supportsNativeSigningColumns !== false
+                ? { has_signing: false, signing_date: null }
+                : {}),
+              has_process_erp: false,
+              process_erp_date: null,
+              has_st: false,
+              st_date: null,
+            }))
+          : mode === 'with_signing'
+          ? legacyPayloads.map((p) => ({
+              ...p,
+              has_signing: false,
+              signing_date: null,
+            }))
+          : legacyPayloads;
       const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
         'st_new_product_status?select=*',
         {
@@ -1153,10 +1286,9 @@ export async function ensureMissingStNewProductStatuses(
       return Array.isArray(rows) ? rows.map(normalizeStNewProductStatusRow) : [];
     };
 
-    if (supportsNativeTwoStepColumns !== false) {
+    if (supportsNativeTwoStepColumns === true) {
       try {
-        const res = await tryPost(true);
-        supportsNativeTwoStepColumns = true;
+        const res = await tryPost('two_step');
         created.push(...res);
         continue;
       } catch (err) {
@@ -1168,7 +1300,22 @@ export async function ensureMissingStNewProductStatuses(
       }
     }
 
-    const res = await tryPost(false);
+    if (supportsNativeSigningColumns !== false) {
+      try {
+        const res = await tryPost('with_signing');
+        supportsNativeSigningColumns = true;
+        created.push(...res);
+        continue;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeSigningColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const res = await tryPost('legacy');
     created.push(...res);
   }
 
@@ -1222,27 +1369,30 @@ export async function batchUpsertStNewProductStatuses(
 
   const savedAll: StNewProductStatus[] = [];
 
+  const pickPayload = (
+    item: UpsertStNewProductStatusInput,
+    mode: 'native_full' | 'actual_schema' | 'legacy_no_signing'
+  ): Record<string, unknown> => {
+    const {
+      nativeFullPayload,
+      actualSchemaPayload,
+      legacyWithoutSigningPayload,
+    } = buildStatusPayloads(item, nowIso);
+    return mode === 'native_full'
+      ? nativeFullPayload
+      : mode === 'actual_schema'
+      ? actualSchemaPayload
+      : legacyWithoutSigningPayload;
+  };
+
   const sendBatchUpdate = async (
     chunk: UpsertStNewProductStatusInput[],
-    mode: 'native_with_signing' | 'native_no_signing' | 'fallback'
+    mode: 'native_full' | 'actual_schema' | 'legacy_no_signing'
   ): Promise<StNewProductStatus[]> => {
-    const payload = chunk.map((item) => {
-      const {
-        nativeWithSigningPayload,
-        nativeWithoutSigningPayload,
-        fallbackPayload,
-      } = buildStatusPayloads(item, nowIso);
-      const body =
-        mode === 'native_with_signing'
-          ? nativeWithSigningPayload
-          : mode === 'native_no_signing'
-          ? nativeWithoutSigningPayload
-          : fallbackPayload;
-      return {
-        id: item.id,
-        ...body,
-      };
-    });
+    const payload = chunk.map((item) => ({
+      id: item.id,
+      ...pickPayload(item, mode),
+    }));
     const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
       'st_new_product_status?on_conflict=id&select=*',
       {
@@ -1256,20 +1406,9 @@ export async function batchUpsertStNewProductStatuses(
 
   const sendBatchInsert = async (
     chunk: UpsertStNewProductStatusInput[],
-    mode: 'native_with_signing' | 'native_no_signing' | 'fallback'
+    mode: 'native_full' | 'actual_schema' | 'legacy_no_signing'
   ): Promise<StNewProductStatus[]> => {
-    const payload = chunk.map((item) => {
-      const {
-        nativeWithSigningPayload,
-        nativeWithoutSigningPayload,
-        fallbackPayload,
-      } = buildStatusPayloads(item, nowIso);
-      return mode === 'native_with_signing'
-        ? nativeWithSigningPayload
-        : mode === 'native_no_signing'
-        ? nativeWithoutSigningPayload
-        : fallbackPayload;
-    });
+    const payload = chunk.map((item) => pickPayload(item, mode));
     const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
       'st_new_product_status?select=*',
       {
@@ -1283,81 +1422,79 @@ export async function batchUpsertStNewProductStatuses(
 
   for (const chunk of chunkArray(toUpdate, 50)) {
     if (
-      supportsNativeTwoStepColumns !== false &&
-      supportsNativeStageColumns !== false
+      supportsNativeTwoStepColumns === true &&
+      supportsNativeStageColumns === true &&
+      supportsNativeSigningColumns !== false
     ) {
-      if (supportsNativeSigningColumns !== false) {
-        try {
-          const res = await sendBatchUpdate(chunk, 'native_with_signing');
-          supportsNativeTwoStepColumns = true;
-          supportsNativeStageColumns = true;
-          supportsNativeSigningColumns = true;
-          savedAll.push(...res);
-          continue;
-        } catch (err) {
-          if (isMissingWorkflowColumnError(err)) {
-            supportsNativeSigningColumns = false;
-          } else {
-            throw err;
-          }
-        }
-      }
-
       try {
-        const res = await sendBatchUpdate(chunk, 'native_no_signing');
-        supportsNativeTwoStepColumns = true;
-        supportsNativeStageColumns = true;
+        const res = await sendBatchUpdate(chunk, 'native_full');
         savedAll.push(...res);
         continue;
       } catch (err) {
         if (isMissingWorkflowColumnError(err)) {
+          supportsNativeTwoStepColumns = false;
           supportsNativeStageColumns = false;
         } else {
           throw err;
         }
       }
     }
-    const res = await sendBatchUpdate(chunk, 'fallback');
+
+    if (supportsNativeSigningColumns !== false) {
+      try {
+        const res = await sendBatchUpdate(chunk, 'actual_schema');
+        supportsNativeSigningColumns = true;
+        savedAll.push(...res);
+        continue;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeSigningColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const res = await sendBatchUpdate(chunk, 'legacy_no_signing');
     savedAll.push(...res);
   }
 
   for (const chunk of chunkArray(toInsert, 50)) {
     if (
-      supportsNativeTwoStepColumns !== false &&
-      supportsNativeStageColumns !== false
+      supportsNativeTwoStepColumns === true &&
+      supportsNativeStageColumns === true &&
+      supportsNativeSigningColumns !== false
     ) {
-      if (supportsNativeSigningColumns !== false) {
-        try {
-          const res = await sendBatchInsert(chunk, 'native_with_signing');
-          supportsNativeTwoStepColumns = true;
-          supportsNativeStageColumns = true;
-          supportsNativeSigningColumns = true;
-          savedAll.push(...res);
-          continue;
-        } catch (err) {
-          if (isMissingWorkflowColumnError(err)) {
-            supportsNativeSigningColumns = false;
-          } else {
-            throw err;
-          }
-        }
-      }
-
       try {
-        const res = await sendBatchInsert(chunk, 'native_no_signing');
-        supportsNativeTwoStepColumns = true;
-        supportsNativeStageColumns = true;
+        const res = await sendBatchInsert(chunk, 'native_full');
         savedAll.push(...res);
         continue;
       } catch (err) {
         if (isMissingWorkflowColumnError(err)) {
+          supportsNativeTwoStepColumns = false;
           supportsNativeStageColumns = false;
         } else {
           throw err;
         }
       }
     }
-    const res = await sendBatchInsert(chunk, 'fallback');
+
+    if (supportsNativeSigningColumns !== false) {
+      try {
+        const res = await sendBatchInsert(chunk, 'actual_schema');
+        supportsNativeSigningColumns = true;
+        savedAll.push(...res);
+        continue;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeSigningColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const res = await sendBatchInsert(chunk, 'legacy_no_signing');
     savedAll.push(...res);
   }
 

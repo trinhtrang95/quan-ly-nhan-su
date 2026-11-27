@@ -1277,11 +1277,12 @@ export function normalizeStNewProductStatusRow(
     ? Boolean(row.has_st)
     : encodedSteps
     ? Boolean(encodedSteps.hst)
-    : Boolean(has_process_erp && legacyAppliedDate);
+    : Boolean((has_process_erp || row.has_unit_price) && legacyAppliedDate);
   const st_date = hasNativeWorkflowColumns
     ? normDate(row.st_date)
     : encodedSteps
-    ? normDate(encodedSteps.std)
+    ? normDate(encodedSteps.std) ||
+      (encodedSteps.hst ? legacyAppliedDate : null)
     : legacyAppliedDate;
 
   const readStageBool = (

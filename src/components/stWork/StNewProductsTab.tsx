@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
   ArrowUpDown,
   Check,
   CheckCircle2,
@@ -14,6 +15,21 @@ import {
   X,
 } from 'lucide-react';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
+
+function formatStSaveError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err || '').trim();
+  if (!raw) return getFriendlyErrorMessage(err);
+  if (raw.includes('42501') || raw.toLowerCase().includes('row-level security')) {
+    return 'Lỗi phân quyền Supabase (RLS 42501): Không có quyền ghi bảng st_new_product_status.';
+  }
+  if (raw.includes('Failed to fetch') || raw.includes('AbortError')) {
+    return 'Lỗi kết nối mạng tới Supabase. Vui lòng kiểm tra kết nối và thử lại.';
+  }
+  if (raw.includes('Supabase REST') || raw.includes('PGRST') || raw.includes('Thiếu')) {
+    return `Lỗi lưu dữ liệu Supabase: ${raw.slice(0, 180)}`;
+  }
+  return `Không thể lưu tiến độ: ${raw.slice(0, 180)}`;
+}
 import {
   buildSigningInitialState,
   buildSigningStatusPayload,
@@ -152,6 +168,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     toModalProgressState(null)
   );
   const [miniNotes, setMiniNotes] = useState<string>('');
+  const [miniError, setMiniError] = useState<string>('');
   const [isSavingMini, setIsSavingMini] = useState<boolean>(false);
 
   // Modal B: Full Product Detail Modal (opened by clicking Mã hàng link)
@@ -177,6 +194,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   } | null>(null);
   const [singleStageDone, setSingleStageDone] = useState<boolean>(false);
   const [singleStageDate, setSingleStageDate] = useState<string>('');
+  const [singleStageError, setSingleStageError] = useState<string>('');
   const [isSavingSingleStage, setIsSavingSingleStage] = useState<boolean>(false);
 
   // Modal F: Quick-Confirm Signing Mini Modal (triggered by clicking ĐANG TRÌNH KÝ cell)
@@ -185,6 +203,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   );
   const [signingDone, setSigningDone] = useState<boolean>(false);
   const [signingDate, setSigningDate] = useState<string>('');
+  const [signingError, setSigningError] = useState<string>('');
   const [isSavingSigning, setIsSavingSigning] = useState<boolean>(false);
 
   useEffect(() => {
@@ -288,10 +307,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     setProgressModalItem(item);
     setMiniState(toModalProgressState(item.status));
     setMiniNotes(item.status?.notes || '');
+    setMiniError('');
   };
 
   const handleCloseProgressModal = () => {
     if (isSavingMini) return;
+    setMiniError('');
     setProgressModalItem(null);
   };
 
@@ -324,6 +345,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     if (!progressModalItem) return;
 
     const pid = progressModalItem.product.id;
+    setMiniError('');
     setIsSavingMini(true);
     try {
       const savedStatus = await upsertStNewProductStatus({
@@ -361,7 +383,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       );
       setProgressModalItem(null);
     } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
+      const msg = formatStSaveError(err);
+      setMiniError(msg);
+      onShowToast?.(msg);
     } finally {
       setIsSavingMini(false);
     }
@@ -375,10 +399,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     setSingleStageTarget({ item, stage });
     setSingleStageDone(initial.done);
     setSingleStageDate(initial.date);
+    setSingleStageError('');
   };
 
   const handleCloseSingleStageModal = () => {
     if (isSavingSingleStage) return;
+    setSingleStageError('');
     setSingleStageTarget(null);
   };
 
@@ -387,6 +413,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     if (!singleStageTarget || isSavingSingleStage) return;
 
     const { item, stage } = singleStageTarget;
+    setSingleStageError('');
     setIsSavingSingleStage(true);
     try {
       const payload = buildSingleStageStatusPayload(
@@ -405,7 +432,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       );
       setSingleStageTarget(null);
     } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
+      const msg = formatStSaveError(err);
+      setSingleStageError(msg);
+      onShowToast?.(msg);
     } finally {
       setIsSavingSingleStage(false);
     }
@@ -416,10 +445,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     setSigningTarget(item);
     setSigningDone(initial.done);
     setSigningDate(initial.date);
+    setSigningError('');
   };
 
   const handleCloseSigningModal = () => {
     if (isSavingSigning) return;
+    setSigningError('');
     setSigningTarget(null);
   };
 
@@ -428,6 +459,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
     if (!signingTarget || isSavingSigning) return;
 
     const item = signingTarget;
+    setSigningError('');
     setIsSavingSigning(true);
     try {
       const payload = buildSigningStatusPayload(item, signingDone, signingDate);
@@ -441,7 +473,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       );
       setSigningTarget(null);
     } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
+      const msg = formatStSaveError(err);
+      setSigningError(msg);
+      onShowToast?.(msg);
     } finally {
       setIsSavingSigning(false);
     }
@@ -1342,6 +1376,17 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] resize-none"
                   />
                 </div>
+
+                {miniError && (
+                  <div
+                    role="alert"
+                    data-testid="st-mini-error"
+                    className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700 flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{miniError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
@@ -1471,6 +1516,17 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     className="w-full h-9 px-2.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
                   />
                 </div>
+
+                {singleStageError && (
+                  <div
+                    role="alert"
+                    data-testid="st-single-stage-error"
+                    className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700 flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{singleStageError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
@@ -1600,6 +1656,17 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     className="w-full h-9 px-2.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
                   />
                 </div>
+
+                {signingError && (
+                  <div
+                    role="alert"
+                    data-testid="st-signing-mini-error"
+                    className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700 flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{signingError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
