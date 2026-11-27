@@ -483,7 +483,15 @@ export function computeStagesProgress(
       nextPendingStageKey = stage.key;
     }
   }
-  const percentage = Math.round((completedCount / 7) * 100);
+  const hasCreatedProductScore = 10;
+  const hasProcessErpScore = status?.has_process_erp ? 10 : 0;
+  const stagesScore = completedCount * 10;
+  const hasStScore =
+    status?.has_st && toIsoDateOnly(status?.st_date) ? 10 : 0;
+  const percentage = Math.min(
+    100,
+    hasCreatedProductScore + hasProcessErpScore + stagesScore + hasStScore
+  );
   return {
     completedCount,
     totalCount: 7,

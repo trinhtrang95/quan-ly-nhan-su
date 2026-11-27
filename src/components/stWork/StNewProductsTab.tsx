@@ -669,13 +669,13 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   CÔNG ĐOẠN
                 </th>
                 <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
-                  TỶ LỆ %
-                </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   ST
                 </th>
                 <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   NGÀY ÁP DỤNG
+                </th>
+                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                  TỶ LỆ %
                 </th>
                 <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   HIỆN TRẠNG
@@ -821,37 +821,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       </div>
                     </td>
 
-                    {/* 8. Tỷ lệ % */}
-                    <td className="px-1 py-2 border-r border-slate-100 align-middle whitespace-nowrap">
-                      <div className="flex items-center justify-center gap-1">
-                        <div className="w-6 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
-                          <div
-                            className={`h-full rounded-full transition-all duration-200 ${
-                              percentage === 100
-                                ? 'bg-emerald-600'
-                                : percentage > 0
-                                ? 'bg-[#14539E]'
-                                : 'bg-slate-300'
-                            }`}
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
-                        <span
-                          data-testid={`st-row-percent-${p.product_code}`}
-                          className={`font-mono text-[10.5px] font-bold tabular-nums w-7 text-right ${
-                            percentage === 100
-                              ? 'text-emerald-700'
-                              : percentage > 0
-                              ? 'text-[#14539E]'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          {percentage}%
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* 9. ST (Icon-only) */}
+                    {/* 8. ST (Icon-only) */}
                     <td className="px-1 py-2 border-r border-slate-100 text-center align-middle">
                       {hasSt ? (
                         <span
@@ -879,9 +849,48 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       )}
                     </td>
 
-                    {/* 10. Ngày áp dụng */}
+                    {/* 9. Ngày áp dụng */}
                     <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
                       {formatStDateVN(st?.st_date)}
+                    </td>
+
+                    {/* 10. Tỷ lệ % (10 mốc × 10% = 100%) */}
+                    <td
+                      title={`Tạo mã: 10% · QT ERP: ${
+                        hasProcessErp ? '+10%' : '0%'
+                      } · Công đoạn: ${item.stageProgress.completedCount}/7 (+${
+                        item.stageProgress.completedCount * 10
+                      }%) · ST: ${
+                        hasSt && st?.st_date ? '+10%' : '0%'
+                      } = ${percentage}%`}
+                      className="px-1 py-2 border-r border-slate-100 align-middle whitespace-nowrap"
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <div className="w-5 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
+                          <div
+                            className={`h-full rounded-full transition-all duration-200 ${
+                              percentage === 100
+                                ? 'bg-emerald-600'
+                                : percentage > 0
+                                ? 'bg-[#14539E]'
+                                : 'bg-slate-300'
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                        <span
+                          data-testid={`st-row-percent-${p.product_code}`}
+                          className={`font-mono text-[10.5px] font-bold tabular-nums w-[30px] text-right ${
+                            percentage === 100
+                              ? 'text-emerald-700'
+                              : percentage > 0
+                              ? 'text-[#14539E]'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          {percentage}%
+                        </span>
+                      </div>
                     </td>
 
                     {/* 11. Hiện trạng (Auto Badge: Hoàn thành / Đang làm) */}
@@ -980,6 +989,45 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
 
               {/* Body */}
               <div className="p-4 overflow-y-auto space-y-3.5 text-xs">
+                {/* Tổng quan tiến độ 10 mốc × 10% */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
+                    <span className="font-bold text-slate-800">
+                      Tỷ lệ hoàn thành:
+                    </span>
+                    <span className="text-slate-500">
+                      Tạo mã 10% + QT ERP {miniState.has_process_erp ? '10%' : '0%'} + {doneStages}/7 CĐ ({doneStages * 10}%) + ST{' '}
+                      {miniState.has_st && miniState.st_date ? '10%' : '0%'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-200 ${
+                          pct === 100
+                            ? 'bg-emerald-600'
+                            : pct > 0
+                            ? 'bg-[#14539E]'
+                            : 'bg-slate-300'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span
+                      data-testid="st-mini-percent-label"
+                      className={`font-mono text-xs font-bold tabular-nums ${
+                        pct === 100
+                          ? 'text-emerald-700'
+                          : pct > 0
+                          ? 'text-[#14539E]'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      {pct}%
+                    </span>
+                  </div>
+                </div>
+
                 {/* 1. Quy trình ERP */}
                 <div
                   className={`rounded-lg border px-3 py-2.5 flex flex-wrap items-center justify-between gap-3 transition-colors ${
@@ -1026,38 +1074,15 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   </div>
                 </div>
 
-                {/* 2. Danh sách 7 công đoạn + Live Tỷ lệ % */}
+                {/* 2. Danh sách 7 công đoạn */}
                 <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-bold text-slate-800">
                       2. Danh sách 7 công đoạn ({doneStages}/7)
                     </span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-200 ${
-                            pct === 100
-                              ? 'bg-emerald-600'
-                              : pct > 0
-                              ? 'bg-[#14539E]'
-                              : 'bg-slate-300'
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span
-                        data-testid="st-mini-percent-label"
-                        className={`font-mono text-xs font-bold tabular-nums ${
-                          pct === 100
-                            ? 'text-emerald-700'
-                            : pct > 0
-                            ? 'text-[#14539E]'
-                            : 'text-slate-500'
-                        }`}
-                      >
-                        {pct}%
-                      </span>
-                    </div>
+                    <span className="font-mono text-[11px] font-semibold text-slate-500 tabular-nums">
+                      +{doneStages * 10}% / 70%
+                    </span>
                   </div>
 
                   <div className="space-y-1.5">
@@ -1499,14 +1524,35 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
 
                 {/* Progress Summary */}
                 <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="font-bold uppercase tracking-wide text-slate-700">
                       Tiến độ thực hiện đơn giá mới
                     </h4>
-                    <span className="font-mono font-bold text-[#14539E]">
-                      {detailModalItem.stageProgress.percentage}% (
-                      {detailModalItem.stageProgress.completedCount}/7 công đoạn)
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            detailModalItem.stageProgress.percentage === 100
+                              ? 'bg-emerald-600'
+                              : 'bg-[#14539E]'
+                          }`}
+                          style={{
+                            width: `${detailModalItem.stageProgress.percentage}%`,
+                          }}
+                        />
+                      </div>
+                      <span
+                        data-testid="st-detail-percent-label"
+                        className={`font-mono font-bold tabular-nums ${
+                          detailModalItem.stageProgress.percentage === 100
+                            ? 'text-emerald-700'
+                            : 'text-[#14539E]'
+                        }`}
+                      >
+                        {detailModalItem.stageProgress.percentage}% (
+                        {detailModalItem.stageProgress.completedCount}/7 công đoạn)
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

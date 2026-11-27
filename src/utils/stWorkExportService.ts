@@ -307,7 +307,7 @@ export function buildStReportWorkbook(
       label: 'Hoàn thành',
       count: completedAllCount,
       group: 'Hoàn thành',
-      note: 'Đã hoàn thành Quy trình ERP + đủ 7 công đoạn (100%) + ST (có Ngày áp dụng)',
+      note: 'Đã tạo mã + Quy trình ERP + đủ 7 công đoạn + ST áp dụng (100%)',
     },
     {
       label: 'Chưa tạo Quy trình ERP',
@@ -325,7 +325,7 @@ export function buildStReportWorkbook(
       label: 'Đã xong QT & 7 công đoạn – chờ ST',
       count: waitingStAllCount,
       group: 'Đang làm',
-      note: 'Đã xong Quy trình ERP và 7 công đoạn (100%), đang chờ ST & Ngày áp dụng',
+      note: 'Đã xong Quy trình ERP và 7 công đoạn (90%), đang chờ ST & Ngày áp dụng',
     },
   ];
 
@@ -375,9 +375,9 @@ export function buildStReportWorkbook(
     { key: 'processErp', width: 16 },
     { key: 'processErpDate', width: 14 },
     { key: 'stages', width: 30 },
-    { key: 'percent', width: 12 },
     { key: 'st', width: 14 },
     { key: 'stDate', width: 14 },
+    { key: 'percent', width: 12 },
     { key: 'status', width: 16 },
     { key: 'stage', width: 32 },
     { key: 'days', width: 18 },
@@ -400,9 +400,9 @@ export function buildStReportWorkbook(
     'Quy trình ERP',
     'Ngày tạo QT',
     'Công đoạn (WIN–FIN)',
-    'Tỷ lệ %',
     'ST',
     'Ngày áp dụng',
+    'Tỷ lệ %',
     'Hiện trạng',
     'Phân loại tiến độ',
     'Số ngày hoàn thành',
@@ -437,13 +437,13 @@ export function buildStReportWorkbook(
       doneStageCodes.length > 0
         ? `${doneStageCodes.length}/7 (${doneStageCodes.join(', ')})`
         : '0/7';
-    excelRow.getCell(11).value = `${item.stageProgress.percentage}%`;
-    excelRow.getCell(12).value = hasSt
+    excelRow.getCell(11).value = hasSt
       ? 'Hoàn thành'
       : hasProcessErp && item.stageProgress.allCompleted
       ? 'Chờ ST'
       : '—';
-    excelRow.getCell(13).value = formatStDateVN(st?.st_date);
+    excelRow.getCell(12).value = formatStDateVN(st?.st_date);
+    excelRow.getCell(13).value = `${item.stageProgress.percentage}%`;
     excelRow.getCell(14).value = item.isCompleted ? 'Hoàn thành' : 'Đang làm';
     excelRow.getCell(15).value = item.waitingLabel;
     excelRow.getCell(16).value =

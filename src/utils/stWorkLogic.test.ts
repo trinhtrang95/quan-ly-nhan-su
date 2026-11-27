@@ -62,13 +62,19 @@ function buildFullCompletedStatus(
 }
 
 describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ERP -> WIN..FIN -> ST)', () => {
-  it('computes 7-stage progress percentages and next pending stage accurately', () => {
+  it('computes 10-milestone x 10% progress percentages (Product 10% + ERP 10% + 7 stages 70% + ST 10% = 100%)', () => {
     const empty = computeStagesProgress(null);
     assert.equal(empty.completedCount, 0);
     assert.equal(empty.totalCount, 7);
-    assert.equal(empty.percentage, 0);
+    assert.equal(empty.percentage, 10);
     assert.equal(empty.allCompleted, false);
     assert.equal(empty.nextPendingStageKey, 'win');
+
+    const erpOnly = computeStagesProgress({
+      has_process_erp: true,
+      process_erp_date: '2026-10-10',
+    });
+    assert.equal(erpOnly.percentage, 20);
 
     const fourOfSeven = computeStagesProgress({
       has_stage_win: true,
@@ -80,15 +86,20 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
       has_stage_fin: false,
     });
     assert.equal(fourOfSeven.completedCount, 4);
-    assert.equal(fourOfSeven.percentage, 57);
+    assert.equal(fourOfSeven.percentage, 50);
     assert.equal(fourOfSeven.allCompleted, false);
     assert.equal(fourOfSeven.nextPendingStageKey, 'imp');
 
-    const allSeven = computeStagesProgress(buildFullCompletedStatus());
-    assert.equal(allSeven.completedCount, 7);
-    assert.equal(allSeven.percentage, 100);
-    assert.equal(allSeven.allCompleted, true);
-    assert.equal(allSeven.nextPendingStageKey, null);
+    const waitingStWithoutDate = computeStagesProgress(
+      buildFullCompletedStatus({ has_st: true, st_date: null })
+    );
+    assert.equal(waitingStWithoutDate.percentage, 90);
+
+    const allTenMilestones = computeStagesProgress(buildFullCompletedStatus());
+    assert.equal(allTenMilestones.completedCount, 7);
+    assert.equal(allTenMilestones.percentage, 100);
+    assert.equal(allTenMilestones.allCompleted, true);
+    assert.equal(allTenMilestones.nextPendingStageKey, null);
   });
 
   it('enforces 3-condition completion rule: Quy trình ERP + all 7 stages (100%) + ST with st_date', () => {
@@ -396,7 +407,7 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
       'Chưa tạo Quy trình ERP'
     );
     assert.equal(productsWithStatus[5].currentWaitingStep, 'stages');
-    assert.equal(productsWithStatus[5].stageProgress.percentage, 43);
+    assert.equal(productsWithStatus[5].stageProgress.percentage, 50);
 
     const requests: StChangeRequest[] = [
       {
@@ -508,9 +519,9 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
     assert.equal(headers[8], 'Quy trình ERP');
     assert.equal(headers[9], 'Ngày tạo QT');
     assert.equal(headers[10], 'Công đoạn (WIN–FIN)');
-    assert.equal(headers[11], 'Tỷ lệ %');
-    assert.equal(headers[12], 'ST');
-    assert.equal(headers[13], 'Ngày áp dụng');
+    assert.equal(headers[11], 'ST');
+    assert.equal(headers[12], 'Ngày áp dụng');
+    assert.equal(headers[13], 'Tỷ lệ %');
     assert.equal(headers[14], 'Hiện trạng');
   });
 
@@ -553,7 +564,7 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
 
     const progress = computeStagesProgress(normalized);
     assert.equal(progress.completedCount, 4);
-    assert.equal(progress.percentage, 57);
+    assert.equal(progress.percentage, 60);
     assert.equal(progress.nextPendingStageKey, 'imp');
     assert.equal(getPendingWorkflowStep(normalized)?.key, 'stages');
   });
@@ -680,7 +691,7 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
     ];
 
     const statuses: StNewProductStatus[] = [
-      // pa: no process_erp_date, fallback to st_date 2026-08-15, 100% stages
+      // pa: no process_erp_date, fallback to st_date 2026-08-15, 90% (10 + 0 + 70 + 10)
       buildFullCompletedStatus({
         id: 'sa',
         product_id: 'pa',
@@ -688,7 +699,7 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
         process_erp_date: null,
         st_date: '2026-08-15',
       }),
-      // pb: process_erp_date 2026-11-20, 29% (WIN+CUT), no st_date
+      // pb: process_erp_date 2026-11-20, 40% (10 + 10 + WIN+CUT 20), no st_date
       buildFullCompletedStatus({
         id: 'sb',
         product_id: 'pb',
@@ -704,7 +715,7 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
         has_st: false,
         st_date: null,
       }),
-      // pc: process_erp_date 2025-12-10, 0% stages, st_date 2026-01-05
+      // pc: process_erp_date 2025-12-10, 30% (10 + 10 + 0 + ST 10), st_date 2026-01-05
       buildFullCompletedStatus({
         id: 'sc',
         product_id: 'pc',
@@ -872,7 +883,7 @@ describe('stWorkLogic 7-stage & 2-milestone workflow calculations (Quy trình ER
         ...saveSolPayload,
         id: saveSolPayload.id || undefined,
       }).percentage,
-      29
+      40
     );
 
     const clearWinPayload = buildSingleStageStatusPayload(

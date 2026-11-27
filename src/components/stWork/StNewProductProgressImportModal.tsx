@@ -467,10 +467,10 @@ export const StNewProductProgressImportModal: React.FC<
                         7 CÔNG ĐOẠN
                       </th>
                       <th className="px-2 py-2 text-center border-r border-b border-slate-200 whitespace-nowrap">
-                        TỶ LỆ %
+                        NGÀY ÁP DỤNG
                       </th>
                       <th className="px-2 py-2 text-center border-r border-b border-slate-200 whitespace-nowrap">
-                        NGÀY ÁP DỤNG
+                        TỶ LỆ %
                       </th>
                       <th className="px-2 py-2 text-center border-r border-b border-slate-200 whitespace-nowrap">
                         DỰ KIẾN
@@ -529,11 +529,11 @@ export const StNewProductProgressImportModal: React.FC<
                             })}
                           </div>
                         </td>
-                        <td className="px-2 py-2 text-center font-mono font-bold text-[11px] border-r border-slate-200/70 tabular-nums">
-                          {row.stagePercentage}%
-                        </td>
                         <td className="px-2 py-2 text-center font-mono text-[11px] text-slate-700 border-r border-slate-200/70 whitespace-nowrap tabular-nums">
                           {row.has_st ? formatStDateVN(row.st_date) : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-center font-mono font-bold text-[11px] border-r border-slate-200/70 tabular-nums">
+                          {row.stagePercentage}%
                         </td>
                         <td className="px-2 py-2 text-center border-r border-slate-200/70 whitespace-nowrap">
                           {row.status === 'valid' ? (
