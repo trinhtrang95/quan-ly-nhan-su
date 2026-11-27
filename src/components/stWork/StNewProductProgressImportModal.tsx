@@ -197,6 +197,9 @@ export const StNewProductProgressImportModal: React.FC<
           stage_sol2_date: r.stages.sol2.date,
           has_stage_fin: r.stages.fin.done,
           stage_fin_date: r.stages.fin.date,
+          has_signing:
+            Boolean(existingSt?.has_signing) || Boolean(r.has_st && r.st_date),
+          signing_date: existingSt?.signing_date ?? null,
           has_st: r.has_st,
           st_date: r.st_date,
           unit_price: existingSt?.unit_price ?? null,

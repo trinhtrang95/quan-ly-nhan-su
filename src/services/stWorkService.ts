@@ -110,6 +110,8 @@ export async function fetchStNewProductStatuses(): Promise<StNewProductStatus[]>
       'has_process_erp' in rows[0] && 'has_st' in rows[0];
     supportsNativeStageColumns =
       'has_stage_win' in rows[0] && 'has_stage_fin' in rows[0];
+    supportsNativeSigningColumns =
+      'has_signing' in rows[0] && 'signing_date' in rows[0];
   }
   return rows.map(normalizeStNewProductStatusRow);
 }
@@ -377,6 +379,9 @@ export async function createStProduct(input: {
     supportsNativeStageColumns =
       'has_stage_win' in existingStatusRows[0] &&
       'has_stage_fin' in existingStatusRows[0];
+    supportsNativeSigningColumns =
+      'has_signing' in existingStatusRows[0] &&
+      'signing_date' in existingStatusRows[0];
     createdStatus = normalizeStNewProductStatusRow(existingStatusRows[0]);
   } else {
     const baseLegacyPayload = {
@@ -457,6 +462,8 @@ export async function createStProduct(input: {
         stage_sol2_date: null,
         has_stage_fin: false,
         stage_fin_date: null,
+        has_signing: false,
+        signing_date: null,
         has_st: false,
         st_date: null,
         has_process: false,
@@ -696,7 +703,9 @@ export async function batchImportStProducts(input: {
             typeof existingRow.notes === 'string' ? existingRow.notes : null
           );
           const finalNotes =
-            supportsNativeStageColumns === false || steps
+            supportsNativeStageColumns === false ||
+            supportsNativeSigningColumns === false ||
+            steps
               ? encodeStepsIntoNotes(noteText, parsedExisting)
               : noteText;
           await overtimeSupabase.request<void>(
@@ -807,7 +816,9 @@ export async function batchImportStProducts(input: {
             typeof existingStatus.notes === 'string' ? existingStatus.notes : null
           );
           const finalNotes =
-            supportsNativeStageColumns === false || steps
+            supportsNativeStageColumns === false ||
+            supportsNativeSigningColumns === false ||
+            steps
               ? encodeStepsIntoNotes(cleanNote, parsedStatus)
               : cleanNote;
           await overtimeSupabase.request<void>(
@@ -852,6 +863,7 @@ export async function batchImportStProducts(input: {
 
 let supportsNativeTwoStepColumns: boolean | null = null;
 let supportsNativeStageColumns: boolean | null = null;
+let supportsNativeSigningColumns: boolean | null = null;
 
 function isMissingWorkflowColumnError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err || '');
@@ -882,6 +894,8 @@ export interface UpsertStNewProductStatusInput {
   stage_sol2_date?: string | null;
   has_stage_fin?: boolean;
   stage_fin_date?: string | null;
+  has_signing?: boolean;
+  signing_date?: string | null;
   has_st: boolean;
   st_date: string | null;
   has_bom_erp?: boolean;
@@ -901,77 +915,11 @@ export async function upsertStNewProductStatus(
   input: UpsertStNewProductStatusInput
 ): Promise<StNewProductStatus> {
   const nowIso = new Date().toISOString();
-  const stageFields = {
-    has_stage_win: Boolean(input.has_stage_win),
-    stage_win_date: input.stage_win_date || null,
-    has_stage_cut: Boolean(input.has_stage_cut),
-    stage_cut_date: input.stage_cut_date || null,
-    has_stage_sol: Boolean(input.has_stage_sol),
-    stage_sol_date: input.stage_sol_date || null,
-    has_stage_ass: Boolean(input.has_stage_ass),
-    stage_ass_date: input.stage_ass_date || null,
-    has_stage_imp: Boolean(input.has_stage_imp),
-    stage_imp_date: input.stage_imp_date || null,
-    has_stage_sol2: Boolean(input.has_stage_sol2),
-    stage_sol2_date: input.stage_sol2_date || null,
-    has_stage_fin: Boolean(input.has_stage_fin),
-    stage_fin_date: input.stage_fin_date || null,
-  };
-  const twoStepValues = {
-    has_process_erp: Boolean(input.has_process_erp),
-    process_erp_date: input.process_erp_date || null,
-    has_st: Boolean(input.has_st),
-    st_date: input.st_date || null,
-  };
-  const completed = isNewProductCompleted({
-    ...twoStepValues,
-    ...stageFields,
-  });
-  const cleanUserNotes = input.notes?.trim() || null;
-
-  const legacyBasePayload = {
-    product_id: input.product_id,
-    has_process: Boolean(twoStepValues.has_process_erp),
-    process_created_at: twoStepValues.process_erp_date || null,
-    has_unit_price: Boolean(input.has_quote),
-    unit_price:
-      input.unit_price !== null &&
-      input.unit_price !== undefined &&
-      !Number.isNaN(Number(input.unit_price))
-        ? Number(input.unit_price)
-        : null,
-    currency: (input.currency || 'VND').trim() || 'VND',
-    price_created_at: input.quote_date || null,
-    price_applied_at: completed ? twoStepValues.st_date || null : null,
-    updated_at: nowIso,
-  };
-
-  const nativePayload = {
-    ...legacyBasePayload,
-    ...twoStepValues,
-    ...stageFields,
-    notes: cleanUserNotes,
-  };
-
-  const fallbackPayload = {
-    ...legacyBasePayload,
-    notes: encodeStepsIntoNotes(cleanUserNotes, {
-      ...twoStepValues,
-      ...stageFields,
-      ...(typeof input.has_bom_erp === 'boolean'
-        ? { has_bom_erp: input.has_bom_erp, bom_erp_date: input.bom_erp_date || null }
-        : {}),
-      ...(typeof input.has_spec_erp === 'boolean'
-        ? { has_spec_erp: input.has_spec_erp, spec_erp_date: input.spec_erp_date || null }
-        : {}),
-      ...(typeof input.has_khsx === 'boolean'
-        ? { has_khsx: input.has_khsx, khsx_date: input.khsx_date || null }
-        : {}),
-      ...(typeof input.has_quote === 'boolean'
-        ? { has_quote: input.has_quote, quote_date: input.quote_date || null }
-        : {}),
-    }),
-  };
+  const {
+    nativeWithSigningPayload,
+    nativeWithoutSigningPayload,
+    fallbackPayload,
+  } = buildStatusPayloads(input, nowIso);
 
   let targetId = input.id || '';
   if (!targetId) {
@@ -1018,8 +966,24 @@ export async function upsertStNewProductStatus(
     supportsNativeTwoStepColumns !== false &&
     supportsNativeStageColumns !== false
   ) {
+    if (supportsNativeSigningColumns !== false) {
+      try {
+        const saved = await sendSave(nativeWithSigningPayload);
+        supportsNativeTwoStepColumns = true;
+        supportsNativeStageColumns = true;
+        supportsNativeSigningColumns = true;
+        return saved;
+      } catch (err) {
+        if (isMissingWorkflowColumnError(err)) {
+          supportsNativeSigningColumns = false;
+        } else {
+          throw err;
+        }
+      }
+    }
+
     try {
-      const saved = await sendSave(nativePayload);
+      const saved = await sendSave(nativeWithoutSigningPayload);
       supportsNativeTwoStepColumns = true;
       supportsNativeStageColumns = true;
       return saved;
@@ -1039,7 +1003,8 @@ function buildStatusPayloads(
   input: UpsertStNewProductStatusInput,
   nowIso: string
 ): {
-  nativePayload: Record<string, unknown>;
+  nativeWithSigningPayload: Record<string, unknown>;
+  nativeWithoutSigningPayload: Record<string, unknown>;
   fallbackPayload: Record<string, unknown>;
 } {
   const stageFields = {
@@ -1058,6 +1023,10 @@ function buildStatusPayloads(
     has_stage_fin: Boolean(input.has_stage_fin),
     stage_fin_date: input.stage_fin_date || null,
   };
+  const signingFields = {
+    has_signing: Boolean(input.has_signing),
+    signing_date: input.signing_date || null,
+  };
   const twoStepValues = {
     has_process_erp: Boolean(input.has_process_erp),
     process_erp_date: input.process_erp_date || null,
@@ -1067,6 +1036,7 @@ function buildStatusPayloads(
   const completed = isNewProductCompleted({
     ...twoStepValues,
     ...stageFields,
+    ...signingFields,
   });
   const cleanUserNotes = input.notes?.trim() || null;
 
@@ -1087,34 +1057,49 @@ function buildStatusPayloads(
     updated_at: nowIso,
   };
 
-  const nativePayload = {
+  const encodedNotes = encodeStepsIntoNotes(cleanUserNotes, {
+    ...twoStepValues,
+    ...stageFields,
+    ...signingFields,
+    ...(typeof input.has_bom_erp === 'boolean'
+      ? { has_bom_erp: input.has_bom_erp, bom_erp_date: input.bom_erp_date || null }
+      : {}),
+    ...(typeof input.has_spec_erp === 'boolean'
+      ? { has_spec_erp: input.has_spec_erp, spec_erp_date: input.spec_erp_date || null }
+      : {}),
+    ...(typeof input.has_khsx === 'boolean'
+      ? { has_khsx: input.has_khsx, khsx_date: input.khsx_date || null }
+      : {}),
+    ...(typeof input.has_quote === 'boolean'
+      ? { has_quote: input.has_quote, quote_date: input.quote_date || null }
+      : {}),
+  });
+
+  const nativeWithSigningPayload = {
     ...legacyBasePayload,
     ...twoStepValues,
     ...stageFields,
+    ...signingFields,
     notes: cleanUserNotes,
+  };
+
+  const nativeWithoutSigningPayload = {
+    ...legacyBasePayload,
+    ...twoStepValues,
+    ...stageFields,
+    notes: encodedNotes,
   };
 
   const fallbackPayload = {
     ...legacyBasePayload,
-    notes: encodeStepsIntoNotes(cleanUserNotes, {
-      ...twoStepValues,
-      ...stageFields,
-      ...(typeof input.has_bom_erp === 'boolean'
-        ? { has_bom_erp: input.has_bom_erp, bom_erp_date: input.bom_erp_date || null }
-        : {}),
-      ...(typeof input.has_spec_erp === 'boolean'
-        ? { has_spec_erp: input.has_spec_erp, spec_erp_date: input.spec_erp_date || null }
-        : {}),
-      ...(typeof input.has_khsx === 'boolean'
-        ? { has_khsx: input.has_khsx, khsx_date: input.khsx_date || null }
-        : {}),
-      ...(typeof input.has_quote === 'boolean'
-        ? { has_quote: input.has_quote, quote_date: input.quote_date || null }
-        : {}),
-    }),
+    notes: encodedNotes,
   };
 
-  return { nativePayload, fallbackPayload };
+  return {
+    nativeWithSigningPayload,
+    nativeWithoutSigningPayload,
+    fallbackPayload,
+  };
 }
 
 export async function ensureMissingStNewProductStatuses(
@@ -1239,16 +1224,23 @@ export async function batchUpsertStNewProductStatuses(
 
   const sendBatchUpdate = async (
     chunk: UpsertStNewProductStatusInput[],
-    useNative: boolean
+    mode: 'native_with_signing' | 'native_no_signing' | 'fallback'
   ): Promise<StNewProductStatus[]> => {
     const payload = chunk.map((item) => {
-      const { nativePayload, fallbackPayload } = buildStatusPayloads(
-        item,
-        nowIso
-      );
+      const {
+        nativeWithSigningPayload,
+        nativeWithoutSigningPayload,
+        fallbackPayload,
+      } = buildStatusPayloads(item, nowIso);
+      const body =
+        mode === 'native_with_signing'
+          ? nativeWithSigningPayload
+          : mode === 'native_no_signing'
+          ? nativeWithoutSigningPayload
+          : fallbackPayload;
       return {
         id: item.id,
-        ...(useNative ? nativePayload : fallbackPayload),
+        ...body,
       };
     });
     const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
@@ -1264,14 +1256,19 @@ export async function batchUpsertStNewProductStatuses(
 
   const sendBatchInsert = async (
     chunk: UpsertStNewProductStatusInput[],
-    useNative: boolean
+    mode: 'native_with_signing' | 'native_no_signing' | 'fallback'
   ): Promise<StNewProductStatus[]> => {
     const payload = chunk.map((item) => {
-      const { nativePayload, fallbackPayload } = buildStatusPayloads(
-        item,
-        nowIso
-      );
-      return useNative ? nativePayload : fallbackPayload;
+      const {
+        nativeWithSigningPayload,
+        nativeWithoutSigningPayload,
+        fallbackPayload,
+      } = buildStatusPayloads(item, nowIso);
+      return mode === 'native_with_signing'
+        ? nativeWithSigningPayload
+        : mode === 'native_no_signing'
+        ? nativeWithoutSigningPayload
+        : fallbackPayload;
     });
     const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
       'st_new_product_status?select=*',
@@ -1289,8 +1286,25 @@ export async function batchUpsertStNewProductStatuses(
       supportsNativeTwoStepColumns !== false &&
       supportsNativeStageColumns !== false
     ) {
+      if (supportsNativeSigningColumns !== false) {
+        try {
+          const res = await sendBatchUpdate(chunk, 'native_with_signing');
+          supportsNativeTwoStepColumns = true;
+          supportsNativeStageColumns = true;
+          supportsNativeSigningColumns = true;
+          savedAll.push(...res);
+          continue;
+        } catch (err) {
+          if (isMissingWorkflowColumnError(err)) {
+            supportsNativeSigningColumns = false;
+          } else {
+            throw err;
+          }
+        }
+      }
+
       try {
-        const res = await sendBatchUpdate(chunk, true);
+        const res = await sendBatchUpdate(chunk, 'native_no_signing');
         supportsNativeTwoStepColumns = true;
         supportsNativeStageColumns = true;
         savedAll.push(...res);
@@ -1303,7 +1317,7 @@ export async function batchUpsertStNewProductStatuses(
         }
       }
     }
-    const res = await sendBatchUpdate(chunk, false);
+    const res = await sendBatchUpdate(chunk, 'fallback');
     savedAll.push(...res);
   }
 
@@ -1312,8 +1326,25 @@ export async function batchUpsertStNewProductStatuses(
       supportsNativeTwoStepColumns !== false &&
       supportsNativeStageColumns !== false
     ) {
+      if (supportsNativeSigningColumns !== false) {
+        try {
+          const res = await sendBatchInsert(chunk, 'native_with_signing');
+          supportsNativeTwoStepColumns = true;
+          supportsNativeStageColumns = true;
+          supportsNativeSigningColumns = true;
+          savedAll.push(...res);
+          continue;
+        } catch (err) {
+          if (isMissingWorkflowColumnError(err)) {
+            supportsNativeSigningColumns = false;
+          } else {
+            throw err;
+          }
+        }
+      }
+
       try {
-        const res = await sendBatchInsert(chunk, true);
+        const res = await sendBatchInsert(chunk, 'native_no_signing');
         supportsNativeTwoStepColumns = true;
         supportsNativeStageColumns = true;
         savedAll.push(...res);
@@ -1326,7 +1357,7 @@ export async function batchUpsertStNewProductStatuses(
         }
       }
     }
-    const res = await sendBatchInsert(chunk, false);
+    const res = await sendBatchInsert(chunk, 'fallback');
     savedAll.push(...res);
   }
 

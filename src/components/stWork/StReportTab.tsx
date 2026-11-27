@@ -88,15 +88,20 @@ export const StReportTab: React.FC<StReportTabProps> = ({
     const waitingStages = productsWithStatus.filter(
       (p) => !p.isCompleted && p.currentWaitingStep === 'stages'
     ).length;
+    const waitingSigning = productsWithStatus.filter(
+      (p) => !p.isCompleted && p.currentWaitingStep === 'signing'
+    ).length;
     const waitingSt = productsWithStatus.filter(
       (p) => !p.isCompleted && p.currentWaitingStep === 'st'
     ).length;
     return {
       total: productsWithStatus.length,
       completed,
-      inProgress: waitingProcessErp + waitingStages + waitingSt,
+      inProgress:
+        waitingProcessErp + waitingStages + waitingSigning + waitingSt,
       waitingProcessErp,
       waitingStages,
+      waitingSigning,
       waitingSt,
     };
   }, [productsWithStatus]);
@@ -348,7 +353,7 @@ export const StReportTab: React.FC<StReportTabProps> = ({
       </div>
 
       {/* Live New-Product Pipeline Breakdown */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 shrink-0">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 shrink-0">
         <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-600">
             Hoàn thành
@@ -379,6 +384,14 @@ export const StReportTab: React.FC<StReportTabProps> = ({
           </span>
           <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
             {formatNumberVN(liveProductBreakdown.waitingStages)}
+          </span>
+        </div>
+        <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-700">
+            Chờ trình ký
+          </span>
+          <span className="font-mono text-sm font-bold text-amber-700 tabular-nums">
+            {formatNumberVN(liveProductBreakdown.waitingSigning)}
           </span>
         </div>
         <div className="bg-white border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2">

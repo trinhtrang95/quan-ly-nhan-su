@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
+  buildSigningInitialState,
+  buildSigningStatusPayload,
   buildSingleStageInitialState,
   buildSingleStageStatusPayload,
   calculateCompletionDays,
@@ -27,6 +29,8 @@ import {
   formatStDateVN,
   getLocalIsoDateToday,
   getPendingWorkflowStep,
+  getSigningDisplayState,
+  hasEffectiveSigning,
   isNewProductCompleted,
   sortNewProductsList,
   ST_NEW_PRODUCT_SORT_OPTIONS,
@@ -81,6 +85,8 @@ interface ModalProgressState {
   stage_sol2_date: string;
   has_stage_fin: boolean;
   stage_fin_date: string;
+  has_signing: boolean;
+  signing_date: string;
   has_st: boolean;
   st_date: string;
 }
@@ -105,6 +111,8 @@ function toModalProgressState(
     stage_sol2_date: status?.stage_sol2_date || '',
     has_stage_fin: Boolean(status?.has_stage_fin),
     stage_fin_date: status?.stage_fin_date || '',
+    has_signing: Boolean(status?.has_signing),
+    signing_date: status?.signing_date || '',
     has_st: Boolean(status?.has_st),
     st_date: status?.st_date || '',
   };
@@ -170,6 +178,14 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
   const [singleStageDone, setSingleStageDone] = useState<boolean>(false);
   const [singleStageDate, setSingleStageDate] = useState<string>('');
   const [isSavingSingleStage, setIsSavingSingleStage] = useState<boolean>(false);
+
+  // Modal F: Quick-Confirm Signing Mini Modal (triggered by clicking ĐANG TRÌNH KÝ cell)
+  const [signingTarget, setSigningTarget] = useState<StProductWithStatus | null>(
+    null
+  );
+  const [signingDone, setSigningDone] = useState<boolean>(false);
+  const [signingDate, setSigningDate] = useState<string>('');
+  const [isSavingSigning, setIsSavingSigning] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isSortMenuOpen) return;
@@ -329,6 +345,8 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
         stage_sol2_date: miniState.stage_sol2_date || null,
         has_stage_fin: miniState.has_stage_fin,
         stage_fin_date: miniState.stage_fin_date || null,
+        has_signing: miniState.has_signing,
+        signing_date: miniState.signing_date || null,
         has_st: miniState.has_st,
         st_date: miniState.st_date || null,
         unit_price: progressModalItem.status?.unit_price ?? null,
@@ -390,6 +408,42 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
       onShowToast?.(getFriendlyErrorMessage(err));
     } finally {
       setIsSavingSingleStage(false);
+    }
+  };
+
+  const handleOpenSigningModal = (item: StProductWithStatus) => {
+    const initial = buildSigningInitialState(item.status);
+    setSigningTarget(item);
+    setSigningDone(initial.done);
+    setSigningDate(initial.date);
+  };
+
+  const handleCloseSigningModal = () => {
+    if (isSavingSigning) return;
+    setSigningTarget(null);
+  };
+
+  const handleSaveSigning = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signingTarget || isSavingSigning) return;
+
+    const item = signingTarget;
+    setIsSavingSigning(true);
+    try {
+      const payload = buildSigningStatusPayload(item, signingDone, signingDate);
+      const savedStatus = await upsertStNewProductStatus(payload);
+      onStatusUpdated(savedStatus);
+      await onRefresh();
+      onShowToast?.(
+        signingDone
+          ? `Đã xác nhận trình ký cho mã "${item.product.product_code}".`
+          : `Đã đặt lại trạng thái chưa trình ký cho mã "${item.product.product_code}".`
+      );
+      setSigningTarget(null);
+    } catch (err) {
+      onShowToast?.(getFriendlyErrorMessage(err));
+    } finally {
+      setIsSavingSigning(false);
     }
   };
 
@@ -597,7 +651,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
         </button>
       </div>
 
-      {/* 3. Read-Only 12-Column Table (`st_new_product_status` joined with `st_products`) */}
+      {/* 3. Read-Only 13-Column Table (`st_new_product_status` joined with `st_products`) */}
       <div
         data-testid="st-new-products-table-wrapper"
         className="flex-1 min-h-0 overflow-auto rounded-b-xl"
@@ -645,43 +699,46 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
             data-testid="st-new-products-table"
             className="w-full border-collapse text-left"
           >
-            <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] font-bold text-slate-600 uppercase tracking-tight shadow-[0_1px_0_0_rgba(203,213,225,1)]">
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[9.5px] font-bold text-slate-600 uppercase tracking-tight leading-[1.15] shadow-[0_1px_0_0_rgba(203,213,225,1)]">
               <tr>
-                <th className="sticky left-0 z-20 bg-slate-100 px-1 py-2.5 w-[34px] min-w-[34px] text-center border-r border-b border-slate-200 whitespace-nowrap">
+                <th className="sticky left-0 z-20 bg-slate-100 px-1 py-2 w-[32px] min-w-[32px] text-center border-r border-b border-slate-200 whitespace-nowrap">
                   STT
                 </th>
-                <th className="sticky left-[34px] z-20 bg-slate-100 px-1.5 py-2.5 w-[46px] min-w-[46px] border-r border-b border-slate-200 whitespace-nowrap">
+                <th className="sticky left-[32px] z-20 bg-slate-100 px-1 py-2 w-[40px] min-w-[40px] border-r border-b border-slate-200 whitespace-nowrap">
                   LINE
                 </th>
-                <th className="sticky left-[80px] z-20 bg-slate-100 px-1.5 py-2.5 min-w-[82px] border-r border-b border-slate-200 whitespace-nowrap">
+                <th className="sticky left-[72px] z-20 bg-slate-100 px-1.5 py-2 min-w-[82px] border-r border-b border-slate-200 whitespace-nowrap">
                   MÃ HÀNG
                 </th>
-                <th className="px-1.5 py-2.5 w-[64px] max-w-[68px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1.5 py-2 w-[68px] max-w-[72px] border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   QUY CÁCH
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
-                  QUY TRÌNH ERP
+                <th className="px-1.5 py-2 text-center border-r border-b border-slate-200 bg-slate-100">
+                  QUY TRÌNH <br />ERP
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
-                  NGÀY TẠO QT
+                <th className="px-1.5 py-2 text-center border-r border-b border-slate-200 bg-slate-100">
+                  NGÀY <br />TẠO QT
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   CÔNG ĐOẠN
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2 text-center border-r border-b border-slate-200 bg-slate-100">
+                  ĐANG <br />TRÌNH KÝ
+                </th>
+                <th className="px-1.5 py-2 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   ST
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
-                  NGÀY ÁP DỤNG
+                <th className="px-1.5 py-2 text-center border-r border-b border-slate-200 bg-slate-100">
+                  NGÀY <br />ÁP DỤNG
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   TỶ LỆ %
                 </th>
-                <th className="px-1 py-2.5 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
+                <th className="px-1 py-2 text-center border-r border-b border-slate-200 bg-slate-100 whitespace-nowrap">
                   HIỆN TRẠNG
                 </th>
-                <th className="px-1 py-2.5 w-[48px] text-center border-b border-slate-200 bg-slate-100 whitespace-nowrap">
-                  THAO TÁC
+                <th className="px-1 py-2 w-[42px] text-center border-b border-slate-200 bg-slate-100">
+                  THAO <br />TÁC
                 </th>
               </tr>
             </thead>
@@ -691,9 +748,12 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                 const st = item.status;
                 const hasProcessErp = Boolean(st?.has_process_erp);
                 const hasSt = Boolean(st?.has_st);
+                const effectiveSigning = hasEffectiveSigning(st);
                 const { percentage, allCompleted, nextPendingStageKey } =
                   item.stageProgress;
-                const isWaitingSt = hasProcessErp && allCompleted && !hasSt;
+                const signingDisplay = getSigningDisplayState(st, allCompleted);
+                const isWaitingSt =
+                  hasProcessErp && allCompleted && effectiveSigning && !hasSt;
                 const stickyCellBg = item.isCompleted
                   ? 'bg-[#F4FBF7] group-hover:bg-[#EAF7F0]'
                   : 'bg-white group-hover:bg-[#F3F8FF]';
@@ -717,21 +777,21 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     {/* 2. LINE (từ st_products) */}
                     <td
                       title={p.line_name || undefined}
-                      className={`sticky left-[34px] z-[5] px-1.5 py-2 font-semibold text-slate-700 max-w-[46px] truncate border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                      className={`sticky left-[32px] z-[5] px-1 py-2 font-semibold text-slate-700 max-w-[40px] truncate border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
                     >
                       {p.line_name || '—'}
                     </td>
 
                     {/* 3. Mã hàng (từ st_products, link xanh đậm -> Full Product Detail Modal) */}
                     <td
-                      className={`sticky left-[80px] z-[5] px-1.5 py-2 border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
+                      className={`sticky left-[72px] z-[5] px-1.5 py-2 border-r border-slate-200/80 transition-colors ${stickyCellBg}`}
                     >
                       <button
                         type="button"
                         data-testid={`st-product-code-btn-${p.product_code}`}
                         onClick={() => setDetailModalItem(item)}
                         title="Bấm để xem chi tiết thông tin sản phẩm"
-                        className="font-mono text-[11.5px] font-bold text-[#14539E] hover:underline cursor-pointer text-left whitespace-nowrap"
+                        className="font-mono text-[11px] font-bold text-[#14539E] hover:underline cursor-pointer text-left whitespace-nowrap"
                       >
                         {p.product_code}
                       </button>
@@ -740,7 +800,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     {/* 4. Quy cách (từ st_products) */}
                     <td
                       title={p.specification || undefined}
-                      className="px-1.5 py-2 border-r border-slate-100 text-[11.5px] text-slate-600 max-w-[68px] truncate"
+                      className="px-1.5 py-2 border-r border-slate-100 text-[11px] text-slate-600 max-w-[72px] truncate"
                     >
                       {p.specification || '—'}
                     </td>
@@ -767,13 +827,13 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     </td>
 
                     {/* 6. NGÀY TẠO QT */}
-                    <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
+                    <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[10.5px] text-slate-700 tabular-nums whitespace-nowrap">
                       {formatStDateVN(st?.process_erp_date)}
                     </td>
 
                     {/* 7. Công đoạn (WIN -> CUT -> SOL -> ASS -> IMP -> SOL2 -> FIN) */}
                     <td className="px-1 py-2 border-r border-slate-100 align-middle">
-                      <div className="flex items-center justify-center gap-0.5 flex-nowrap">
+                      <div className="flex items-center justify-center gap-px flex-nowrap">
                         {ST_PRODUCTION_STAGES.map((stage, idx) => {
                           const done = Boolean(st?.[stage.boolField]);
                           const doneDate = st?.[stage.dateField] || null;
@@ -803,14 +863,14 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                                 onClick={() => handleOpenSingleStageModal(item, stage)}
                                 title={tooltipText}
                                 aria-label={`${p.product_code}: ${tooltipText}`}
-                                className={`inline-flex items-center justify-center px-1 py-0.5 rounded border font-mono text-[9px] font-semibold leading-none whitespace-nowrap select-none cursor-pointer transition-all hover:-translate-y-px hover:shadow-xs focus:outline-none focus:ring-1 focus:ring-[#14539E] ${badgeClass}`}
+                                className={`inline-flex items-center justify-center px-[3px] py-0.5 rounded border font-mono text-[8.5px] font-semibold leading-none whitespace-nowrap select-none cursor-pointer transition-all hover:-translate-y-px hover:shadow-xs focus:outline-none focus:ring-1 focus:ring-[#14539E] ${badgeClass}`}
                               >
                                 {stage.code}
                               </button>
                               {idx < ST_PRODUCTION_STAGES.length - 1 && (
                                 <span
                                   aria-hidden="true"
-                                  className="text-[8px] text-slate-300 select-none leading-none"
+                                  className="text-[7.5px] text-slate-300 select-none leading-none"
                                 >
                                   →
                                 </span>
@@ -821,8 +881,30 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       </div>
                     </td>
 
-                    {/* 8. ST (Icon-only) */}
-                    <td className="px-1 py-2 border-r border-slate-100 text-center align-middle">
+                    {/* 8. ĐANG TRÌNH KÝ (Icon-only clickable trigger) */}
+                    <td className="px-0.5 py-2 border-r border-slate-100 text-center align-middle">
+                      <button
+                        type="button"
+                        data-testid={`st-signing-btn-${p.product_code}`}
+                        onClick={() => handleOpenSigningModal(item)}
+                        title={signingDisplay.tooltip}
+                        aria-label={`${p.product_code} - Đang trình ký: ${signingDisplay.tooltip}`}
+                        className="w-7 h-7 rounded-md inline-flex items-center justify-center cursor-pointer transition-colors hover:bg-slate-100 focus:outline-none focus:ring-1 focus:ring-[#14539E]"
+                      >
+                        {signingDisplay.state === 'done' ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : signingDisplay.state === 'waiting' ? (
+                          <Clock className="w-4 h-4 text-amber-500" />
+                        ) : (
+                          <span className="text-slate-300 font-medium select-none">
+                            —
+                          </span>
+                        )}
+                      </button>
+                    </td>
+
+                    {/* 9. ST (Icon-only) */}
+                    <td className="px-0.5 py-2 border-r border-slate-100 text-center align-middle">
                       {hasSt ? (
                         <span
                           title="Đã hoàn thành ST"
@@ -833,7 +915,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         </span>
                       ) : isWaitingSt ? (
                         <span
-                          title="Đã xong QT & 7 công đoạn – đang chờ ST"
+                          title="Đã trình ký – đang chờ ST"
                           aria-label="ST: Đang chờ"
                           className="inline-flex items-center justify-center"
                         >
@@ -849,24 +931,26 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       )}
                     </td>
 
-                    {/* 9. Ngày áp dụng */}
-                    <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
+                    {/* 10. Ngày áp dụng */}
+                    <td className="px-1 py-2 border-r border-slate-100 text-center font-mono text-[10.5px] text-slate-700 tabular-nums whitespace-nowrap">
                       {formatStDateVN(st?.st_date)}
                     </td>
 
-                    {/* 10. Tỷ lệ % (10 mốc × 10% = 100%) */}
+                    {/* 11. Tỷ lệ % (QT ERP 10% + 7 CĐ 70% + Trình ký 10% + ST 10% = 100%) */}
                     <td
-                      title={`Tạo mã: 10% · QT ERP: ${
+                      title={`QT ERP: ${
                         hasProcessErp ? '+10%' : '0%'
                       } · Công đoạn: ${item.stageProgress.completedCount}/7 (+${
                         item.stageProgress.completedCount * 10
-                      }%) · ST: ${
+                      }%) · Trình ký: ${
+                        effectiveSigning ? '+10%' : '0%'
+                      } · ST: ${
                         hasSt && st?.st_date ? '+10%' : '0%'
                       } = ${percentage}%`}
                       className="px-1 py-2 border-r border-slate-100 align-middle whitespace-nowrap"
                     >
                       <div className="flex items-center justify-center gap-1">
-                        <div className="w-5 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
+                        <div className="w-4 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
                           <div
                             className={`h-full rounded-full transition-all duration-200 ${
                               percentage === 100
@@ -880,7 +964,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         </div>
                         <span
                           data-testid={`st-row-percent-${p.product_code}`}
-                          className={`font-mono text-[10.5px] font-bold tabular-nums w-[30px] text-right ${
+                          className={`font-mono text-[10px] font-bold tabular-nums w-[27px] text-right ${
                             percentage === 100
                               ? 'text-emerald-700'
                               : percentage > 0
@@ -893,26 +977,26 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       </div>
                     </td>
 
-                    {/* 11. Hiện trạng (Auto Badge: Hoàn thành / Đang làm) */}
+                    {/* 12. Hiện trạng (Auto Badge: Hoàn thành / Đang làm) */}
                     <td className="px-1 py-2 border-r border-slate-100 text-center align-middle whitespace-nowrap">
                       {item.isCompleted ? (
                         <span
                           data-testid={`st-row-status-${p.product_code}`}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10.5px] font-semibold whitespace-nowrap"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold whitespace-nowrap"
                         >
                           Hoàn thành
                         </span>
                       ) : (
                         <span
                           data-testid={`st-row-status-${p.product_code}`}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-[10.5px] font-semibold whitespace-nowrap"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold whitespace-nowrap"
                         >
                           Đang làm
                         </span>
                       )}
                     </td>
 
-                    {/* 12. Thao tác (Icon-only Cập nhật tiến độ, NO delete button) */}
+                    {/* 13. Thao tác (Icon-only Cập nhật tiến độ, NO delete button) */}
                     <td className="px-1 py-2 text-center align-middle">
                       <button
                         type="button"
@@ -920,9 +1004,9 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         onClick={() => handleOpenProgressModal(item)}
                         title={`Cập nhật tiến độ ${p.product_code}`}
                         aria-label={`Cập nhật tiến độ ${p.product_code}`}
-                        className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] hover:bg-blue-50/50 inline-flex items-center justify-center cursor-pointer transition-colors"
+                        className="w-6 h-6 rounded-md border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] hover:bg-blue-50/50 inline-flex items-center justify-center cursor-pointer transition-colors"
                       >
-                        <Pencil className="w-3.5 h-3.5" />
+                        <Pencil className="w-3 h-3" />
                       </button>
                     </td>
                   </tr>
@@ -989,14 +1073,15 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
 
               {/* Body */}
               <div className="p-4 overflow-y-auto space-y-3.5 text-xs">
-                {/* Tổng quan tiến độ 10 mốc × 10% */}
+                {/* Tổng quan tiến độ: QT ERP 10% + 7 CĐ 70% + Trình ký 10% + ST 10% */}
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                     <span className="font-bold text-slate-800">
                       Tỷ lệ hoàn thành:
                     </span>
                     <span className="text-slate-500">
-                      Tạo mã 10% + QT ERP {miniState.has_process_erp ? '10%' : '0%'} + {doneStages}/7 CĐ ({doneStages * 10}%) + ST{' '}
+                      QT ERP {miniState.has_process_erp ? '10%' : '0%'} + {doneStages}/7 CĐ ({doneStages * 10}%) + Trình ký{' '}
+                      {hasEffectiveSigning(miniState) ? '10%' : '0%'} + ST{' '}
                       {miniState.has_st && miniState.st_date ? '10%' : '0%'}
                     </span>
                   </div>
@@ -1145,13 +1230,62 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   </div>
                 </div>
 
-                {/* 3. ST */}
+                {/* 3. Trình ký (Tạo file & in trình ký) */}
+                <div
+                  className={`rounded-lg border px-3 py-2.5 flex flex-wrap items-center justify-between gap-3 transition-colors ${
+                    hasEffectiveSigning(miniState)
+                      ? 'bg-emerald-50/50 border-emerald-200'
+                      : miniLivePreview.stageProgress.allCompleted
+                      ? 'bg-amber-50/50 border-amber-200'
+                      : 'bg-slate-50/60 border-slate-200'
+                  }`}
+                >
+                  <label className="inline-flex items-center gap-2.5 font-bold text-slate-900 cursor-pointer min-w-0">
+                    <input
+                      type="checkbox"
+                      data-testid="st-mini-check-signing"
+                      checked={miniState.has_signing}
+                      onChange={(e) =>
+                        handleToggleMiniField(
+                          'has_signing',
+                          'signing_date',
+                          e.target.checked
+                        )
+                      }
+                      className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
+                    />
+                    <span>3. Trình ký (Tạo file &amp; in trình ký)</span>
+                  </label>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">
+                      Ngày trình ký:
+                    </span>
+                    <input
+                      type="date"
+                      data-testid="st-mini-date-signing"
+                      value={miniState.signing_date}
+                      onChange={(e) =>
+                        handleChangeMiniDate(
+                          'has_signing',
+                          'signing_date',
+                          e.target.value
+                        )
+                      }
+                      aria-label="Ngày trình ký"
+                      className="h-8 w-36 px-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. ST */}
                 <div
                   className={`rounded-lg border px-3 py-2.5 flex flex-wrap items-center justify-between gap-3 transition-colors ${
                     miniState.has_st && miniState.st_date
                       ? 'bg-emerald-50/50 border-emerald-200'
                       : miniState.has_process_erp &&
-                        miniLivePreview.stageProgress.allCompleted
+                        miniLivePreview.stageProgress.allCompleted &&
+                        hasEffectiveSigning(miniState)
                       ? 'bg-amber-50/50 border-amber-200'
                       : 'bg-slate-50/60 border-slate-200'
                   }`}
@@ -1170,7 +1304,7 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                       }
                       className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
                     />
-                    <span>3. ST (Áp dụng sản xuất)</span>
+                    <span>4. ST (Áp dụng sản xuất)</span>
                   </label>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -1356,6 +1490,135 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                   className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   {isSavingSingleStage ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>Lưu</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
+
+      {/* MODAL F: Quick-Confirm Signing Mini Modal (Đang trình ký) */}
+      {signingTarget && (() => {
+        const sp = signingTarget.product;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Cập nhật bước Trình ký cho ${sp.product_code}`}
+            onClick={handleCloseSigningModal}
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          >
+            <form
+              data-testid="st-signing-mini-modal"
+              onSubmit={handleSaveSigning}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-2 bg-slate-50/80">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-sm font-bold text-[#14539E]">
+                      {sp.product_code}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-[#14539E] text-[11px] font-bold">
+                      Trình ký
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                    {sp.product_name}
+                    {sp.specification ? ` · ${sp.specification}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSavingSigning}
+                  onClick={handleCloseSigningModal}
+                  aria-label="Đóng cửa sổ trình ký"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 inline-flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-4 space-y-3 text-xs">
+                <label
+                  className={`rounded-lg border px-3 py-2.5 flex items-center gap-2.5 font-semibold cursor-pointer transition-colors ${
+                    signingDone
+                      ? 'bg-emerald-50/60 border-emerald-200 text-slate-900'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    data-testid="st-signing-mini-check"
+                    checked={signingDone}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSigningDone(checked);
+                      setSigningDate((prev) =>
+                        checked ? prev || getLocalIsoDateToday() : ''
+                      );
+                    }}
+                    className="w-4 h-4 accent-[#14539E] rounded cursor-pointer shrink-0"
+                  />
+                  <span>Đã tạo file, in và mang đi trình ký</span>
+                </label>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label
+                      htmlFor="st-signing-mini-date-input"
+                      className="font-semibold text-slate-700"
+                    >
+                      Ngày trình ký
+                    </label>
+                    <span
+                      data-testid="st-signing-mini-date-vn"
+                      className="font-mono text-[11px] font-medium text-slate-500"
+                    >
+                      {signingDate ? formatStDateVN(signingDate) : '—'}
+                    </span>
+                  </div>
+                  <input
+                    id="st-signing-mini-date-input"
+                    type="date"
+                    lang="vi"
+                    data-testid="st-signing-mini-date"
+                    value={signingDate}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSigningDate(val);
+                      if (val) setSigningDone(true);
+                    }}
+                    className="w-full h-9 px-2.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+                  />
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingSigning}
+                  onClick={handleCloseSigningModal}
+                  className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer hover:bg-slate-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSigning}
+                  data-testid="st-signing-mini-save-btn"
+                  className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingSigning ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Check className="w-3.5 h-3.5" />
@@ -1555,27 +1818,15 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div className="rounded-lg border border-slate-200 px-3 py-2 flex items-center justify-between">
-                      <span className="font-semibold text-slate-700">
-                        Quy trình ERP
-                      </span>
-                      <span className="font-mono text-slate-900">
-                        {st?.has_process_erp
-                          ? `Đã có (${formatStDateVN(st.process_erp_date)})`
-                          : 'Đang chờ'}
-                      </span>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 px-3 py-2 flex items-center justify-between">
-                      <span className="font-semibold text-slate-700">
-                        ST (Ngày áp dụng)
-                      </span>
-                      <span className="font-mono text-slate-900">
-                        {st?.has_st
-                          ? `Hoàn thành (${formatStDateVN(st.st_date)})`
-                          : 'Đang chờ'}
-                      </span>
-                    </div>
+                  <div className="rounded-lg border border-slate-200 px-3 py-2 flex items-center justify-between">
+                    <span className="font-semibold text-slate-700">
+                      1. Quy trình ERP
+                    </span>
+                    <span className="font-mono text-slate-900">
+                      {st?.has_process_erp
+                        ? `Đã có (${formatStDateVN(st.process_erp_date)})`
+                        : 'Đang chờ'}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1600,6 +1851,42 @@ export const StNewProductsTab: React.FC<StNewProductsTabProps> = ({
                         </div>
                       );
                     })}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div
+                      data-testid="st-detail-signing-row"
+                      className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-2 ${
+                        hasEffectiveSigning(st)
+                          ? 'bg-emerald-50/50 border-emerald-200'
+                          : detailModalItem.stageProgress.allCompleted
+                          ? 'bg-amber-50/50 border-amber-200'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      <span className="font-semibold text-slate-700">
+                        Trình ký (Tạo file &amp; in trình ký)
+                      </span>
+                      <span className="font-mono text-slate-900">
+                        {st?.has_signing
+                          ? `Đã trình ký (${formatStDateVN(st.signing_date)})`
+                          : st?.has_st
+                          ? 'Đã áp dụng ST'
+                          : detailModalItem.stageProgress.allCompleted
+                          ? 'Chờ trình ký'
+                          : 'Chưa tới lượt'}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 px-3 py-2 flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700">
+                        ST (Ngày áp dụng)
+                      </span>
+                      <span className="font-mono text-slate-900">
+                        {st?.has_st
+                          ? `Hoàn thành (${formatStDateVN(st.st_date)})`
+                          : 'Đang chờ'}
+                      </span>
+                    </div>
                   </div>
 
                   {st?.notes && (

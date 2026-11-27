@@ -169,9 +169,9 @@ test('validateImportedProgressRows matches products, computes completion, and fl
   assert.equal(preview[0].willBeCompleted, true);
   assert.equal(preview[0].st_date, '2026-11-26');
 
-  // Row 2: Product (10) + QT ERP (10) + 2 stages (20) = 40% -> Đang làm
+  // Row 2: QT ERP (10) + 2 stages (20) = 30% -> Đang làm
   assert.equal(preview[1].status, 'valid');
-  assert.equal(preview[1].stagePercentage, 40);
+  assert.equal(preview[1].stagePercentage, 30);
   assert.equal(preview[1].willBeCompleted, false);
 
   // Row 3: unknown product code -> error

@@ -185,11 +185,11 @@ export const ST_PRODUCTION_STAGES: readonly StProductionStageMeta[] = [
   },
 ] as const;
 
-export type StWorkflowStepKey = 'process_erp' | 'stages' | 'st';
+export type StWorkflowStepKey = 'process_erp' | 'stages' | 'signing' | 'st';
 
-export type StWorkflowBoolField = 'has_process_erp' | 'has_st';
+export type StWorkflowBoolField = 'has_process_erp' | 'has_signing' | 'has_st';
 
-export type StWorkflowDateField = 'process_erp_date' | 'st_date';
+export type StWorkflowDateField = 'process_erp_date' | 'signing_date' | 'st_date';
 
 export interface StWorkflowStepMeta {
   key: StWorkflowStepKey;
@@ -216,10 +216,18 @@ export const ST_WORKFLOW_STEPS: readonly StWorkflowStepMeta[] = [
     waitingLabel: 'Đang thực hiện công đoạn (WIN–FIN)',
   },
   {
-    key: 'st',
+    key: 'signing',
     order: 3,
+    label: 'Đang trình ký',
+    waitingLabel: 'Đã xong 7 công đoạn – chờ trình ký',
+    boolField: 'has_signing',
+    dateField: 'signing_date',
+  },
+  {
+    key: 'st',
+    order: 4,
     label: 'ST',
-    waitingLabel: 'Đã xong QT & 7 công đoạn – chờ ST',
+    waitingLabel: 'Đang trình ký – chờ ST',
     boolField: 'has_st',
     dateField: 'st_date',
   },
@@ -244,6 +252,8 @@ export interface StNewProductStatus {
   stage_sol2_date?: string | null;
   has_stage_fin?: boolean;
   stage_fin_date?: string | null;
+  has_signing?: boolean;
+  signing_date?: string | null;
   has_st: boolean;
   st_date: string | null;
   // Optional/legacy compatibility fields
@@ -470,6 +480,15 @@ export function calculateCompletionDays(
   return diffDays >= 0 ? diffDays : 0;
 }
 
+export function hasEffectiveSigning(
+  status?: Partial<StNewProductStatus> | null
+): boolean {
+  if (!status) return false;
+  return Boolean(
+    status.has_signing || (status.has_st && toIsoDateOnly(status.st_date))
+  );
+}
+
 export function computeStagesProgress(
   status?: Partial<StNewProductStatus> | null
 ): StStagesProgress {
@@ -483,14 +502,14 @@ export function computeStagesProgress(
       nextPendingStageKey = stage.key;
     }
   }
-  const hasCreatedProductScore = 10;
   const hasProcessErpScore = status?.has_process_erp ? 10 : 0;
   const stagesScore = completedCount * 10;
-  const hasStScore =
-    status?.has_st && toIsoDateOnly(status?.st_date) ? 10 : 0;
+  const hasStDone = Boolean(status?.has_st && toIsoDateOnly(status?.st_date));
+  const hasSigningScore = status?.has_signing || hasStDone ? 10 : 0;
+  const hasStScore = hasStDone ? 10 : 0;
   const percentage = Math.min(
     100,
-    hasCreatedProductScore + hasProcessErpScore + stagesScore + hasStScore
+    hasProcessErpScore + stagesScore + hasSigningScore + hasStScore
   );
   return {
     completedCount,
@@ -509,6 +528,7 @@ export function isNewProductCompleted(
   return Boolean(
     status.has_process_erp &&
       stageProgress.allCompleted &&
+      hasEffectiveSigning(status) &&
       status.has_st &&
       toIsoDateOnly(status.st_date)
   );
@@ -525,7 +545,10 @@ export function getPendingWorkflowStep(
   if (!stageProgress.allCompleted) {
     return ST_WORKFLOW_STEPS[1];
   }
-  return ST_WORKFLOW_STEPS[2];
+  if (!hasEffectiveSigning(status)) {
+    return ST_WORKFLOW_STEPS[2];
+  }
+  return ST_WORKFLOW_STEPS[3];
 }
 
 export function getNewProductWaitingLabel(
@@ -1099,6 +1122,8 @@ export interface StEncodedStepsPayload {
   s2d?: string | null;
   sf?: boolean;
   sfd?: string | null;
+  hsg?: boolean;
+  sgd?: string | null;
   hst?: boolean;
   std?: string | null;
 }
@@ -1154,6 +1179,8 @@ export function encodeStepsIntoNotes(
     stage_sol2_date?: string | null;
     has_stage_fin?: boolean;
     stage_fin_date?: string | null;
+    has_signing?: boolean;
+    signing_date?: string | null;
     has_st: boolean;
     st_date: string | null;
   }
@@ -1187,6 +1214,9 @@ export function encodeStepsIntoNotes(
     ...(status.has_stage_fin
       ? { sf: true, sfd: status.stage_fin_date || null }
       : {}),
+    ...(status.has_signing
+      ? { hsg: true, sgd: status.signing_date || null }
+      : {}),
     hst: Boolean(status.has_st),
     std: status.st_date || null,
   };
@@ -1218,6 +1248,9 @@ export function normalizeStNewProductStatusRow(
     'has_stage_cut' in row ||
     'has_stage_fin' in row;
 
+  const hasNativeSigningColumns =
+    'has_signing' in row || 'signing_date' in row;
+
   const normDate = (val: unknown): string | null =>
     toIsoDateOnly(typeof val === 'string' ? val : null) || null;
 
@@ -1231,6 +1264,13 @@ export function normalizeStNewProductStatusRow(
     : encodedSteps
     ? normDate(encodedSteps.pd)
     : normDate(row.process_created_at);
+
+  const has_signing = hasNativeSigningColumns
+    ? Boolean(row.has_signing)
+    : Boolean(encodedSteps?.hsg);
+  const signing_date = hasNativeSigningColumns
+    ? normDate(row.signing_date)
+    : normDate(encodedSteps?.sgd);
 
   const legacyAppliedDate = normDate(row.price_applied_at);
   const has_st = hasNativeWorkflowColumns
@@ -1279,6 +1319,8 @@ export function normalizeStNewProductStatusRow(
     stage_sol2_date: readStageDate('stage_sol2_date', 's2d'),
     has_stage_fin: readStageBool('has_stage_fin', 'sf'),
     stage_fin_date: readStageDate('stage_fin_date', 'sfd'),
+    has_signing,
+    signing_date,
     has_st,
     st_date,
     has_quote: Boolean(row.has_quote ?? encodedSteps?.hq ?? row.has_unit_price),
@@ -1669,6 +1711,8 @@ export function buildSingleStageStatusPayload(
     stage_sol2_date: st?.stage_sol2_date || null,
     has_stage_fin: Boolean(st?.has_stage_fin),
     stage_fin_date: st?.stage_fin_date || null,
+    has_signing: Boolean(st?.has_signing),
+    signing_date: st?.signing_date || null,
     has_st: Boolean(st?.has_st),
     st_date: st?.st_date || null,
     unit_price: st?.unit_price ?? null,
@@ -1682,3 +1726,92 @@ export function buildSingleStageStatusPayload(
     [stage.dateField]: cleanDate,
   };
 }
+
+export type StSigningDisplayState = 'done' | 'waiting' | 'pending';
+
+export function getSigningDisplayState(
+  status: StNewProductStatus | null | undefined,
+  allStagesCompleted: boolean
+): { state: StSigningDisplayState; tooltip: string } {
+  const isDone = Boolean(status?.has_signing || status?.has_st);
+  if (isDone) {
+    const dt = toIsoDateOnly(status?.signing_date);
+    return {
+      state: 'done',
+      tooltip: dt
+        ? `Đã trình ký: ${formatStDateVN(dt)}`
+        : status?.has_signing
+        ? 'Đã hoàn thành bước trình ký'
+        : 'Đã áp dụng ST (hoàn thành trình ký)',
+    };
+  }
+  if (allStagesCompleted) {
+    return {
+      state: 'waiting',
+      tooltip: 'Chờ tạo file & trình ký',
+    };
+  }
+  return {
+    state: 'pending',
+    tooltip: 'Chưa tới bước trình ký (Bấm để cập nhật nhanh)',
+  };
+}
+
+export function buildSigningInitialState(
+  status: StNewProductStatus | null | undefined,
+  todayIso: string = getLocalIsoDateToday()
+): { done: boolean; date: string } {
+  const existingDone = Boolean(status?.has_signing);
+  const existingDate = toIsoDateOnly(status?.signing_date);
+  if (existingDone) {
+    return {
+      done: true,
+      date: existingDate || todayIso,
+    };
+  }
+  return {
+    done: true,
+    date: todayIso,
+  };
+}
+
+export function buildSigningStatusPayload(
+  item: StProductWithStatus,
+  done: boolean,
+  dateIso: string,
+  fallbackTodayIso: string = getLocalIsoDateToday()
+) {
+  const st = item.status;
+  const cleanDate = done
+    ? toIsoDateOnly(dateIso) || fallbackTodayIso
+    : null;
+
+  return {
+    id: st?.id || null,
+    product_id: item.product.id,
+    has_process_erp: Boolean(st?.has_process_erp),
+    process_erp_date: st?.process_erp_date || null,
+    has_stage_win: Boolean(st?.has_stage_win),
+    stage_win_date: st?.stage_win_date || null,
+    has_stage_cut: Boolean(st?.has_stage_cut),
+    stage_cut_date: st?.stage_cut_date || null,
+    has_stage_sol: Boolean(st?.has_stage_sol),
+    stage_sol_date: st?.stage_sol_date || null,
+    has_stage_ass: Boolean(st?.has_stage_ass),
+    stage_ass_date: st?.stage_ass_date || null,
+    has_stage_imp: Boolean(st?.has_stage_imp),
+    stage_imp_date: st?.stage_imp_date || null,
+    has_stage_sol2: Boolean(st?.has_stage_sol2),
+    stage_sol2_date: st?.stage_sol2_date || null,
+    has_stage_fin: Boolean(st?.has_stage_fin),
+    stage_fin_date: st?.stage_fin_date || null,
+    has_signing: done,
+    signing_date: cleanDate,
+    has_st: Boolean(st?.has_st),
+    st_date: st?.st_date || null,
+    unit_price: st?.unit_price ?? null,
+    currency: st?.currency || 'VND',
+    notes: st?.notes || null,
+  };
+}
+
