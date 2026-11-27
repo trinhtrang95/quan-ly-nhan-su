@@ -297,15 +297,22 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
           </div>
         </div>
 
-        {/* KPI 4: Phiếu yêu cầu tiếp nhận trong kỳ + Báo giá khách hàng summary */}
+        {/* KPI 4: Phiếu yêu cầu tiếp nhận trong kỳ */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between gap-3">
           <div className="flex items-start justify-between gap-2">
             <div>
               <div className="text-xs font-semibold text-slate-500">
                 Phiếu yêu cầu tiếp nhận trong kỳ
               </div>
-              <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1.5">
-                {isLoading ? '—' : formatNumberVN(metrics.requestsInPeriodCount)}
+              <div className="flex items-baseline gap-2 mt-1.5">
+                <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                  {isLoading ? '—' : formatNumberVN(metrics.requestsInPeriodCount)}
+                </div>
+                {!isLoading && (
+                  <span className="text-[11px] font-medium text-slate-500">
+                    hạng mục ({formatNumberVN(metrics.requestsUniqueInPeriodCount)} tờ phiếu)
+                  </span>
+                )}
               </div>
             </div>
             <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
@@ -315,7 +322,8 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
 
           <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
             <span className="text-slate-500 font-mono tabular-nums">
-              Tháng trước: {formatNumberVN(metrics.requestsInPrevPeriodCount)} phiếu
+              Tháng trước: {formatNumberVN(metrics.requestsInPrevPeriodCount)} mục (
+              {formatNumberVN(metrics.requestsUniqueInPrevPeriodCount)} tờ)
             </span>
             <button
               type="button"
@@ -337,7 +345,8 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
               Phiếu yêu cầu theo Bộ phận YC ({periodRange.currentLabel})
             </h3>
             <span className="text-xs font-mono text-slate-500 tabular-nums">
-              {formatNumberVN(metrics.requestsInPeriodCount)} phiếu
+              {formatNumberVN(metrics.requestsInPeriodCount)} mục ·{' '}
+              {formatNumberVN(metrics.requestsUniqueInPeriodCount)} tờ
             </span>
           </div>
           <div className="p-3 overflow-y-auto max-h-80 divide-y divide-slate-100">
@@ -370,7 +379,7 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
               Phiếu yêu cầu theo Tình trạng xử lý
             </h3>
             <span className="text-xs font-mono text-slate-500 tabular-nums">
-              6 trạng thái
+              3 trạng thái
             </span>
           </div>
           <div className="p-3 space-y-2">

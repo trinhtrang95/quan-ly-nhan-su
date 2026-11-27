@@ -1,8 +1,11 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
+  ArrowUpDown,
   Check,
-  ChevronDown,
+  ClipboardCheck,
   ClipboardList,
+  FileSpreadsheet,
   Loader2,
   Pencil,
   Plus,
@@ -11,24 +14,34 @@ import {
   X,
 } from 'lucide-react';
 import { CompanyDepartment, DepartmentGroup } from '../../types/hr';
-import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
+  computeChangeRequestStatusCounts,
+  extractAvailableYearsFromChangeRequests,
+  filterChangeRequestsList,
   formatNumberVN,
   formatStDateVN,
-  getLocalIsoDateToday,
-  ST_CHANGE_REQUEST_STATUSES,
+  sortChangeRequestsList,
+  ST_CHANGE_REQUEST_PROCESS_STAGES,
+  ST_CHANGE_REQUEST_SORT_OPTIONS,
   ST_STATUS_BADGE_META,
   StChangeRequest,
+  StChangeRequestSortMode,
   StChangeRequestStatus,
   StProduct,
 } from '../../utils/stWorkLogic';
 import {
-  createStChangeRequest,
   DEFAULT_COMPANY_DEPARTMENTS,
   deleteStChangeRequest,
   mergeCompanyDepartmentOptions,
-  updateStChangeRequest,
+  mergeGroupOptions,
 } from '../../services/stWorkService';
+import { StChangeRequestCreateModal } from './StChangeRequestCreateModal';
+import { StChangeRequestImportModal } from './StChangeRequestImportModal';
+import {
+  formatStChangeRequestError,
+  StChangeRequestEditModal,
+  StChangeRequestStatusModal,
+} from './StChangeRequestModals';
 
 export interface StChangeRequestsTabProps {
   changeRequests: StChangeRequest[];
@@ -40,125 +53,73 @@ export interface StChangeRequestsTabProps {
   onShowToast?: (message: string) => void;
 }
 
-interface ProductCodeComboboxProps {
-  value: string;
-  products: StProduct[];
-  onChangeValue: (code: string) => void;
-  onSelectProduct: (product: StProduct) => void;
-  placeholder?: string;
-  ariaLabel?: string;
-  compact?: boolean;
-}
-
-const ProductCodeCombobox: React.FC<ProductCodeComboboxProps> = ({
-  value,
-  products,
-  onChangeValue,
-  onSelectProduct,
-  placeholder = 'Chọn / nhập mã hàng...',
-  ariaLabel = 'Mã hàng',
-  compact = false,
-}) => {
-  const [open, setOpen] = useState(false);
-  const blurTimer = useRef<number | null>(null);
-
-  const suggestions = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    const list = q
-      ? products.filter(
-          (p) =>
-            p.product_code.toLowerCase().includes(q) ||
-            p.product_name.toLowerCase().includes(q) ||
-            p.specification.toLowerCase().includes(q)
-        )
-      : products;
-    return list.slice(0, 12);
-  }, [value, products]);
-
-  return (
-    <div className="relative">
-      <div className="relative flex items-center">
-        <input
-          type="text"
-          value={value}
-          onFocus={() => {
-            if (blurTimer.current) window.clearTimeout(blurTimer.current);
-            setOpen(true);
-          }}
-          onBlur={() => {
-            blurTimer.current = window.setTimeout(() => setOpen(false), 160);
-          }}
-          onChange={(e) => {
-            onChangeValue(e.target.value);
-            setOpen(true);
-          }}
-          placeholder={placeholder}
-          aria-label={ariaLabel}
-          className={`w-full pr-6 font-mono bg-white border rounded-lg focus:outline-none focus:border-[#14539E] ${
-            compact
-              ? 'h-7 px-2 text-xs border-[#14539E]'
-              : 'h-8 px-2.5 text-xs border-slate-300'
-          }`}
-        />
-        <button
-          type="button"
-          tabIndex={-1}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            setOpen((prev) => !prev);
-          }}
-          aria-label="Mở danh sách mã hàng"
-          className="absolute right-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-        >
-          <ChevronDown className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {open && suggestions.length > 0 && (
-        <div className="absolute left-0 right-0 mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto divide-y divide-slate-100">
-          {suggestions.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onSelectProduct(p);
-                setOpen(false);
-              }}
-              className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50/70 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs font-bold text-[#14539E]">
-                  {p.product_code}
-                </span>
-                <span className="text-[10px] text-slate-400 truncate">
-                  {p.line_name} · {p.customer_short_name}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-600 truncate">
-                {p.product_name}
-                {p.specification ? ` · ${p.specification}` : ''}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+type ChangeRequestStatusFilter = 'ALL' | StChangeRequestStatus;
 
 export const StChangeRequestsTab: React.FC<StChangeRequestsTabProps> = ({
   changeRequests,
   products,
   companyDepartments = DEFAULT_COMPANY_DEPARTMENTS,
+  groups = [],
   isLoading,
   onRefresh,
   onShowToast,
 }) => {
-  const [deptFilter, setDeptFilter] = useState<string>('ALL');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showAddForm, setShowAddForm] = useState<boolean>(true);
+  const [yearFilter, setYearFilter] = useState<string>(() =>
+    new Date().getFullYear().toString()
+  );
+  const [monthFilter, setMonthFilter] = useState<string>(() =>
+    (new Date().getMonth() + 1).toString()
+  );
+  const [deptFilter, setDeptFilter] = useState<string>('ALL');
+  const [stageFilter, setStageFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] =
+    useState<ChangeRequestStatusFilter>('ALL');
+  const [sortMode, setSortMode] =
+    useState<StChangeRequestSortMode>('received_desc');
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState<boolean>(false);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Modals
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [statusModalTarget, setStatusModalTarget] =
+    useState<StChangeRequest | null>(null);
+  const [editModalTarget, setEditModalTarget] =
+    useState<StChangeRequest | null>(null);
+
+  // Row delete confirmation & error banner
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string>('');
+
+  useEffect(() => {
+    if (!isSortMenuOpen) return;
+    const handlePointerDown = (ev: MouseEvent) => {
+      if (
+        sortMenuRef.current &&
+        !sortMenuRef.current.contains(ev.target as Node)
+      ) {
+        setIsSortMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setIsSortMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSortMenuOpen]);
+
+  const currentYearNum = new Date().getFullYear();
+
+  const availableYears = useMemo(
+    () => extractAvailableYearsFromChangeRequests(changeRequests, currentYearNum),
+    [changeRequests, currentYearNum]
+  );
 
   const departmentOptions = useMemo(
     () =>
@@ -169,660 +130,576 @@ export const StChangeRequestsTab: React.FC<StChangeRequestsTabProps> = ({
     [companyDepartments, changeRequests]
   );
 
-  // New Change Request form state
-  const [newDept, setNewDept] = useState<string>('');
-  const [newContent, setNewContent] = useState<string>('');
-  const [newReceivedAt, setNewReceivedAt] = useState<string>(() =>
-    getLocalIsoDateToday()
+  const groupOptions = useMemo(
+    () => mergeGroupOptions(groups, changeRequests),
+    [groups, changeRequests]
   );
-  const [newProductCode, setNewProductCode] = useState<string>('');
-  const [newSpec, setNewSpec] = useState<string>('');
-  const [newStatus, setNewStatus] = useState<StChangeRequestStatus>('Mới');
-  const [newProcessedAt, setNewProcessedAt] = useState<string>('');
-  const [newAppliedVersion, setNewAppliedVersion] = useState<string>('');
-  const [newNotes, setNewNotes] = useState<string>('');
-  const [isAdding, setIsAdding] = useState<boolean>(false);
 
-  // Edit row state
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDept, setEditDept] = useState<string>('');
-  const [editContent, setEditContent] = useState<string>('');
-  const [editReceivedAt, setEditReceivedAt] = useState<string>('');
-  const [editProductCode, setEditProductCode] = useState<string>('');
-  const [editSpec, setEditSpec] = useState<string>('');
-  const [editStatus, setEditStatus] = useState<StChangeRequestStatus>('Mới');
-  const [editProcessedAt, setEditProcessedAt] = useState<string>('');
-  const [editAppliedVersion, setEditAppliedVersion] = useState<string>('');
-  const [editNotes, setEditNotes] = useState<string>('');
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // Pre-status filtered list drives the 4 dynamic counter tabs
+  const preStatusFilteredRequests = useMemo(
+    () =>
+      filterChangeRequestsList(changeRequests, {
+        searchQuery,
+        yearFilter,
+        monthFilter,
+        deptFilter,
+        stageFilter,
+        statusFilter: 'ALL',
+      }),
+    [changeRequests, searchQuery, yearFilter, monthFilter, deptFilter, stageFilter]
+  );
 
-  const effectiveNewDept = newDept || departmentOptions[0] || '';
+  const statusCounts = useMemo(
+    () => computeChangeRequestStatusCounts(preStatusFilteredRequests),
+    [preStatusFilteredRequests]
+  );
 
-  const filteredRequests = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return changeRequests.filter((req) => {
-      if (deptFilter !== 'ALL' && req.department !== deptFilter) return false;
-      if (statusFilter !== 'ALL' && req.status !== statusFilter) return false;
-      if (q) {
-        const hit =
-          req.product_code.toLowerCase().includes(q) ||
-          req.content.toLowerCase().includes(q) ||
-          req.specification.toLowerCase().includes(q) ||
-          req.department.toLowerCase().includes(q);
-        if (!hit) return false;
-      }
-      return true;
-    });
-  }, [changeRequests, deptFilter, statusFilter, searchQuery]);
+  const filteredAndSortedRequests = useMemo(() => {
+    const filtered =
+      statusFilter === 'ALL'
+        ? preStatusFilteredRequests
+        : preStatusFilteredRequests.filter((r) => r.status === statusFilter);
+    return sortChangeRequestsList(filtered, sortMode);
+  }, [preStatusFilteredRequests, statusFilter, sortMode]);
 
-  const handleAddRequest = async () => {
-    if (!effectiveNewDept) {
-      onShowToast?.('Vui lòng chọn Bộ phận yêu cầu.');
-      return;
-    }
-    if (!newContent.trim()) {
-      onShowToast?.('Vui lòng nhập Nội dung yêu cầu.');
-      return;
-    }
-    setIsAdding(true);
+  const activeSortOption = useMemo(
+    () =>
+      ST_CHANGE_REQUEST_SORT_OPTIONS.find((opt) => opt.value === sortMode) ||
+      ST_CHANGE_REQUEST_SORT_OPTIONS[0],
+    [sortMode]
+  );
+
+  const handleDeleteRow = async (req: StChangeRequest) => {
+    setDeletingId(req.id);
+    setActionError('');
     try {
-      await createStChangeRequest({
-        department: effectiveNewDept,
-        content: newContent.trim(),
-        received_at: newReceivedAt || getLocalIsoDateToday(),
-        product_code: newProductCode.trim(),
-        specification: newSpec.trim(),
-        status: newStatus,
-        processed_at: newProcessedAt || null,
-        applied_version: newAppliedVersion.trim() || null,
-        notes: newNotes.trim() || null,
-      });
-      await onRefresh();
-      setNewContent('');
-      setNewProductCode('');
-      setNewSpec('');
-      setNewStatus('Mới');
-      setNewProcessedAt('');
-      setNewAppliedVersion('');
-      setNewNotes('');
-      onShowToast?.('Đã thêm phiếu yêu cầu thay đổi mới.');
-    } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
-    } finally {
-      setIsAdding(false);
-    }
-  };
-
-  const handleStartEdit = (req: StChangeRequest) => {
-    setEditingId(req.id);
-    setEditDept(req.department);
-    setEditContent(req.content);
-    setEditReceivedAt(req.received_at);
-    setEditProductCode(req.product_code);
-    setEditSpec(req.specification);
-    setEditStatus(req.status);
-    setEditProcessedAt(req.processed_at || '');
-    setEditAppliedVersion(req.applied_version || '');
-    setEditNotes(req.notes || '');
-    setConfirmDeleteId(null);
-  };
-
-  const handleSaveEdit = async (id: string) => {
-    setBusyId(id);
-    try {
-      await updateStChangeRequest(id, {
-        department: editDept,
-        content: editContent,
-        received_at: editReceivedAt || getLocalIsoDateToday(),
-        product_code: editProductCode,
-        specification: editSpec,
-        status: editStatus,
-        processed_at: editProcessedAt || null,
-        applied_version: editAppliedVersion || null,
-        notes: editNotes || null,
-      });
-      await onRefresh();
-      setEditingId(null);
-      onShowToast?.('Đã cập nhật phiếu yêu cầu.');
-    } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    setBusyId(id);
-    try {
-      await deleteStChangeRequest(id);
+      await deleteStChangeRequest(req.id);
       await onRefresh();
       setConfirmDeleteId(null);
-      onShowToast?.('Đã xóa phiếu yêu cầu.');
+      onShowToast?.('Đã xóa hạng mục phiếu yêu cầu.');
     } catch (err) {
-      onShowToast?.(getFriendlyErrorMessage(err));
+      const msg = formatStChangeRequestError(err);
+      setActionError(msg);
+      onShowToast?.(msg);
     } finally {
-      setBusyId(null);
+      setDeletingId(null);
     }
   };
 
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setYearFilter('ALL');
+    setMonthFilter('ALL');
+    setDeptFilter('ALL');
+    setStageFilter('ALL');
+    setStatusFilter('ALL');
+  };
+
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) ||
+    yearFilter !== 'ALL' ||
+    monthFilter !== 'ALL' ||
+    deptFilter !== 'ALL' ||
+    stageFilter !== 'ALL' ||
+    statusFilter !== 'ALL';
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden">
-      {/* Top Filter Toolbar */}
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={deptFilter}
-            onChange={(e) => setDeptFilter(e.target.value)}
-            aria-label="Lọc theo Bộ phận yêu cầu"
-            className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Bộ phận YC</option>
-            {departmentOptions.map((dept) => (
-              <option key={dept} value={dept}>
-                {dept}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label="Lọc theo Tình trạng xử lý"
-            className="h-8 px-2.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-          >
-            <option value="ALL">Tất cả Tình trạng</option>
-            {ST_CHANGE_REQUEST_STATUSES.map((st) => (
-              <option key={st} value={st}>
-                {st}
-              </option>
-            ))}
-          </select>
-
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm mã hàng, nội dung..."
-              aria-label="Tìm kiếm phiếu yêu cầu"
-              className="w-full h-8 pl-8 pr-7 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Xóa từ khóa tìm kiếm"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+    <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl font-sans">
+      {/* Unified Single Horizontal Toolbar */}
+      <div
+        data-testid="st-change-requests-toolbar"
+        className="px-2.5 py-2 border-b border-slate-200 bg-slate-50/70 rounded-t-xl flex items-center gap-1 flex-nowrap overflow-x-auto xl:overflow-visible shrink-0"
+      >
+        {/* 1. Search Input */}
+        <div className="relative flex-1 min-w-[116px] max-w-[220px]">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            data-testid="st-cr-search-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Tìm mã phiếu, mã hàng, quy cách, nội dung..."
+            aria-label="Tìm kiếm phiếu yêu cầu"
+            className="w-full h-9 pl-7 pr-6 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Xóa từ khóa tìm kiếm"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
+        {/* 2. Năm */}
+        <select
+          data-testid="st-cr-year-filter"
+          value={yearFilter}
+          onChange={(e) => setYearFilter(e.target.value)}
+          aria-label="Lọc theo Năm"
+          className="h-9 px-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer shrink-0"
+        >
+          <option value="ALL">Tất cả Năm</option>
+          {availableYears.map((yr) => (
+            <option key={yr} value={String(yr)}>
+              Năm {yr}
+            </option>
+          ))}
+        </select>
+
+        {/* 3. Tháng */}
+        <select
+          data-testid="st-cr-month-filter"
+          value={monthFilter}
+          onChange={(e) => setMonthFilter(e.target.value)}
+          aria-label="Lọc theo Tháng"
+          className="h-9 px-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer shrink-0"
+        >
+          <option value="ALL">Tất cả Tháng</option>
+          {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
+            <option key={m} value={String(m)}>
+              Tháng {m}
+            </option>
+          ))}
+        </select>
+
+        {/* 4. Bộ phận YC */}
+        <select
+          data-testid="st-cr-dept-filter"
+          value={deptFilter}
+          onChange={(e) => setDeptFilter(e.target.value)}
+          aria-label="Lọc theo Bộ phận yêu cầu"
+          className="h-9 px-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer shrink-0"
+        >
+          <option value="ALL">Tất cả Bộ phận</option>
+          {departmentOptions.map((dept) => (
+            <option key={dept} value={dept}>
+              {dept}
+            </option>
+          ))}
+        </select>
+
+        {/* 5. Công đoạn */}
+        <select
+          data-testid="st-cr-stage-filter"
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          aria-label="Lọc theo Công đoạn"
+          className="h-9 px-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer shrink-0"
+        >
+          <option value="ALL">Tất cả Công đoạn</option>
+          {ST_CHANGE_REQUEST_PROCESS_STAGES.map((stage) => (
+            <option key={stage} value={stage}>
+              {stage}
+            </option>
+          ))}
+        </select>
+
+        {/* 6. Status Counter Tabs */}
+        <div className="h-9 inline-flex items-center gap-0.5 p-0.5 bg-white border border-slate-300 rounded-lg shrink-0">
+          <button
+            type="button"
+            data-testid="st-cr-status-tab-all"
+            onClick={() => setStatusFilter('ALL')}
+            className={`h-full px-1 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'ALL'
+                ? 'bg-[#14539E] text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Tất cả ({formatNumberVN(statusCounts.total)})
+          </button>
+          <button
+            type="button"
+            data-testid="st-cr-status-tab-checking"
+            onClick={() => setStatusFilter('Đang kiểm tra')}
+            className={`h-full px-1 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'Đang kiểm tra'
+                ? 'bg-amber-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Đang kiểm tra ({formatNumberVN(statusCounts.checking)})
+          </button>
+          <button
+            type="button"
+            data-testid="st-cr-status-tab-changed"
+            onClick={() => setStatusFilter('Đã thay đổi')}
+            className={`h-full px-1 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'Đã thay đổi'
+                ? 'bg-emerald-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Đã thay đổi ({formatNumberVN(statusCounts.changed)})
+          </button>
+          <button
+            type="button"
+            data-testid="st-cr-status-tab-unchanged"
+            onClick={() => setStatusFilter('Không thay đổi')}
+            className={`h-full px-1 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              statusFilter === 'Không thay đổi'
+                ? 'bg-slate-600 text-white'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Không thay đổi ({formatNumberVN(statusCounts.unchanged)})
+          </button>
+        </div>
+
+        {/* 7. Icon-only Sắp xếp theo */}
+        <div className="relative shrink-0" ref={sortMenuRef}>
+          <button
+            type="button"
+            data-testid="st-cr-sort-btn"
+            onClick={() => setIsSortMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={isSortMenuOpen}
+            aria-label="Sắp xếp theo"
+            title={`Sắp xếp theo (${activeSortOption.label})`}
+            className={`w-9 h-9 rounded-lg border text-xs font-medium inline-flex items-center justify-center cursor-pointer transition-colors shrink-0 ${
+              isSortMenuOpen
+                ? 'border-[#14539E] bg-blue-50 text-[#14539E]'
+                : 'border-slate-300 bg-white hover:border-[#14539E] text-slate-700 hover:text-[#14539E]'
+            }`}
+          >
+            <ArrowUpDown className="w-4 h-4" />
+          </button>
+
+          {isSortMenuOpen && (
+            <div
+              role="menu"
+              data-testid="st-cr-sort-menu"
+              className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30"
+            >
+              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Sắp xếp phiếu yêu cầu
+              </div>
+              {ST_CHANGE_REQUEST_SORT_OPTIONS.map((opt) => {
+                const active = sortMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    data-testid={`st-cr-sort-option-${opt.value}`}
+                    onClick={() => {
+                      setSortMode(opt.value);
+                      setIsSortMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left text-xs font-medium flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-blue-50/80 text-[#14539E] font-semibold'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 8. + Thêm phiếu (far right) */}
         <button
           type="button"
-          onClick={() => setShowAddForm((prev) => !prev)}
-          className={`h-8 px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
-            showAddForm
-              ? 'bg-[#14539E] text-white border-[#14539E]'
-              : 'bg-white text-[#14539E] border-[#14539E]/40 hover:bg-blue-50'
-          }`}
+          data-testid="st-cr-add-btn"
+          onClick={() => setIsCreateModalOpen(true)}
+          className="ml-auto h-9 px-2.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>{showAddForm ? 'Ẩn khung thêm phiếu' : 'Thêm phiếu yêu cầu'}</span>
+          <span>Thêm phiếu</span>
         </button>
       </div>
 
-      {/* Quick-Add Change Request Form */}
-      {showAddForm && (
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-white shrink-0">
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="w-40 shrink-0">
-                <select
-                  value={effectiveNewDept}
-                  onChange={(e) => setNewDept(e.target.value)}
-                  aria-label="Bộ phận yêu cầu mới"
-                  className="w-full h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-                >
-                  {departmentOptions.length === 0 ? (
-                    <option value="">-- Chưa có Bộ phận --</option>
-                  ) : (
-                    departmentOptions.map((dept) => (
-                      <option key={dept} value={dept}>
-                        {dept}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              <div className="flex-1 min-w-[220px]">
-                <input
-                  type="text"
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  placeholder="Nội dung yêu cầu *"
-                  aria-label="Nội dung yêu cầu mới"
-                  className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-
-              <div className="w-[140px] shrink-0">
-                <input
-                  type="date"
-                  value={newReceivedAt}
-                  onChange={(e) => setNewReceivedAt(e.target.value)}
-                  aria-label="Ngày tiếp nhận"
-                  title="Ngày tiếp nhận"
-                  className="w-full h-8 px-2 text-[11px] font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-
-              <div className="w-48 shrink-0">
-                <ProductCodeCombobox
-                  value={newProductCode}
-                  products={products}
-                  ariaLabel="Mã hàng phiếu yêu cầu mới"
-                  onChangeValue={(code) => setNewProductCode(code)}
-                  onSelectProduct={(prod) => {
-                    setNewProductCode(prod.product_code);
-                    setNewSpec(prod.specification || '');
-                  }}
-                />
-              </div>
-
-              <div className="w-36 shrink-0">
-                <input
-                  type="text"
-                  value={newSpec}
-                  onChange={(e) => setNewSpec(e.target.value)}
-                  placeholder="Quy cách"
-                  aria-label="Quy cách mới"
-                  className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200/70">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-medium text-slate-500">
-                  Tình trạng:
-                </span>
-                <select
-                  value={newStatus}
-                  onChange={(e) => {
-                    const nextStatus = e.target.value as StChangeRequestStatus;
-                    setNewStatus(nextStatus);
-                    if (
-                      (nextStatus === 'Đã xử lý' ||
-                        nextStatus === 'Đã áp dụng') &&
-                      !newProcessedAt
-                    ) {
-                      setNewProcessedAt(getLocalIsoDateToday());
-                    }
-                  }}
-                  aria-label="Tình trạng xử lý mới"
-                  className="h-8 px-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer"
-                >
-                  {ST_CHANGE_REQUEST_STATUSES.map((st) => (
-                    <option key={st} value={st}>
-                      {st}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-medium text-slate-500">
-                  Ngày xử lý:
-                </span>
-                <input
-                  type="date"
-                  value={newProcessedAt}
-                  onChange={(e) => setNewProcessedAt(e.target.value)}
-                  aria-label="Ngày xử lý mới"
-                  className="h-8 px-2 text-[11px] font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-
-              <div className="w-32 shrink-0">
-                <input
-                  type="text"
-                  value={newAppliedVersion}
-                  onChange={(e) => setNewAppliedVersion(e.target.value)}
-                  placeholder="Phiên bản"
-                  aria-label="Phiên bản áp dụng mới"
-                  className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-
-              <input
-                type="text"
-                value={newNotes}
-                onChange={(e) => setNewNotes(e.target.value)}
-                placeholder="Ghi chú thêm (nếu có)..."
-                aria-label="Ghi chú phiếu yêu cầu mới"
-                className="flex-1 min-w-[180px] h-8 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E]"
-              />
-
-              <button
-                type="button"
-                disabled={isAdding}
-                onClick={() => void handleAddRequest()}
-                className="h-8 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
-              >
-                {isAdding ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Plus className="w-3.5 h-3.5" />
-                )}
-                <span>Thêm phiếu</span>
-              </button>
-            </div>
+      {/* Action error banner (never swallow Supabase errors) */}
+      {actionError && (
+        <div
+          role="alert"
+          className="mx-3 mt-2.5 p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center justify-between gap-2 shrink-0"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="truncate">{actionError}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => setActionError('')}
+            aria-label="Đóng thông báo lỗi"
+            className="text-rose-500 hover:text-rose-700 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
-      {/* Strictly 10-Column Table */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      {/* Read-Only 12-Column Sticky Table */}
+      <div
+        data-testid="st-cr-table-wrapper"
+        className="flex-1 min-h-0 overflow-auto rounded-b-xl"
+      >
         {isLoading && changeRequests.length === 0 ? (
           <div className="p-10 flex items-center justify-center gap-2 text-xs text-slate-500">
             <Loader2 className="w-4 h-4 animate-spin text-[#14539E]" />
-            <span>Đang tải danh sách phiếu yêu cầu...</span>
+            <span>Đang tải nhật ký phiếu yêu cầu...</span>
           </div>
-        ) : filteredRequests.length === 0 ? (
-          <div className="p-12 text-center space-y-2.5">
+        ) : changeRequests.length === 0 ? (
+          <div className="p-12 text-center space-y-3">
             <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
               <ClipboardList className="w-5 h-5" />
             </div>
-            <p className="text-xs text-slate-500">
-              {changeRequests.length === 0
-                ? 'Chưa có phiếu yêu cầu thay đổi nào. Hãy nhập thông tin phía trên để tạo phiếu mới.'
-                : 'Không có phiếu yêu cầu nào khớp bộ lọc hiện tại.'}
+            <p className="text-xs text-slate-600">
+              Chưa có phiếu yêu cầu thay đổi nào. Hãy tạo phiếu mới hoặc nhập từ
+              file Excel.
             </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreateModalOpen(true)}
+                className="h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-medium cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Thêm phiếu</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="h-9 px-3.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Nhập từ file</span>
+              </button>
+            </div>
+          </div>
+        ) : filteredAndSortedRequests.length === 0 ? (
+          <div className="p-12 text-center space-y-2.5">
+            <p className="text-xs text-slate-500">
+              Không có phiếu yêu cầu nào khớp bộ lọc hiện tại.
+            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="h-8 px-3 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-[#14539E] cursor-pointer"
+              >
+                Hiển thị tất cả ({formatNumberVN(changeRequests.length)} hạng mục)
+              </button>
+            )}
           </div>
         ) : (
-          <table className="w-full min-w-[980px] border-collapse text-left">
-            <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+          <table
+            data-testid="st-cr-table"
+            className="w-full min-w-[980px] border-collapse text-left"
+          >
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[9.5px] font-bold text-slate-600 uppercase tracking-tight leading-[1.15] shadow-[0_1px_0_0_rgba(203,213,225,1)]">
               <tr>
-                <th className="px-2 py-2 w-10 text-center border-r border-slate-200/70">
+                <th className="px-1 py-2 w-8 text-center border-r border-b border-slate-200 whitespace-nowrap">
                   STT
                 </th>
-                <th className="px-2 py-2 w-28 border-r border-slate-200/70">
-                  Bộ phận YC
+                <th className="px-1.5 py-2 w-[78px] text-center border-r border-b border-slate-200 whitespace-nowrap">
+                  NGÀY NHẬN <br />YC
                 </th>
-                <th className="px-2 py-2 border-r border-slate-200/70">
-                  Nội dung yêu cầu
+                <th className="px-1.5 py-2 w-[78px] border-r border-b border-slate-200 whitespace-nowrap">
+                  BỘ PHẬN <br />YC
                 </th>
-                <th className="px-2 py-2 w-24 border-r border-slate-200/70">
-                  Ngày tiếp nhận
+                <th className="px-1.5 py-2 w-[96px] border-r border-b border-slate-200 whitespace-nowrap">
+                  MÃ HÀNG
                 </th>
-                <th className="px-2 py-2 w-24 border-r border-slate-200/70">
-                  Mã hàng
+                <th className="px-1.5 py-2 w-[88px] border-r border-b border-slate-200 whitespace-nowrap">
+                  QUY CÁCH
                 </th>
-                <th className="px-2 py-2 w-24 border-r border-slate-200/70">
-                  Quy cách
+                <th className="px-1.5 py-2 w-[84px] border-r border-b border-slate-200 whitespace-nowrap">
+                  CÔNG ĐOẠN
                 </th>
-                <th className="px-2 py-2 w-24 border-r border-slate-200/70">
-                  Tình trạng xử lý
+                <th className="px-2 py-2 min-w-[170px] border-r border-b border-slate-200">
+                  NỘI DUNG YÊU CẦU <br />THAY ĐỔI
                 </th>
-                <th className="px-2 py-2 w-24 border-r border-slate-200/70">
-                  Ngày xử lý
+                <th className="px-1.5 py-2 w-[104px] text-center border-r border-b border-slate-200 whitespace-nowrap">
+                  TÌNH TRẠNG
                 </th>
-                <th className="px-2 py-2 w-20 border-r border-slate-200/70">
-                  Phiên bản áp dụng
+                <th className="px-1.5 py-2 w-[92px] text-center border-r border-b border-slate-200">
+                  NGÀY ÁP DỤNG <br />ĐƠN GIÁ THAY ĐỔI
                 </th>
-                <th className="px-2 py-2 w-44">Ghi chú</th>
+                <th className="px-1.5 py-2 w-[68px] text-center border-r border-b border-slate-200">
+                  PHIÊN BẢN <br />ÁP DỤNG
+                </th>
+                <th className="px-1.5 py-2 w-[110px] border-r border-b border-slate-200 whitespace-nowrap">
+                  GHI CHÚ
+                </th>
+                <th className="px-1 py-2 w-[82px] text-center border-b border-slate-200 whitespace-nowrap">
+                  THAO TÁC
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-xs">
-              {filteredRequests.map((req, idx) => {
-                const isEditing = editingId === req.id;
-                const isBusy = busyId === req.id;
+              {filteredAndSortedRequests.map((req, idx) => {
                 const badge = ST_STATUS_BADGE_META[req.status];
+                const isAllModel =
+                  req.product_code.trim().toUpperCase() === 'ALL MODEL';
+                const isConfirmingDelete = confirmDeleteId === req.id;
+                const isDeleting = deletingId === req.id;
+                const codeTooltip = `Mã phiếu: ${
+                  req.request_code || 'Chưa gắn mã'
+                } · Nhóm xử lý: ${req.assigned_group || 'ST'}`;
 
                 return (
                   <tr
                     key={req.id}
-                    className="hover:bg-blue-50/30 transition-colors"
+                    data-testid={`st-cr-row-${req.id}`}
+                    className="hover:bg-[#F3F8FF] transition-colors"
                   >
-                    <td className="px-2 py-1.5 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
+                    {/* 1. STT */}
+                    <td className="px-1.5 py-2 text-center font-mono text-[11px] text-slate-500 tabular-nums border-r border-slate-100">
                       {formatNumberVN(idx + 1)}
                     </td>
 
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 font-semibold text-slate-800">
-                      {isEditing ? (
-                        <select
-                          value={editDept}
-                          onChange={(e) => setEditDept(e.target.value)}
-                          aria-label="Sửa Bộ phận YC"
-                          className="w-full h-7 px-1.5 text-xs border border-[#14539E] rounded bg-white"
-                        >
-                          {departmentOptions.map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        req.department
-                      )}
+                    {/* 2. NGÀY NHẬN YC */}
+                    <td className="px-2 py-2 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap border-r border-slate-100">
+                      {formatStDateVN(req.received_at)}
                     </td>
 
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 text-slate-900">
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={editContent}
-                          onChange={(e) => setEditContent(e.target.value)}
-                          aria-label="Sửa Nội dung yêu cầu"
-                          className="w-full h-7 px-2 text-xs border border-[#14539E] rounded bg-white"
-                        />
-                      ) : (
-                        req.content
-                      )}
+                    {/* 3. BỘ PHẬN YC */}
+                    <td
+                      title={req.department || undefined}
+                      className="px-2 py-2 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100"
+                    >
+                      {req.department || '—'}
                     </td>
 
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
-                      {isEditing ? (
-                        <input
-                          type="date"
-                          value={editReceivedAt}
-                          onChange={(e) => setEditReceivedAt(e.target.value)}
-                          aria-label="Sửa Ngày tiếp nhận"
-                          className="w-full h-7 px-1 text-[11px] font-mono border border-[#14539E] rounded bg-white"
-                        />
-                      ) : (
-                        formatStDateVN(req.received_at)
-                      )}
-                    </td>
-
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 font-mono font-semibold text-[#14539E]">
-                      {isEditing ? (
-                        <ProductCodeCombobox
-                          value={editProductCode}
-                          products={products}
-                          compact
-                          ariaLabel="Sửa Mã hàng"
-                          onChangeValue={(code) => setEditProductCode(code)}
-                          onSelectProduct={(prod) => {
-                            setEditProductCode(prod.product_code);
-                            setEditSpec(prod.specification || '');
-                          }}
-                        />
-                      ) : (
-                        req.product_code || '—'
-                      )}
-                    </td>
-
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 text-slate-600">
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={editSpec}
-                          onChange={(e) => setEditSpec(e.target.value)}
-                          aria-label="Sửa Quy cách"
-                          className="w-full h-7 px-2 text-xs border border-[#14539E] rounded bg-white"
-                        />
-                      ) : (
-                        req.specification || '—'
-                      )}
-                    </td>
-
-                    <td className="px-2.5 py-1.5 border-r border-slate-100">
-                      {isEditing ? (
-                        <select
-                          value={editStatus}
-                          onChange={(e) => {
-                            const nextSt = e.target
-                              .value as StChangeRequestStatus;
-                            setEditStatus(nextSt);
-                            if (
-                              (nextSt === 'Đã xử lý' ||
-                                nextSt === 'Đã áp dụng') &&
-                              !editProcessedAt
-                            ) {
-                              setEditProcessedAt(getLocalIsoDateToday());
-                            }
-                          }}
-                          aria-label="Sửa Tình trạng xử lý"
-                          className="w-full h-7 px-1.5 text-xs border border-[#14539E] rounded bg-white"
-                        >
-                          {ST_CHANGE_REQUEST_STATUSES.map((st) => (
-                            <option key={st} value={st}>
-                              {st}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[11px] font-semibold whitespace-nowrap ${badge.bgClass} ${badge.textClass} ${badge.borderClass}`}
-                        >
-                          {req.status}
+                    {/* 4. MÃ HÀNG */}
+                    <td
+                      title={codeTooltip}
+                      className="px-2 py-2 font-mono text-[11px] font-bold border-r border-slate-100 whitespace-nowrap"
+                    >
+                      {isAllModel ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 text-[#14539E] border border-blue-200 text-[10px] font-bold">
+                          ALL MODEL
                         </span>
-                      )}
-                    </td>
-
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap">
-                      {isEditing ? (
-                        <input
-                          type="date"
-                          value={editProcessedAt}
-                          onChange={(e) => setEditProcessedAt(e.target.value)}
-                          aria-label="Sửa Ngày xử lý"
-                          className="w-full h-7 px-1 text-[11px] font-mono border border-[#14539E] rounded bg-white"
-                        />
+                      ) : req.product_code ? (
+                        <span className="text-[#14539E]">{req.product_code}</span>
                       ) : (
-                        formatStDateVN(req.processed_at)
+                        <span className="text-slate-400 font-normal">—</span>
                       )}
                     </td>
 
-                    <td className="px-2.5 py-1.5 border-r border-slate-100 font-mono text-slate-700">
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={editAppliedVersion}
-                          onChange={(e) =>
-                            setEditAppliedVersion(e.target.value)
-                          }
-                          aria-label="Sửa Phiên bản áp dụng"
-                          className="w-full h-7 px-2 text-xs font-mono border border-[#14539E] rounded bg-white"
-                        />
-                      ) : (
-                        req.applied_version || '—'
+                    {/* 5. QUY CÁCH */}
+                    <td
+                      title={req.specification || undefined}
+                      className="px-2 py-2 text-[11px] text-slate-700 max-w-[120px] truncate border-r border-slate-100"
+                    >
+                      {req.specification || '—'}
+                    </td>
+
+                    {/* 6. CÔNG ĐOẠN */}
+                    <td className="px-2 py-2 text-[11px] font-medium text-slate-700 whitespace-nowrap border-r border-slate-100">
+                      {req.process_stage || (
+                        <span className="text-slate-300">—</span>
                       )}
                     </td>
 
-                    {/* Column 10: Ghi chú + inline Edit/Delete controls */}
-                    <td className="px-2.5 py-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editNotes}
-                            onChange={(e) => setEditNotes(e.target.value)}
-                            aria-label="Sửa Ghi chú"
-                            className="flex-1 min-w-0 h-7 px-2 text-xs border border-[#14539E] rounded bg-white"
-                          />
-                        ) : (
-                          <span className="text-slate-600 truncate">
-                            {req.notes || '—'}
-                          </span>
-                        )}
+                    {/* 7. NỘI DUNG YÊU CẦU THAY ĐỔI */}
+                    <td
+                      title={req.content}
+                      className="px-2.5 py-2 text-slate-900 leading-snug border-r border-slate-100"
+                    >
+                      {req.content}
+                    </td>
 
-                        <div className="inline-flex items-center gap-1 shrink-0">
-                          {isEditing ? (
-                            <>
-                              <button
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => void handleSaveEdit(req.id)}
-                                aria-label="Lưu phiếu yêu cầu"
-                                title="Lưu"
-                                className="w-7 h-7 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center justify-center cursor-pointer"
-                              >
-                                {isBusy ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Check className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingId(null)}
-                                aria-label="Hủy sửa phiếu yêu cầu"
-                                title="Hủy"
-                                className="w-7 h-7 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 inline-flex items-center justify-center cursor-pointer"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          ) : confirmDeleteId === req.id ? (
-                            <>
-                              <button
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => void handleDelete(req.id)}
-                                className="h-7 px-2 rounded-md bg-rose-600 text-white text-[11px] font-semibold cursor-pointer"
-                              >
-                                Xác nhận
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteId(null)}
-                                className="h-7 px-2 rounded-md border border-slate-300 text-slate-600 text-[11px] cursor-pointer"
-                              >
-                                Hủy
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleStartEdit(req)}
-                                aria-label="Sửa phiếu yêu cầu"
-                                title="Sửa phiếu"
-                                className="w-7 h-7 rounded-md border border-slate-200 text-slate-600 hover:border-[#14539E] hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteId(req.id)}
-                                aria-label="Xóa phiếu yêu cầu"
-                                title="Xóa phiếu"
-                                className="w-7 h-7 rounded-md border border-red-200 text-red-500 hover:bg-red-50 inline-flex items-center justify-center cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
+                    {/* 8. TÌNH TRẠNG (clickable badge -> Status Mini Modal) */}
+                    <td className="px-2 py-2 text-center whitespace-nowrap border-r border-slate-100">
+                      <button
+                        type="button"
+                        data-testid={`st-cr-row-status-btn-${req.id}`}
+                        onClick={() => setStatusModalTarget(req)}
+                        title="Bấm để cập nhật tình trạng xử lý"
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[11px] font-semibold whitespace-nowrap cursor-pointer transition-all hover:shadow-xs ${badge.bgClass} ${badge.textClass} ${badge.borderClass}`}
+                      >
+                        {req.status}
+                      </button>
+                    </td>
+
+                    {/* 9. NGÀY ÁP DỤNG ĐƠN GIÁ THAY ĐỔI */}
+                    <td className="px-2 py-2 text-center font-mono text-[11px] text-slate-700 tabular-nums whitespace-nowrap border-r border-slate-100">
+                      {req.processed_at ? formatStDateVN(req.processed_at) : '—'}
+                    </td>
+
+                    {/* 10. PHIÊN BẢN ÁP DỤNG */}
+                    <td className="px-2 py-2 text-center font-mono text-[11px] font-semibold text-slate-700 whitespace-nowrap border-r border-slate-100">
+                      {req.applied_version || (
+                        <span className="text-slate-300 font-normal">—</span>
+                      )}
+                    </td>
+
+                    {/* 11. GHI CHÚ */}
+                    <td
+                      title={req.notes || undefined}
+                      className="px-2 py-2 text-[11px] text-slate-600 max-w-[160px] truncate border-r border-slate-100"
+                    >
+                      {req.notes || <span className="text-slate-300">—</span>}
+                    </td>
+
+                    {/* 12. THAO TÁC */}
+                    <td className="px-1.5 py-2 text-center align-middle whitespace-nowrap">
+                      {isConfirmingDelete ? (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={isDeleting}
+                            data-testid={`st-cr-confirm-delete-${req.id}`}
+                            onClick={() => void handleDeleteRow(req)}
+                            className="h-6 px-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-semibold cursor-pointer disabled:opacity-50"
+                          >
+                            {isDeleting ? '...' : 'Xóa'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isDeleting}
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="h-6 px-1.5 rounded border border-slate-300 bg-white text-slate-600 text-[10px] cursor-pointer"
+                          >
+                            Hủy
+                          </button>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="inline-flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            data-testid={`st-cr-action-status-${req.id}`}
+                            onClick={() => setStatusModalTarget(req)}
+                            title="Cập nhật tình trạng xử lý"
+                            aria-label="Cập nhật tình trạng xử lý"
+                            className="w-6 h-6 rounded-md border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] hover:bg-blue-50/50 inline-flex items-center justify-center cursor-pointer transition-colors"
+                          >
+                            <ClipboardCheck className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`st-cr-action-edit-${req.id}`}
+                            onClick={() => setEditModalTarget(req)}
+                            title="Chỉnh sửa hạng mục"
+                            aria-label="Chỉnh sửa hạng mục"
+                            className="w-6 h-6 rounded-md border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E] hover:bg-blue-50/50 inline-flex items-center justify-center cursor-pointer transition-colors"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`st-cr-action-delete-${req.id}`}
+                            onClick={() => setConfirmDeleteId(req.id)}
+                            title="Xóa hạng mục"
+                            aria-label="Xóa hạng mục"
+                            className="w-6 h-6 rounded-md border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 inline-flex items-center justify-center cursor-pointer transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -831,6 +708,51 @@ export const StChangeRequestsTab: React.FC<StChangeRequestsTabProps> = ({
           </table>
         )}
       </div>
+
+      {/* Create Multi-Item Change Request Modal */}
+      <StChangeRequestCreateModal
+        isOpen={isCreateModalOpen}
+        products={products}
+        existingRequests={changeRequests}
+        departmentOptions={departmentOptions}
+        groupOptions={groupOptions}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreated={onRefresh}
+        onOpenImportModal={() => setIsImportModalOpen(true)}
+        onShowToast={onShowToast}
+      />
+
+      {/* Import from Excel Modal */}
+      <StChangeRequestImportModal
+        isOpen={isImportModalOpen}
+        products={products}
+        existingRequests={changeRequests}
+        defaultDepartment={departmentOptions[0] || 'Sản xuất'}
+        defaultAssignedGroup={groupOptions.includes('ST') ? 'ST' : groupOptions[0] || 'ST'}
+        onClose={() => setIsImportModalOpen(false)}
+        onImported={onRefresh}
+        onShowToast={onShowToast}
+      />
+
+      {/* Mini Status Update Modal */}
+      <StChangeRequestStatusModal
+        request={statusModalTarget}
+        groupOptions={groupOptions}
+        onClose={() => setStatusModalTarget(null)}
+        onSaved={onRefresh}
+        onShowToast={onShowToast}
+      />
+
+      {/* Full Edit Row Modal */}
+      <StChangeRequestEditModal
+        request={editModalTarget}
+        products={products}
+        departmentOptions={departmentOptions}
+        groupOptions={groupOptions}
+        onClose={() => setEditModalTarget(null)}
+        onSaved={onRefresh}
+        onShowToast={onShowToast}
+      />
     </div>
   );
 };

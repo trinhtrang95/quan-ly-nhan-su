@@ -116,10 +116,10 @@ export async function fetchStNewProductStatuses(): Promise<StNewProductStatus[]>
 }
 
 export async function fetchStChangeRequests(): Promise<StChangeRequest[]> {
-  const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+  const rows = await fetchAllPaginatedRows(
     'st_change_requests?select=*&order=received_at.desc,created_at.desc'
   );
-  return Array.isArray(rows) ? rows.map(normalizeStChangeRequestRow) : [];
+  return rows.map(normalizeStChangeRequestRow);
 }
 
 export async function fetchStCustomerQuotes(): Promise<StCustomerQuote[]> {
@@ -1505,8 +1505,11 @@ export async function batchUpsertStNewProductStatuses(
 // 5. ST CHANGE REQUESTS (`st_change_requests`)
 // ==========================================
 
-export async function createStChangeRequest(input: {
+export interface StChangeRequestWriteInput {
+  request_code?: string | null;
   department: string;
+  assigned_group?: string | null;
+  process_stage?: string | null;
   content: string;
   received_at: string;
   product_code: string;
@@ -1515,30 +1518,45 @@ export async function createStChangeRequest(input: {
   processed_at?: string | null;
   applied_version?: string | null;
   notes?: string | null;
-}): Promise<StChangeRequest> {
+}
+
+function buildChangeRequestPayload(
+  input: StChangeRequestWriteInput,
+  nowIso: string
+): Record<string, unknown> {
   const cleanDept = input.department.trim();
   const cleanContent = input.content.trim();
   if (!cleanDept || !cleanContent) {
-    throw new Error('Vui lòng chọn Bộ phận YC và nhập Nội dung yêu cầu.');
+    throw new Error('Vui lòng chọn Bộ phận YC và nhập Nội dung yêu cầu thay đổi.');
   }
+  return {
+    request_code: input.request_code?.trim() || null,
+    department: cleanDept,
+    assigned_group: input.assigned_group?.trim() || 'ST',
+    process_stage: input.process_stage?.trim() || null,
+    content: cleanContent,
+    received_at: input.received_at,
+    product_code: input.product_code.trim(),
+    specification: input.specification.trim(),
+    status: input.status,
+    processed_at: input.processed_at || null,
+    applied_version: input.applied_version?.trim() || null,
+    notes: input.notes?.trim() || null,
+    updated_at: nowIso,
+  };
+}
+
+export async function createStChangeRequest(
+  input: StChangeRequestWriteInput
+): Promise<StChangeRequest> {
   const nowIso = new Date().toISOString();
+  const payload = buildChangeRequestPayload(input, nowIso);
   const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
     'st_change_requests?select=*',
     {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        department: cleanDept,
-        content: cleanContent,
-        received_at: input.received_at,
-        product_code: input.product_code.trim(),
-        specification: input.specification.trim(),
-        status: input.status,
-        processed_at: input.processed_at || null,
-        applied_version: input.applied_version?.trim() || null,
-        notes: input.notes?.trim() || null,
-        updated_at: nowIso,
-      }),
+      body: JSON.stringify(payload),
     }
   );
   if (!Array.isArray(rows) || !rows[0]) {
@@ -1547,42 +1565,47 @@ export async function createStChangeRequest(input: {
   return normalizeStChangeRequestRow(rows[0]);
 }
 
+export async function batchCreateStChangeRequests(
+  inputs: StChangeRequestWriteInput[]
+): Promise<StChangeRequest[]> {
+  if (inputs.length === 0) return [];
+  const nowIso = new Date().toISOString();
+  const payloads = inputs.map((item) => buildChangeRequestPayload(item, nowIso));
+  const createdAll: StChangeRequest[] = [];
+
+  for (const chunk of chunkArray(payloads, 50)) {
+    const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
+      'st_change_requests?select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(chunk),
+      }
+    );
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new Error('Supabase không trả về dữ liệu sau khi lưu danh sách phiếu yêu cầu.');
+    }
+    createdAll.push(...rows.map(normalizeStChangeRequestRow));
+  }
+
+  return createdAll;
+}
+
 export async function updateStChangeRequest(
   id: string,
-  input: {
-    department: string;
-    content: string;
-    received_at: string;
-    product_code: string;
-    specification: string;
-    status: StChangeRequestStatus;
-    processed_at?: string | null;
-    applied_version?: string | null;
-    notes?: string | null;
-  }
+  input: StChangeRequestWriteInput
 ): Promise<StChangeRequest> {
-  const cleanDept = input.department.trim();
-  const cleanContent = input.content.trim();
-  if (!cleanDept || !cleanContent) {
-    throw new Error('Bộ phận YC và Nội dung yêu cầu không được để trống.');
+  if (!id) {
+    throw new Error('Thiếu mã bản ghi (id) để cập nhật phiếu yêu cầu.');
   }
+  const nowIso = new Date().toISOString();
+  const payload = buildChangeRequestPayload(input, nowIso);
   const rows = await overtimeSupabase.request<Record<string, unknown>[]>(
     `st_change_requests?id=eq.${encodeURIComponent(id)}&select=*`,
     {
       method: 'PATCH',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        department: cleanDept,
-        content: cleanContent,
-        received_at: input.received_at,
-        product_code: input.product_code.trim(),
-        specification: input.specification.trim(),
-        status: input.status,
-        processed_at: input.processed_at || null,
-        applied_version: input.applied_version?.trim() || null,
-        notes: input.notes?.trim() || null,
-        updated_at: new Date().toISOString(),
-      }),
+      body: JSON.stringify(payload),
     }
   );
   if (!Array.isArray(rows) || !rows[0]) {
@@ -1649,4 +1672,25 @@ export {
   readLocalCompanyDepartments,
   subscribeToCompanyDepartmentsRealtime,
 } from '../utils/companyDepartmentsService';
+
+export function mergeGroupOptions(
+  groups: ReadonlyArray<{ name: string }>,
+  existingRequests: ReadonlyArray<{ assigned_group?: string | null }>
+): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const add = (raw: string | null | undefined) => {
+    const clean = (raw || '').trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    ordered.push(clean);
+  };
+  add('ST');
+  for (const g of groups) add(g.name);
+  for (const r of existingRequests) add(r.assigned_group);
+  return ordered;
+}
+
 

@@ -7,25 +7,33 @@ import {
   buildSingleStageInitialState,
   buildSingleStageStatusPayload,
   calculateCompletionDays,
+  computeChangeRequestStatusCounts,
   computeNewProductStatusCounts,
   computeStagesProgress,
   computeStOverviewMetrics,
   computeStReportComparison,
+  countUniqueChangeRequestSheets,
   encodeStepsIntoNotes,
+  extractAvailableYearsFromChangeRequests,
   extractAvailableYearsFromNewProducts,
+  filterChangeRequestsList,
   filterNewProductsList,
   formatStageBadgeTooltip,
+  generateNextRequestCode,
   getNewProductWaitingLabel,
   getPendingWorkflowStep,
   getSigningDisplayState,
   hasEffectiveSigning,
   isNewProductCompleted,
   mergeProductsWithStatus,
+  normalizeChangeRequestProcessStage,
   normalizeStChangeRequestRow,
+  normalizeStChangeRequestStatus,
   normalizeStNewProductStatusRow,
   normalizeStProductRow,
   resolveOverviewPeriodRange,
   resolveReportPeriodRange,
+  sortChangeRequestsList,
   sortNewProductsList,
   ST_PRODUCTION_STAGES,
   type StChangeRequest,
@@ -486,26 +494,32 @@ describe('stWorkLogic 7-stage & signing/ST workflow calculations (Quy trình ERP
     const requests: StChangeRequest[] = [
       {
         id: 'r1',
-        department: 'PE',
+        request_code: 'YC-20261012-01',
+        department: 'Sản xuất',
+        assigned_group: 'ST',
+        process_stage: 'WINDING',
         content: 'Đổi kích thước lỗ',
         received_at: '2026-10-12',
         product_code: 'ST-001',
         specification: '10x20mm',
-        status: 'Đã áp dụng',
+        status: 'Đã thay đổi',
         processed_at: '2026-10-14',
-        applied_version: 'Rev.02',
+        applied_version: 'A22',
         notes: null,
         created_at: '2026-10-12T03:00:00.000Z',
         updated_at: '2026-10-14T03:00:00.000Z',
       },
       {
         id: 'r2',
-        department: 'IOT',
+        request_code: 'YC-20261012-01',
+        department: 'Sản xuất',
+        assigned_group: 'ST',
+        process_stage: 'SOLDER',
         content: 'Cập nhật cảm biến',
         received_at: '2026-10-18',
         product_code: 'ST-002',
         specification: '15x30mm',
-        status: 'Đang xử lý',
+        status: 'Đang kiểm tra',
         processed_at: null,
         applied_version: null,
         notes: null,
@@ -599,6 +613,19 @@ describe('stWorkLogic 7-stage & signing/ST workflow calculations (Quy trình ERP
     assert.equal(headers[14], 'Ngày áp dụng');
     assert.equal(headers[15], 'Tỷ lệ %');
     assert.equal(headers[16], 'Hiện trạng');
+
+    const crSheet = workbook.getWorksheet('Phiếu yêu cầu');
+    assert.ok(crSheet);
+    assert.equal(crSheet.columnCount, 13);
+    const crHeaders = crSheet.getRow(3).values as unknown[];
+    assert.equal(crHeaders[2], 'Mã phiếu');
+    assert.equal(crHeaders[3], 'Ngày nhận YC');
+    assert.equal(crHeaders[4], 'Bộ phận YC');
+    assert.equal(crHeaders[5], 'Nhóm xử lý');
+    assert.equal(crHeaders[8], 'Công đoạn');
+    assert.equal(crHeaders[10], 'Tình trạng');
+    assert.equal(crHeaders[11], 'Ngày áp dụng đơn giá thay đổi');
+    assert.equal(crHeaders[12], 'Phiên bản áp dụng');
   });
 
   it('normalizes native stage columns, hybrid signing notes, and [ST_STEPS_JSON] fallback cleanly', () => {
@@ -749,7 +776,10 @@ describe('stWorkLogic 7-stage & signing/ST workflow calculations (Quy trình ERP
         eventType: 'INSERT',
         newRow: {
           id: 'cr-1',
-          department: 'PE',
+          request_code: 'YC-20261125-01',
+          department: 'Sản xuất',
+          assigned_group: 'ST',
+          process_stage: 'WIN',
           content: 'Sửa bản vẽ',
           received_at: '2026-11-25',
           product_code: 'BRK-01',
@@ -760,7 +790,10 @@ describe('stWorkLogic 7-stage & signing/ST workflow calculations (Quy trình ERP
       },
       normalizeStChangeRequestRow
     );
-    assert.equal(reqs[0].status, 'Chờ duyệt');
+    assert.equal(reqs[0].status, 'Đang kiểm tra');
+    assert.equal(reqs[0].process_stage, 'WINDING');
+    assert.equal(reqs[0].request_code, 'YC-20261125-01');
+    assert.equal(reqs[0].assigned_group, 'ST');
 
     reqs = applyRealtimeStRow(
       reqs,
@@ -1115,6 +1148,126 @@ describe('stWorkLogic 7-stage & signing/ST workflow calculations (Quy trình ERP
     assert.equal(clearSigningPayload.has_signing, false);
     assert.equal(clearSigningPayload.signing_date, null);
   });
+
+  it('normalizes change request stages/statuses, generates request codes, counts sheets, filters and sorts cleanly', () => {
+    assert.equal(normalizeStChangeRequestStatus('Đã áp dụng'), 'Đã thay đổi');
+    assert.equal(normalizeStChangeRequestStatus('Đã thay đổi'), 'Đã thay đổi');
+    assert.equal(normalizeStChangeRequestStatus('Từ chối'), 'Không thay đổi');
+    assert.equal(normalizeStChangeRequestStatus('Không thay đổi'), 'Không thay đổi');
+    assert.equal(normalizeStChangeRequestStatus('Đang xử lý'), 'Đang kiểm tra');
+    assert.equal(normalizeStChangeRequestStatus(null), 'Đang kiểm tra');
+
+    assert.equal(normalizeChangeRequestProcessStage('win'), 'WINDING');
+    assert.equal(normalizeChangeRequestProcessStage('sol2'), 'SOLDER 2');
+    assert.equal(normalizeChangeRequestProcessStage('FINAL'), 'FINAL CHECK');
+    assert.equal(normalizeChangeRequestProcessStage('—'), null);
+
+    const reqList: StChangeRequest[] = [
+      {
+        id: 'cr-1',
+        request_code: 'YC-20261127-01',
+        department: 'Sản xuất',
+        assigned_group: 'ST',
+        process_stage: 'WINDING',
+        content: 'Cập nhật thời gian quấn dây',
+        received_at: '2026-11-27',
+        product_code: 'ALL MODEL',
+        specification: 'Rotor line',
+        status: 'Đang kiểm tra',
+        processed_at: null,
+        applied_version: null,
+        notes: null,
+        created_at: '2026-11-27T01:00:00Z',
+        updated_at: '2026-11-27T01:00:00Z',
+      },
+      {
+        id: 'cr-2',
+        request_code: 'YC-20261127-01',
+        department: 'Sản xuất',
+        assigned_group: 'ST',
+        process_stage: 'SOLDER',
+        content: 'Điều chỉnh thao tác hàn',
+        received_at: '2026-11-27',
+        product_code: '49013-029',
+        specification: 'EE4716',
+        status: 'Đã thay đổi',
+        processed_at: '2026-11-28',
+        applied_version: 'A22',
+        notes: 'Đã cập nhật ERP',
+        created_at: '2026-11-27T01:05:00Z',
+        updated_at: '2026-11-28T01:00:00Z',
+      },
+      {
+        id: 'cr-3',
+        request_code: 'YC-20251205-02',
+        department: 'QC',
+        assigned_group: 'PE',
+        process_stage: 'FINAL CHECK',
+        content: 'Kiểm tra ngoại quan',
+        received_at: '2025-12-05',
+        product_code: '49010-001',
+        specification: 'SPEC-X',
+        status: 'Không thay đổi',
+        processed_at: null,
+        applied_version: null,
+        notes: 'Giữ nguyên ST cũ',
+        created_at: '2025-12-05T01:00:00Z',
+        updated_at: '2025-12-05T01:00:00Z',
+      },
+    ];
+
+    assert.equal(countUniqueChangeRequestSheets(reqList), 2);
+    assert.equal(
+      generateNextRequestCode(reqList, '2026-11-27'),
+      'YC-20261127-02'
+    );
+    assert.equal(
+      generateNextRequestCode(reqList, '2026-11-28'),
+      'YC-20261128-01'
+    );
+    assert.deepEqual(
+      extractAvailableYearsFromChangeRequests(reqList, 2026),
+      [2026, 2025]
+    );
+    assert.deepEqual(computeChangeRequestStatusCounts(reqList), {
+      total: 3,
+      checking: 1,
+      changed: 1,
+      unchanged: 1,
+      uniqueSheets: 2,
+    });
+
+    assert.deepEqual(
+      filterChangeRequestsList(reqList, {
+        yearFilter: '2026',
+        monthFilter: '11',
+        deptFilter: 'Sản xuất',
+        stageFilter: 'SOLDER',
+      }).map((r) => r.id),
+      ['cr-2']
+    );
+
+    assert.deepEqual(
+      filterChangeRequestsList(reqList, {
+        searchQuery: 'all model',
+      }).map((r) => r.id),
+      ['cr-1']
+    );
+
+    assert.deepEqual(
+      sortChangeRequestsList(reqList, 'received_asc').map((r) => r.id),
+      ['cr-3', 'cr-1', 'cr-2']
+    );
+    assert.deepEqual(
+      sortChangeRequestsList(reqList, 'status_asc').map((r) => r.id),
+      ['cr-1', 'cr-2', 'cr-3']
+    );
+    assert.deepEqual(
+      sortChangeRequestsList(reqList, 'product_code_asc').map((r) => r.id),
+      ['cr-3', 'cr-2', 'cr-1']
+    );
+  });
 });
+
 
 

@@ -36,6 +36,7 @@ test('services layer exposes HR, Settings, and ST Work CRUD & Realtime APIs', ()
   assert.equal(typeof stWorkService.createStProductWithInitialStatus, 'function');
   assert.equal(typeof stWorkService.upsertStNewProductStatus, 'function');
   assert.equal(typeof stWorkService.createStChangeRequest, 'function');
+  assert.equal(typeof stWorkService.batchCreateStChangeRequests, 'function');
   assert.equal(typeof stWorkService.subscribeToStWorkRealtime, 'function');
   assert.equal(typeof stWorkService.compressImageClientSide, 'function');
   assert.equal(typeof stWorkService.uploadImageToHrBucket, 'function');
@@ -143,4 +144,62 @@ test('upsertStNewProductStatus sends actual Supabase columns, preserves price_ap
       }),
     /42501/
   );
+});
+
+test('batchCreateStChangeRequests sends request_code, assigned_group, process_stage and normalizes rows', async (t) => {
+  const originalRequest = stWorkService.overtimeSupabase.request;
+  let capturedBody: unknown = null;
+
+  t.after(() => {
+    stWorkService.overtimeSupabase.request = originalRequest;
+  });
+
+  stWorkService.overtimeSupabase.request = (async <T>(
+    _path: string,
+    options: RequestInit = {}
+  ): Promise<T> => {
+    const parsed =
+      typeof options.body === 'string' ? JSON.parse(options.body) : null;
+    capturedBody = parsed;
+    return (Array.isArray(parsed) ? parsed : []).map((row, i) => ({
+      id: `cr-mock-${i + 1}`,
+      ...row,
+    })) as unknown as T;
+  }) as typeof originalRequest;
+
+  const created = await stWorkService.batchCreateStChangeRequests([
+    {
+      request_code: 'YC-20261127-01',
+      department: 'Sản xuất',
+      assigned_group: 'ST',
+      process_stage: 'WINDING',
+      content: 'Cập nhật ST quấn dây',
+      received_at: '2026-11-27',
+      product_code: 'ALL MODEL',
+      specification: 'Rotor line',
+      status: 'Đang kiểm tra',
+    },
+    {
+      request_code: 'YC-20261127-01',
+      department: 'Sản xuất',
+      assigned_group: 'ST',
+      process_stage: 'SOLDER',
+      content: 'Cập nhật ST hàn',
+      received_at: '2026-11-27',
+      product_code: '49013-029',
+      specification: 'EE4716',
+      status: 'Đã thay đổi',
+      processed_at: '2026-11-27',
+      applied_version: 'A22',
+    },
+  ]);
+
+  assert.ok(Array.isArray(capturedBody));
+  assert.equal((capturedBody as unknown[]).length, 2);
+  assert.equal(created.length, 2);
+  assert.equal(created[0].request_code, 'YC-20261127-01');
+  assert.equal(created[0].assigned_group, 'ST');
+  assert.equal(created[0].process_stage, 'WINDING');
+  assert.equal(created[1].status, 'Đã thay đổi');
+  assert.equal(created[1].applied_version, 'A22');
 });

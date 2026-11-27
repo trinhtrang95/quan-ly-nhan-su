@@ -9,57 +9,46 @@ export type StWorkSubTab =
 export type StSetupSubTab = 'lines' | 'customers';
 
 export type StChangeRequestStatus =
-  | 'Mới'
-  | 'Đang xử lý'
-  | 'Chờ duyệt'
-  | 'Đã xử lý'
-  | 'Từ chối'
-  | 'Đã áp dụng';
+  | 'Đang kiểm tra'
+  | 'Đã thay đổi'
+  | 'Không thay đổi';
 
 export const ST_CHANGE_REQUEST_STATUSES: StChangeRequestStatus[] = [
-  'Mới',
-  'Đang xử lý',
-  'Chờ duyệt',
-  'Đã xử lý',
-  'Từ chối',
-  'Đã áp dụng',
+  'Đang kiểm tra',
+  'Đã thay đổi',
+  'Không thay đổi',
 ];
 
 export const ST_STATUS_BADGE_META: Record<
   StChangeRequestStatus,
   { bgClass: string; textClass: string; borderClass: string }
 > = {
-  Mới: {
-    bgClass: 'bg-sky-50',
-    textClass: 'text-sky-700',
-    borderClass: 'border-sky-200',
-  },
-  'Đang xử lý': {
+  'Đang kiểm tra': {
     bgClass: 'bg-amber-50',
     textClass: 'text-amber-700',
     borderClass: 'border-amber-200',
   },
-  'Chờ duyệt': {
-    bgClass: 'bg-violet-50',
-    textClass: 'text-violet-700',
-    borderClass: 'border-violet-200',
-  },
-  'Đã xử lý': {
-    bgClass: 'bg-teal-50',
-    textClass: 'text-teal-700',
-    borderClass: 'border-teal-200',
-  },
-  'Từ chối': {
-    bgClass: 'bg-rose-50',
-    textClass: 'text-rose-700',
-    borderClass: 'border-rose-200',
-  },
-  'Đã áp dụng': {
+  'Đã thay đổi': {
     bgClass: 'bg-emerald-50',
     textClass: 'text-emerald-700',
     borderClass: 'border-emerald-200',
   },
+  'Không thay đổi': {
+    bgClass: 'bg-sky-50',
+    textClass: 'text-sky-700',
+    borderClass: 'border-sky-200',
+  },
 };
+
+export const ST_CHANGE_REQUEST_PROCESS_STAGES: readonly string[] = [
+  'WINDING',
+  'CUTTING',
+  'SOLDER',
+  'ASSEMBLY',
+  'IMPREGNATION',
+  'SOLDER 2',
+  'FINAL CHECK',
+] as const;
 
 export interface StLine {
   id: string;
@@ -296,7 +285,10 @@ export interface StProductWithStatus {
 
 export interface StChangeRequest {
   id: string;
+  request_code: string | null;
   department: string;
+  assigned_group: string | null;
+  process_stage: string | null;
   content: string;
   received_at: string;
   product_code: string;
@@ -355,6 +347,8 @@ export interface StOverviewMetrics {
   avgCompletionDaysAllCompleted: number | null;
   requestsInPeriodCount: number;
   requestsInPrevPeriodCount: number;
+  requestsUniqueInPeriodCount: number;
+  requestsUniqueInPrevPeriodCount: number;
   requestsByDepartment: Array<{ department: string; count: number }>;
   requestsByStatus: Array<{ status: StChangeRequestStatus; count: number }>;
   quotesTotalCount: number;
@@ -848,7 +842,7 @@ export function computeStOverviewMetrics(params: {
   for (const req of requestsInPeriod) {
     const st = ST_CHANGE_REQUEST_STATUSES.includes(req.status)
       ? req.status
-      : 'Mới';
+      : 'Đang kiểm tra';
     statusCountMap.set(st, (statusCountMap.get(st) || 0) + 1);
   }
   const requestsByStatus = ST_CHANGE_REQUEST_STATUSES.map((status) => ({
@@ -870,6 +864,9 @@ export function computeStOverviewMetrics(params: {
     avgCompletionDaysAllCompleted,
     requestsInPeriodCount: requestsInPeriod.length,
     requestsInPrevPeriodCount: requestsInPrevPeriod.length,
+    requestsUniqueInPeriodCount: countUniqueChangeRequestSheets(requestsInPeriod),
+    requestsUniqueInPrevPeriodCount:
+      countUniqueChangeRequestSheets(requestsInPrevPeriod),
     requestsByDepartment,
     requestsByStatus,
     quotesTotalCount,
@@ -943,15 +940,19 @@ export function computeStReportComparison(params: {
       : 0;
   })();
 
-  const reqRecCur = changeRequests.filter((r) =>
+  const reqRecCurList = changeRequests.filter((r) =>
     isDateInRange(r.received_at, currentStart, currentEnd)
-  ).length;
-  const reqRecPrev = changeRequests.filter((r) =>
+  );
+  const reqRecPrevList = changeRequests.filter((r) =>
     isDateInRange(r.received_at, prevStart, prevEnd)
-  ).length;
+  );
+  const reqRecCur = reqRecCurList.length;
+  const reqRecPrev = reqRecPrevList.length;
+  const reqUniqueCur = countUniqueChangeRequestSheets(reqRecCurList);
+  const reqUniquePrev = countUniqueChangeRequestSheets(reqRecPrevList);
 
   const isDoneRequestStatus = (st: StChangeRequestStatus) =>
-    st === 'Đã xử lý' || st === 'Đã áp dụng';
+    st === 'Đã thay đổi';
   const reqDoneCur = changeRequests.filter(
     (r) =>
       isDoneRequestStatus(r.status) &&
@@ -1013,21 +1014,21 @@ export function computeStReportComparison(params: {
     },
     {
       key: 'change_requests_received',
-      label: 'Phiếu yêu cầu tiếp nhận',
+      label: 'Phiếu yêu cầu tiếp nhận (hạng mục)',
       currentValue: reqRecCur,
       previousValue: reqRecPrev,
       delta: reqRecCur - reqRecPrev,
-      unit: 'phiếu',
-      note: 'Tính theo ngày tiếp nhận phiếu yêu cầu',
+      unit: 'hạng mục',
+      note: `Tính theo ngày nhận YC · Tương ứng ${reqUniqueCur} tờ phiếu (kỳ trước: ${reqUniquePrev} tờ)`,
     },
     {
       key: 'change_requests_processed',
-      label: 'Phiếu yêu cầu đã xử lý / áp dụng',
+      label: 'Phiếu yêu cầu đã thay đổi / áp dụng',
       currentValue: reqDoneCur,
       previousValue: reqDonePrev,
       delta: reqDoneCur - reqDonePrev,
-      unit: 'phiếu',
-      note: 'Trạng thái Đã xử lý hoặc Đã áp dụng theo ngày xử lý',
+      unit: 'hạng mục',
+      note: 'Trạng thái Đã thay đổi theo Ngày áp dụng đơn giá thay đổi',
     },
     {
       key: 'customer_quotes_done',
@@ -1358,10 +1359,58 @@ export function normalizeStChangeRequestStatus(
   raw: unknown
 ): StChangeRequestStatus {
   const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) return 'Đang kiểm tra';
   if (ST_CHANGE_REQUEST_STATUSES.includes(s as StChangeRequestStatus)) {
     return s as StChangeRequestStatus;
   }
-  return 'Mới';
+  const lower = s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase();
+  if (
+    lower === 'da thay doi' ||
+    lower === 'da xu ly' ||
+    lower === 'da ap dung' ||
+    lower === 'completed' ||
+    lower === 'done'
+  ) {
+    return 'Đã thay đổi';
+  }
+  if (
+    lower === 'khong thay doi' ||
+    lower === 'tu choi' ||
+    lower === 'unchanged' ||
+    lower === 'no change'
+  ) {
+    return 'Không thay đổi';
+  }
+  return 'Đang kiểm tra';
+}
+
+export function normalizeChangeRequestProcessStage(raw: unknown): string | null {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s || s === '—' || s === '-') return null;
+  const upper = s.toUpperCase().replace(/\s+/g, ' ');
+  const stageMap: Record<string, string> = {
+    WIN: 'WINDING',
+    WINDING: 'WINDING',
+    CUT: 'CUTTING',
+    CUTTING: 'CUTTING',
+    SOL: 'SOLDER',
+    SOLDER: 'SOLDER',
+    ASS: 'ASSEMBLY',
+    ASSEMBLY: 'ASSEMBLY',
+    IMP: 'IMPREGNATION',
+    IMPREGNATION: 'IMPREGNATION',
+    SOL2: 'SOLDER 2',
+    'SOLDER 2': 'SOLDER 2',
+    SOLDER2: 'SOLDER 2',
+    FIN: 'FINAL CHECK',
+    'FINAL CHECK': 'FINAL CHECK',
+    FINAL: 'FINAL CHECK',
+  };
+  return stageMap[upper] || upper;
 }
 
 export function normalizeStChangeRequestRow(
@@ -1370,7 +1419,16 @@ export function normalizeStChangeRequestRow(
   const nowIso = new Date().toISOString();
   return {
     id: String(row.id || ''),
+    request_code:
+      typeof row.request_code === 'string' && row.request_code.trim()
+        ? row.request_code.trim()
+        : null,
     department: typeof row.department === 'string' ? row.department.trim() : '',
+    assigned_group:
+      typeof row.assigned_group === 'string' && row.assigned_group.trim()
+        ? row.assigned_group.trim()
+        : 'ST',
+    process_stage: normalizeChangeRequestProcessStage(row.process_stage),
     content: typeof row.content === 'string' ? row.content.trim() : '',
     received_at:
       toIsoDateOnly(typeof row.received_at === 'string' ? row.received_at : null) ||
@@ -1387,7 +1445,7 @@ export function normalizeStChangeRequestRow(
       typeof row.applied_version === 'string' && row.applied_version.trim()
         ? row.applied_version.trim()
         : null,
-    notes: typeof row.notes === 'string' ? row.notes : null,
+    notes: typeof row.notes === 'string' && row.notes.trim() ? row.notes.trim() : null,
     created_at:
       typeof row.created_at === 'string' && row.created_at ? row.created_at : nowIso,
     updated_at:
@@ -1815,4 +1873,236 @@ export function buildSigningStatusPayload(
     notes: st?.notes || null,
   };
 }
+
+// ==========================================
+// Change Requests Filtering, Sorting & Request Code Helpers
+// ==========================================
+
+export function countUniqueChangeRequestSheets(
+  requests: StChangeRequest[]
+): number {
+  const keys = new Set<string>();
+  for (const req of requests) {
+    const code = (req.request_code || '').trim();
+    if (code) {
+      keys.add(`CODE:${code.toUpperCase()}`);
+    } else if (req.id) {
+      keys.add(`ID:${req.id}`);
+    } else {
+      keys.add(`ROW:${req.received_at}|${req.department}|${req.content}`);
+    }
+  }
+  return keys.size;
+}
+
+export function generateNextRequestCode(
+  existingRequests: StChangeRequest[],
+  receivedIsoDate: string = getLocalIsoDateToday()
+): string {
+  const iso = toIsoDateOnly(receivedIsoDate) || getLocalIsoDateToday();
+  const compactDate = iso.replace(/-/g, '');
+  const prefix = `YC-${compactDate}-`;
+  let maxSeq = 0;
+  for (const req of existingRequests) {
+    const code = (req.request_code || '').trim().toUpperCase();
+    if (code.startsWith(prefix)) {
+      const suffix = code.slice(prefix.length);
+      const parsed = Number(suffix);
+      if (Number.isInteger(parsed) && parsed > maxSeq) {
+        maxSeq = parsed;
+      }
+    }
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(2, '0')}`;
+}
+
+export function extractAvailableYearsFromChangeRequests(
+  requests: StChangeRequest[],
+  includeYear?: number
+): number[] {
+  const yearSet = new Set<number>();
+  if (
+    typeof includeYear === 'number' &&
+    Number.isInteger(includeYear) &&
+    includeYear >= 2000 &&
+    includeYear <= 2100
+  ) {
+    yearSet.add(includeYear);
+  }
+  for (const req of requests) {
+    const iso = toIsoDateOnly(req.received_at);
+    if (iso && iso.length >= 4) {
+      const y = Number(iso.slice(0, 4));
+      if (Number.isInteger(y) && y >= 2000 && y <= 2100) {
+        yearSet.add(y);
+      }
+    }
+  }
+  return Array.from(yearSet).sort((a, b) => b - a);
+}
+
+export interface StChangeRequestListFilters {
+  searchQuery?: string;
+  yearFilter?: string;
+  monthFilter?: string;
+  deptFilter?: string;
+  stageFilter?: string;
+  statusFilter?: 'ALL' | StChangeRequestStatus;
+}
+
+export function computeChangeRequestStatusCounts(
+  requests: StChangeRequest[]
+): {
+  total: number;
+  checking: number;
+  changed: number;
+  unchanged: number;
+  uniqueSheets: number;
+} {
+  let checking = 0;
+  let changed = 0;
+  let unchanged = 0;
+  for (const req of requests) {
+    if (req.status === 'Đã thay đổi') changed += 1;
+    else if (req.status === 'Không thay đổi') unchanged += 1;
+    else checking += 1;
+  }
+  return {
+    total: requests.length,
+    checking,
+    changed,
+    unchanged,
+    uniqueSheets: countUniqueChangeRequestSheets(requests),
+  };
+}
+
+export function filterChangeRequestsList(
+  requests: StChangeRequest[],
+  filters: StChangeRequestListFilters
+): StChangeRequest[] {
+  const q = (filters.searchQuery || '').trim().toLowerCase();
+  const yearFilter = filters.yearFilter || 'ALL';
+  const monthFilter = filters.monthFilter || 'ALL';
+  const deptFilter = filters.deptFilter || 'ALL';
+  const stageFilter = filters.stageFilter || 'ALL';
+  const statusFilter = filters.statusFilter || 'ALL';
+
+  const targetYear = yearFilter !== 'ALL' ? Number(yearFilter) : null;
+  const targetMonth = monthFilter !== 'ALL' ? Number(monthFilter) : null;
+
+  return requests.filter((req) => {
+    if (deptFilter !== 'ALL' && req.department !== deptFilter) {
+      return false;
+    }
+    if (stageFilter !== 'ALL') {
+      if ((req.process_stage || '') !== stageFilter) return false;
+    }
+    if (statusFilter !== 'ALL' && req.status !== statusFilter) {
+      return false;
+    }
+    if (targetYear !== null || targetMonth !== null) {
+      const iso = toIsoDateOnly(req.received_at);
+      if (!iso) return false;
+      const [yStr, mStr] = iso.split('-');
+      if (targetYear !== null && Number(yStr) !== targetYear) return false;
+      if (targetMonth !== null && Number(mStr) !== targetMonth) return false;
+    }
+    if (q) {
+      const hit =
+        (req.request_code || '').toLowerCase().includes(q) ||
+        req.product_code.toLowerCase().includes(q) ||
+        req.specification.toLowerCase().includes(q) ||
+        req.content.toLowerCase().includes(q) ||
+        req.department.toLowerCase().includes(q) ||
+        (req.process_stage || '').toLowerCase().includes(q) ||
+        (req.assigned_group || '').toLowerCase().includes(q) ||
+        (req.applied_version || '').toLowerCase().includes(q) ||
+        (req.notes || '').toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  });
+}
+
+export type StChangeRequestSortMode =
+  | 'received_desc'
+  | 'received_asc'
+  | 'processed_desc'
+  | 'status_asc'
+  | 'product_code_asc';
+
+export const ST_CHANGE_REQUEST_SORT_OPTIONS: ReadonlyArray<{
+  value: StChangeRequestSortMode;
+  label: string;
+}> = [
+  { value: 'received_desc', label: 'Ngày nhận YC (Mới nhất trước)' },
+  { value: 'received_asc', label: 'Ngày nhận YC (Cũ nhất trước)' },
+  { value: 'processed_desc', label: 'Ngày áp dụng đơn giá (Mới nhất trước)' },
+  { value: 'status_asc', label: 'Tình trạng (Đang kiểm tra → Hoàn tất)' },
+  { value: 'product_code_asc', label: 'Mã hàng (A → Z)' },
+] as const;
+
+const CHANGE_REQUEST_STATUS_ORDER: Record<StChangeRequestStatus, number> = {
+  'Đang kiểm tra': 0,
+  'Đã thay đổi': 1,
+  'Không thay đổi': 2,
+};
+
+export function sortChangeRequestsList(
+  requests: StChangeRequest[],
+  sortMode: StChangeRequestSortMode
+): StChangeRequest[] {
+  const copy = [...requests];
+  copy.sort((a, b) => {
+    const compareCreatedDesc = () =>
+      (b.created_at || '').localeCompare(a.created_at || '') ||
+      (b.request_code || '').localeCompare(a.request_code || '', 'vi', {
+        numeric: true,
+      });
+
+    switch (sortMode) {
+      case 'received_desc': {
+        const da = toIsoDateOnly(a.received_at);
+        const db = toIsoDateOnly(b.received_at);
+        if (da !== db) return db.localeCompare(da);
+        return compareCreatedDesc();
+      }
+      case 'received_asc': {
+        const da = toIsoDateOnly(a.received_at);
+        const db = toIsoDateOnly(b.received_at);
+        if (da !== db) return da.localeCompare(db);
+        return (a.created_at || '').localeCompare(b.created_at || '');
+      }
+      case 'processed_desc': {
+        const da = toIsoDateOnly(a.processed_at);
+        const db = toIsoDateOnly(b.processed_at);
+        if (da && !db) return -1;
+        if (!da && db) return 1;
+        if (da !== db) return db.localeCompare(da);
+        return compareCreatedDesc();
+      }
+      case 'status_asc': {
+        const diff =
+          CHANGE_REQUEST_STATUS_ORDER[a.status] -
+          CHANGE_REQUEST_STATUS_ORDER[b.status];
+        if (diff !== 0) return diff;
+        const da = toIsoDateOnly(a.received_at);
+        const db = toIsoDateOnly(b.received_at);
+        if (da !== db) return db.localeCompare(da);
+        return compareCreatedDesc();
+      }
+      case 'product_code_asc': {
+        return (
+          (a.product_code || 'ZZZ').localeCompare(
+            b.product_code || 'ZZZ',
+            'vi',
+            { numeric: true, sensitivity: 'base' }
+          ) || compareCreatedDesc()
+        );
+      }
+    }
+  });
+  return copy;
+}
+
 

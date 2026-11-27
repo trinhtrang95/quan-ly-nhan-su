@@ -75,8 +75,7 @@ const SUB_TAB_META: Record<
   },
   change_requests: {
     title: 'Phiếu yêu cầu',
-    subtitle:
-      'Tiếp nhận và theo dõi xử lý các phiếu yêu cầu thay đổi từ các bộ phận',
+    subtitle: '',
     icon: ClipboardList,
   },
   customer_quotes: {
@@ -273,17 +272,23 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
           <div className="flex items-center gap-2.5 min-w-0">
             <span
               className={`rounded-lg bg-blue-50 border border-blue-200/80 text-[#14539E] flex items-center justify-center shrink-0 ${
-                activeTab === 'new_products' ? 'w-10 h-10' : 'w-8 h-8'
+                activeTab === 'new_products' || activeTab === 'change_requests'
+                  ? 'w-10 h-10'
+                  : 'w-8 h-8'
               }`}
             >
               <HeaderIcon
-                className={activeTab === 'new_products' ? 'w-5 h-5' : 'w-4 h-4'}
+                className={
+                  activeTab === 'new_products' || activeTab === 'change_requests'
+                    ? 'w-5 h-5'
+                    : 'w-4 h-4'
+                }
               />
             </span>
             <div className="min-w-0">
               <h1
                 className={`tracking-tight truncate ${
-                  activeTab === 'new_products'
+                  activeTab === 'new_products' || activeTab === 'change_requests'
                     ? 'text-3xl font-extrabold text-slate-900 leading-tight'
                     : 'text-sm sm:text-base font-bold text-slate-900'
                 }`}

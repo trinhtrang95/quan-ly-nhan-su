@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import {
+  countUniqueChangeRequestSheets,
   formatStDateVN,
   getSigningDisplayState,
   isDateInRange,
@@ -533,31 +534,37 @@ export function buildStReportWorkbook(
   });
   requestsSheet.columns = [
     { key: 'stt', width: 7 },
-    { key: 'dept', width: 20 },
-    { key: 'content', width: 38 },
-    { key: 'received', width: 15 },
+    { key: 'requestCode', width: 18 },
+    { key: 'received', width: 14 },
+    { key: 'dept', width: 16 },
+    { key: 'assignedGroup', width: 14 },
     { key: 'code', width: 18 },
-    { key: 'spec', width: 24 },
+    { key: 'spec', width: 20 },
+    { key: 'stage', width: 16 },
+    { key: 'content', width: 42 },
     { key: 'status', width: 16 },
-    { key: 'processed', width: 15 },
+    { key: 'processed', width: 18 },
     { key: 'version', width: 16 },
     { key: 'notes', width: 28 },
   ];
   styleTitleBanner(
     requestsSheet,
-    'DANH SÁCH PHIẾU YÊU CẦU THAY ĐỔI',
+    'NHẬT KÝ PHIẾU YÊU CẦU THAY ĐỔI QUY TRÌNH, ST',
     subtitle,
-    10
+    13
   );
   styleHeaderRow(requestsSheet, 3, [
     'STT',
+    'Mã phiếu',
+    'Ngày nhận YC',
     'Bộ phận YC',
-    'Nội dung yêu cầu',
-    'Ngày tiếp nhận',
+    'Nhóm xử lý',
     'Mã hàng',
     'Quy cách',
-    'Tình trạng xử lý',
-    'Ngày xử lý',
+    'Công đoạn',
+    'Nội dung yêu cầu thay đổi',
+    'Tình trạng',
+    'Ngày áp dụng đơn giá thay đổi',
     'Phiên bản áp dụng',
     'Ghi chú',
   ]);
@@ -572,16 +579,19 @@ export function buildStReportWorkbook(
   rowsToWrite.forEach((req, index) => {
     const excelRow = requestsSheet.getRow(reqRowIdx);
     excelRow.getCell(1).value = index + 1;
-    excelRow.getCell(2).value = req.department;
-    excelRow.getCell(3).value = req.content;
-    excelRow.getCell(4).value = formatStDateVN(req.received_at);
-    excelRow.getCell(5).value = req.product_code;
-    excelRow.getCell(6).value = req.specification;
-    excelRow.getCell(7).value = req.status;
-    excelRow.getCell(8).value = formatStDateVN(req.processed_at);
-    excelRow.getCell(9).value = req.applied_version || '';
-    excelRow.getCell(10).value = req.notes || '';
-    applyDataRowBorderAndFont(excelRow, 10, [1]);
+    excelRow.getCell(2).value = req.request_code || '—';
+    excelRow.getCell(3).value = formatStDateVN(req.received_at);
+    excelRow.getCell(4).value = req.department;
+    excelRow.getCell(5).value = req.assigned_group || 'ST';
+    excelRow.getCell(6).value = req.product_code || '—';
+    excelRow.getCell(7).value = req.specification || '—';
+    excelRow.getCell(8).value = req.process_stage || '—';
+    excelRow.getCell(9).value = req.content;
+    excelRow.getCell(10).value = req.status;
+    excelRow.getCell(11).value = formatStDateVN(req.processed_at);
+    excelRow.getCell(12).value = req.applied_version || '—';
+    excelRow.getCell(13).value = req.notes || '';
+    applyDataRowBorderAndFont(excelRow, 13, [1]);
     excelRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
     reqRowIdx += 1;
   });
@@ -589,15 +599,17 @@ export function buildStReportWorkbook(
   const reqLastDataRow = Math.max(3, reqRowIdx - 1);
   requestsSheet.autoFilter = {
     from: { row: 3, column: 1 },
-    to: { row: reqLastDataRow, column: 10 },
+    to: { row: reqLastDataRow, column: 13 },
   };
 
+  const uniqueSheetCount = countUniqueChangeRequestSheets(rowsToWrite);
   const reqTotalRow = requestsSheet.getRow(reqRowIdx);
   reqTotalRow.getCell(1).value = '';
-  reqTotalRow.getCell(2).value = 'Tổng cộng';
-  reqTotalRow.getCell(3).value = `${rowsToWrite.length} phiếu yêu cầu`;
-  reqTotalRow.getCell(7).value = `Trong kỳ: ${requestsForExport.length}`;
-  styleTotalRow(reqTotalRow, 10, []);
+  reqTotalRow.getCell(2).value = `${uniqueSheetCount} tờ phiếu`;
+  reqTotalRow.getCell(4).value = 'Tổng cộng';
+  reqTotalRow.getCell(9).value = `${rowsToWrite.length} hạng mục yêu cầu`;
+  reqTotalRow.getCell(10).value = `Trong kỳ: ${requestsForExport.length} mục`;
+  styleTotalRow(reqTotalRow, 13, []);
 
   // ==========================================
   // SHEET 4: Báo giá khách hàng
