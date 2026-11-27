@@ -192,7 +192,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     {
       id: 'employees',
       title: 'Nhân sự',
-      subtitle: 'Danh sách hồ sơ, phòng ban & xuất nhập Excel',
+      subtitle: 'Danh sách hồ sơ, nhóm & xuất nhập Excel',
       icon: Users,
       iconColor: 'text-emerald-600 bg-emerald-50',
       action: () => onNavigate('employees'),
@@ -420,7 +420,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           employeeId: r.employeeId,
           fullName: emp?.fullName || 'Nhân sự',
           employeeCode: emp?.employeeCode || '---',
-          department: emp?.department || 'Chưa phân bộ phận',
+          department: emp?.department || 'Chưa phân nhóm',
           totalAmount: Number(r.amount.toFixed(2)),
           recordCount: 1,
         });
@@ -637,7 +637,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1.5 shrink-0">
               <h2 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                Phân bổ nhân sự theo Bộ phận
+                Phân bổ nhân sự theo Nhóm
               </h2>
               <button
                 type="button"

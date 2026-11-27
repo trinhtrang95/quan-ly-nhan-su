@@ -52,10 +52,10 @@ export const GroupManageModal: React.FC<GroupManageModalProps> = ({
             <FolderCog className="w-5 h-5 text-[#2DD4BF]" />
             <div>
               <h3 id="group-modal-title" className="text-sm font-bold">
-                Quản lý Nhóm / Bộ phận
+                Quản lý Nhóm
               </h3>
               <p className="text-xs text-slate-300">
-                Thiết lập danh mục phòng ban cho toàn hệ thống
+                Thiết lập danh mục nhóm trực thuộc Bộ phận Kỹ thuật
               </p>
             </div>
           </div>
@@ -76,7 +76,7 @@ export const GroupManageModal: React.FC<GroupManageModalProps> = ({
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Tên Nhóm / Phòng ban mới..."
+              placeholder="Tên Nhóm mới..."
               aria-label="Tên nhóm mới"
               className="sm:col-span-6 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D9488]"
             />

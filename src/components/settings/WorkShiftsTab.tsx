@@ -102,7 +102,7 @@ export const WorkShiftsTab: React.FC<WorkShiftsTabProps> = ({
               ? 'Toàn công ty (Ca mặc định)'
               : shift.departmentNames.length > 0
                 ? shift.departmentNames.join(', ')
-                : 'Chưa gán phòng ban áp dụng';
+                : 'Chưa gán nhóm áp dụng';
 
             return (
               <div
@@ -242,7 +242,7 @@ export const WorkShiftsTab: React.FC<WorkShiftsTabProps> = ({
             </span>
             <span className="text-xs font-bold">+ Thêm ca làm việc</span>
             <span className="text-[11px] text-slate-400 group-hover:text-[#14539E]/80 text-center max-w-[200px]">
-              Tạo ca hành chính khác, ca kíp hoặc ca riêng cho từng phòng ban
+              Tạo ca hành chính khác, ca kíp hoặc ca riêng cho từng nhóm
             </span>
           </button>
         </div>

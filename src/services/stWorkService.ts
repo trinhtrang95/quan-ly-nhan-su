@@ -1473,3 +1473,12 @@ export function subscribeToStWorkRealtime(
     void client.removeChannel(channel);
   };
 }
+
+export {
+  DEFAULT_COMPANY_DEPARTMENTS,
+  fetchCompanyDepartments,
+  mergeCompanyDepartmentOptions,
+  readLocalCompanyDepartments,
+  subscribeToCompanyDepartmentsRealtime,
+} from '../utils/companyDepartmentsService';
+

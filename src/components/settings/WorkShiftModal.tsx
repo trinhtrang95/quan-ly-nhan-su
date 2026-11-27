@@ -326,7 +326,7 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
                 {editingShift ? 'Cập nhật Ca làm việc' : 'Thêm Ca làm việc mới'}
               </h3>
               <p className="text-[11px] text-slate-500">
-                Thiết lập khung giờ chuẩn, lịch làm việc trong tuần và phạm vi phòng ban
+                Thiết lập khung giờ chuẩn, lịch làm việc trong tuần và phạm vi nhóm
               </p>
             </div>
           </div>
@@ -799,7 +799,7 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
                     Ca mặc định — Áp dụng toàn công ty
                   </div>
                   <p className="text-[11px] text-emerald-700 mt-0.5">
-                    Mọi phòng ban chưa gán ca làm việc riêng đều sử dụng ca này làm
+                    Mọi nhóm chưa gán ca làm việc riêng đều sử dụng ca này làm
                     lịch chuẩn và làm căn cứ tính ngày nghỉ hằng tuần trên Lịch nghỉ
                     lễ, tết.
                   </p>
@@ -810,14 +810,14 @@ export const WorkShiftModal: React.FC<WorkShiftModalProps> = ({
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
                   <Info className="w-3.5 h-3.5 text-[#14539E] shrink-0" />
                   <span>
-                    Chọn các Phòng ban áp dụng riêng ca làm việc này (từ danh sách bộ
-                    phận của hệ thống):
+                    Chọn các Nhóm áp dụng riêng ca làm việc này (từ danh sách nhóm
+                    của hệ thống):
                   </span>
                 </div>
 
                 {departmentOptions.length === 0 ? (
                   <p className="text-xs text-slate-500 italic">
-                    Chưa có phòng ban nào được khai báo trong hệ thống.
+                    Chưa có nhóm nào được khai báo trong hệ thống.
                   </p>
                 ) : (
                   <div className="flex flex-wrap gap-2">

@@ -82,8 +82,8 @@ export const ALL_EMPLOYEE_COLUMNS: EmployeeColumnDef[] = [
   // 1. CÔNG VIỆC
   {
     id: 'department',
-    label: 'Phòng ban',
-    tableHeaderLabel: 'Nhóm / Bộ phận',
+    label: 'Nhóm',
+    tableHeaderLabel: 'Nhóm',
     group: 'WORK',
     sortField: 'department',
     align: 'left',

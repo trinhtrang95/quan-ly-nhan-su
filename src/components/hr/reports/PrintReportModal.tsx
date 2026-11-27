@@ -428,7 +428,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     </th>
                     <th className="p-1.5 border border-slate-600">Mã NV</th>
                     <th className="p-1.5 border border-slate-600">Họ tên</th>
-                    <th className="p-1.5 border border-slate-600">Bộ phận</th>
+                    <th className="p-1.5 border border-slate-600">Nhóm</th>
                     <th className="p-1.5 border border-slate-600 text-center">
                       Tổng phép
                     </th>

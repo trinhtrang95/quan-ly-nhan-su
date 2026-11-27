@@ -87,3 +87,24 @@ export {
   updatePositionInSupabase,
   uploadImageToHrBucket,
 } from '../utils/supabaseService';
+
+// ==========================================
+// BỘ PHẬN CẤP CÔNG TY (COMPANY DEPARTMENTS)
+// ==========================================
+export {
+  COMPANY_DEPARTMENTS_EVENT,
+  COMPANY_DEPARTMENTS_STORAGE_KEY,
+  createCompanyDepartment,
+  DEFAULT_COMPANY_DEPARTMENTS,
+  deleteCompanyDepartment,
+  fetchCompanyDepartments,
+  generateCompanyDepartmentCode,
+  mergeCompanyDepartmentOptions,
+  normalizeCompanyDepartmentRow,
+  readLocalCompanyDepartments,
+  sortCompanyDepartments,
+  subscribeToCompanyDepartmentsRealtime,
+  updateCompanyDepartment,
+  writeLocalCompanyDepartments,
+} from '../utils/companyDepartmentsService';
+

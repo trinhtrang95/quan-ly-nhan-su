@@ -661,10 +661,10 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
           <select
             value={departmentFilter}
             onChange={(e) => setDepartmentFilter(e.target.value)}
-            aria-label="Lọc từ điển theo phòng ban"
+            aria-label="Lọc từ điển theo nhóm"
             className="h-8 px-2.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#14539E] cursor-pointer max-w-[210px]"
           >
-            <option value="ALL">Phòng ban: Tất cả</option>
+            <option value="ALL">Nhóm: Tất cả</option>
             <option value="SHARED">Dùng chung</option>
             {groupOptions.map((grp) => (
               <option key={grp.name} value={grp.name}>
@@ -769,7 +769,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
               disabled={isAddingManual}
               onClick={() => setIsNewGroupPopoverOpen((prev) => !prev)}
               aria-expanded={isNewGroupPopoverOpen}
-              aria-label="Chọn phòng ban áp dụng cho từ mới"
+              aria-label="Chọn nhóm áp dụng cho từ mới"
               className={`h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-45 ${
                 newTargetGroups.length > 0
                   ? 'bg-blue-50/70 border-[#14539E]/40 text-[#14539E]'
@@ -813,7 +813,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
             {isNewGroupPopoverOpen && (
               <div className="absolute right-0 top-full mt-1.5 z-50 w-60 rounded-xl border border-slate-200 bg-white shadow-xl py-1.5">
                 <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Phạm vi phòng ban
+                  Phạm vi nhóm
                 </div>
                 <button
                   type="button"
@@ -832,7 +832,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                 <div className="max-h-52 overflow-y-auto">
                   {groupOptions.length === 0 ? (
                     <div className="px-3 py-2 text-[11px] text-slate-400">
-                      Chưa có danh sách phòng ban.
+                      Chưa có danh sách nhóm.
                     </div>
                   ) : (
                     groupOptions.map((grp) => {
@@ -933,7 +933,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                   Bản dịch (Tiếng Hàn)
                 </th>
                 <th className="px-2.5 py-2 w-[22%] border-r border-slate-200/70 whitespace-nowrap">
-                  Nhóm / Bộ phận
+                  Nhóm
                 </th>
                 <th className="px-2 py-2 w-24 text-center border-r border-slate-200/70 whitespace-nowrap">
                   Ngày thêm
@@ -1040,7 +1040,7 @@ export const GlossaryManagerModal: React.FC<GlossaryManagerModalProps> = ({
                         data-glossary-row-group-trigger="true"
                         disabled={isDeleting}
                         onClick={(e) => handleOpenRowGroupPopover(e, entry.id)}
-                        title="Bấm để chọn phòng ban áp dụng"
+                        title="Bấm để chọn nhóm áp dụng"
                         aria-expanded={isRowPopoverOpen}
                         aria-label={`Chọn nhóm áp dụng cho ${entry.reasonVi}`}
                         className={`w-full min-h-[28px] px-1.5 py-0.5 rounded border text-left flex items-center justify-between gap-1.5 transition-colors cursor-pointer disabled:opacity-45 ${

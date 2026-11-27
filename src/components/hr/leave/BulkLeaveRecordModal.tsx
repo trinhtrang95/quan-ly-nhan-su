@@ -638,7 +638,7 @@ export const BulkLeaveRecordModal: React.FC<BulkLeaveRecordModalProps> = ({
                                     {emp.fullName}
                                   </div>
                                   <div className="text-[10px] text-slate-500 font-medium">
-                                    {emp.employeeCode} • {emp.department || 'Chưa phân bộ phận'}
+                                    {emp.employeeCode} • {emp.department || 'Chưa phân nhóm'}
                                   </div>
                                 </div>
                                 <span

@@ -8,7 +8,7 @@ import {
   Package,
   PackageCheck,
 } from 'lucide-react';
-import { DepartmentGroup } from '../../types/hr';
+import { CompanyDepartment, DepartmentGroup } from '../../types/hr';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   applyRealtimeStRow,
@@ -28,7 +28,10 @@ import {
   StWorkSubTab,
 } from '../../utils/stWorkLogic';
 import {
+  DEFAULT_COMPANY_DEPARTMENTS,
   fetchAllStWorkData,
+  fetchCompanyDepartments,
+  subscribeToCompanyDepartmentsRealtime,
   subscribeToStWorkRealtime,
 } from '../../services/stWorkService';
 import { StChangeRequestsTab } from './StChangeRequestsTab';
@@ -106,6 +109,9 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
   >([]);
   const [changeRequests, setChangeRequests] = useState<StChangeRequest[]>([]);
   const [customerQuotes, setCustomerQuotes] = useState<StCustomerQuote[]>([]);
+  const [companyDepartments, setCompanyDepartments] = useState<
+    CompanyDepartment[]
+  >(DEFAULT_COMPANY_DEPARTMENTS);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -132,6 +138,17 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
 
   useEffect(() => {
     void loadSnapshot(false);
+    let active = true;
+    void fetchCompanyDepartments().then((list) => {
+      if (active) setCompanyDepartments(list);
+    });
+    const unsubDepts = subscribeToCompanyDepartmentsRealtime((latest) => {
+      if (active) setCompanyDepartments(latest);
+    });
+    return () => {
+      active = false;
+      unsubDepts();
+    };
   }, [loadSnapshot]);
 
   // Realtime sync across all 6 ST tables (zero localStorage)
@@ -307,6 +324,7 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
               productsWithStatus={productsWithStatus}
               changeRequests={changeRequests}
               customerQuotes={customerQuotes}
+              companyDepartments={companyDepartments}
               groups={groups}
               isLoading={isLoading}
               onNavigateTab={handleSelectTab}
@@ -343,6 +361,7 @@ export const StWorkWorkspace: React.FC<StWorkWorkspaceProps> = ({
           <StChangeRequestsTab
             changeRequests={changeRequests}
             products={products}
+            companyDepartments={companyDepartments}
             groups={groups}
             isLoading={isLoading}
             onRefresh={() => loadSnapshot(true)}

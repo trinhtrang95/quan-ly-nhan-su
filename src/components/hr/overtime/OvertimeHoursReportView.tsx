@@ -135,7 +135,7 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
   );
 
   const activeDepartmentLabel =
-    departmentFilter === 'ALL' ? 'Tất cả bộ phận' : departmentFilter;
+    departmentFilter === 'ALL' ? 'Tất cả nhóm' : departmentFilter;
   const monthLabelStr = String(selectedMonth).padStart(2, '0');
 
   const handleExportExcel = async () => {
@@ -244,16 +244,16 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
               </select>
             </div>
 
-            {/* Lọc Bộ phận / Nhóm */}
+            {/* Lọc Nhóm */}
             <select
               id="ot-report-dept-select"
               data-testid="ot-report-dept-select"
-              aria-label="Lọc theo Bộ phận hoặc Nhóm"
+              aria-label="Lọc theo Nhóm"
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
               className="h-8 px-2.5 text-xs font-medium text-slate-700 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer min-w-[165px]"
             >
-              <option value="ALL">Tất cả Bộ phận / Nhóm</option>
+              <option value="ALL">Tất cả Nhóm</option>
               {departmentOptions.map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}
@@ -544,7 +544,7 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
                   Xem trước bản in PDF — Thống kê Giờ Tăng ca Tháng {monthLabelStr}/{selectedYear} (A4 Ngang)
                 </h3>
                 <p className="text-[11px] text-blue-100 mt-0.5">
-                  Bộ phận: {activeDepartmentLabel} • {formatNumberVN(report.rows.length)} nhân sự • Tổng{' '}
+                  Nhóm: {activeDepartmentLabel} • {formatNumberVN(report.rows.length)} nhân sự • Tổng{' '}
                   {formatOvertimeHoursVN(report.grandTotalHours, true)} giờ
                 </p>
               </div>
@@ -588,7 +588,7 @@ export const OvertimeHoursReportView: React.FC<OvertimeHoursReportViewProps> = (
                     BẢNG THỐNG KÊ GIỜ TĂNG CA THÁNG {monthLabelStr}/{selectedYear}
                   </h2>
                   <p className="meta text-xs text-slate-600 mt-0.5">
-                    Bộ phận / Nhóm: <strong>{activeDepartmentLabel}</strong> &nbsp;|&nbsp; Tổng nhân sự:{' '}
+                    Nhóm: <strong>{activeDepartmentLabel}</strong> &nbsp;|&nbsp; Tổng nhân sự:{' '}
                     <strong>{formatNumberVN(report.rows.length)}</strong> &nbsp;|&nbsp; Tổng giờ tăng ca:{' '}
                     <strong>{formatOvertimeHoursVN(report.grandTotalHours, true)} giờ</strong>
                   </p>

@@ -547,11 +547,11 @@ export const EmployeeDirectoryView: React.FC<EmployeeDirectoryViewProps> = ({
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              aria-label="Lọc theo Nhóm hoặc Bộ phận"
+              aria-label="Lọc theo Nhóm"
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
             >
               <option value="ALL">
-                Tất cả Nhóm/Bộ phận ({sortedGroups.length})
+                Tất cả Nhóm ({sortedGroups.length})
               </option>
               {sortedGroups.map((grp) => (
                 <option key={grp.id} value={grp.name}>

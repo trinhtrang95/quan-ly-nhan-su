@@ -900,9 +900,9 @@ function AppContent() {
     try {
       const created = await createDepartmentInSupabase(grpData, activeCompany.id);
       setGroups((prev) => prev.map((g) => (g.id === tempId ? created : g)));
-      showToast(`Đã lưu phòng ban "${created.name}" lên bảng departments (Supabase).`);
+      showToast(`Đã lưu nhóm "${created.name}" lên bảng departments (Supabase).`);
     } catch {
-      showToast(`Đã thêm bộ phận mới: ${optimistic.name}.`);
+      showToast(`Đã thêm nhóm mới: ${optimistic.name}.`);
     }
   };
 
@@ -933,9 +933,9 @@ function AppContent() {
         activeCompany.id
       );
       setGroups((prev) => prev.map((g) => (g.id === id ? updated : g)));
-      showToast(`Đã cập nhật phòng ban "${updated.name}" trên Supabase.`);
+      showToast(`Đã cập nhật nhóm "${updated.name}" trên Supabase.`);
     } catch {
-      showToast(`Đã cập nhật thông tin phòng ban: ${data.name}.`);
+      showToast(`Đã cập nhật thông tin nhóm: ${data.name}.`);
     }
   };
 
@@ -951,9 +951,9 @@ function AppContent() {
     }
     try {
       await deleteDepartmentFromSupabase(id);
-      showToast('Đã xóa phòng ban khỏi bảng departments (Supabase).');
+      showToast('Đã xóa nhóm khỏi bảng departments (Supabase).');
     } catch {
-      showToast('Đã xóa bộ phận khỏi danh mục.');
+      showToast('Đã xóa nhóm khỏi danh mục.');
     }
   };
 
@@ -973,10 +973,10 @@ function AppContent() {
     try {
       await reorderDepartmentsInSupabase(orderedWithIndex, activeCompany.id);
       showToast(
-        'Đã lưu thứ tự ưu tiên Phòng ban / Nhóm mặc định (Tầng 1) lên Supabase.'
+        'Đã lưu thứ tự ưu tiên Nhóm mặc định (Tầng 1) lên Supabase.'
       );
     } catch {
-      showToast('Đã cập nhật thứ tự ưu tiên Phòng ban / Nhóm mặc định (Tầng 1).');
+      showToast('Đã cập nhật thứ tự ưu tiên Nhóm mặc định (Tầng 1).');
     }
   };
 
@@ -1981,6 +1981,7 @@ function AppContent() {
                 onClearAllData={handleClearAllData}
                 onRestoreFromBackupFile={handleRestoreFromBackupFile}
                 onSyncLocalToCloud={handleSyncLocalToCloud}
+                onShowToast={showToast}
               />
             )}
           </main>

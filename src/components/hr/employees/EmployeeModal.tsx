@@ -684,7 +684,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 htmlFor="emp-dept-select"
                 className="block text-[11px] font-semibold text-slate-700 mb-1"
               >
-                Nhóm / Bộ phận
+                Nhóm
               </label>
               <select
                 id="emp-dept-select"

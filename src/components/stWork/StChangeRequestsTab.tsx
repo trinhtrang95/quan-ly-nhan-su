@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { DepartmentGroup } from '../../types/hr';
+import { CompanyDepartment, DepartmentGroup } from '../../types/hr';
 import { getFriendlyErrorMessage } from '../../utils/errorAndSecurityService';
 import {
   formatNumberVN,
@@ -24,14 +24,17 @@ import {
 } from '../../utils/stWorkLogic';
 import {
   createStChangeRequest,
+  DEFAULT_COMPANY_DEPARTMENTS,
   deleteStChangeRequest,
+  mergeCompanyDepartmentOptions,
   updateStChangeRequest,
 } from '../../services/stWorkService';
 
 export interface StChangeRequestsTabProps {
   changeRequests: StChangeRequest[];
   products: StProduct[];
-  groups: DepartmentGroup[];
+  companyDepartments?: CompanyDepartment[];
+  groups?: DepartmentGroup[];
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   onShowToast?: (message: string) => void;
@@ -147,7 +150,7 @@ const ProductCodeCombobox: React.FC<ProductCodeComboboxProps> = ({
 export const StChangeRequestsTab: React.FC<StChangeRequestsTabProps> = ({
   changeRequests,
   products,
-  groups,
+  companyDepartments = DEFAULT_COMPANY_DEPARTMENTS,
   isLoading,
   onRefresh,
   onShowToast,
@@ -157,16 +160,14 @@ export const StChangeRequestsTab: React.FC<StChangeRequestsTabProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddForm, setShowAddForm] = useState<boolean>(true);
 
-  const departmentOptions = useMemo(() => {
-    const set = new Set<string>();
-    groups.forEach((g) => {
-      if (g.name?.trim()) set.add(g.name.trim());
-    });
-    changeRequests.forEach((r) => {
-      if (r.department?.trim()) set.add(r.department.trim());
-    });
-    return Array.from(set);
-  }, [groups, changeRequests]);
+  const departmentOptions = useMemo(
+    () =>
+      mergeCompanyDepartmentOptions(
+        companyDepartments,
+        changeRequests.map((r) => r.department)
+      ),
+    [companyDepartments, changeRequests]
+  );
 
   // New Change Request form state
   const [newDept, setNewDept] = useState<string>('');

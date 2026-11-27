@@ -23,8 +23,13 @@ test('services layer exposes HR, Settings, and ST Work CRUD & Realtime APIs', ()
   assert.equal(typeof settingsService.fetchAttendanceSymbols, 'function');
   assert.equal(typeof settingsService.subscribeToAttendanceSymbolsRealtime, 'function');
   assert.equal(typeof settingsService.authenticateAppUserInSupabase, 'function');
+  assert.equal(typeof settingsService.fetchCompanyDepartments, 'function');
+  assert.equal(typeof settingsService.createCompanyDepartment, 'function');
+  assert.equal(typeof settingsService.subscribeToCompanyDepartmentsRealtime, 'function');
 
   assert.equal(typeof stWorkService.fetchAllStWorkData, 'function');
+  assert.equal(typeof stWorkService.fetchCompanyDepartments, 'function');
+  assert.equal(typeof stWorkService.subscribeToCompanyDepartmentsRealtime, 'function');
   assert.equal(typeof stWorkService.createStLine, 'function');
   assert.equal(typeof stWorkService.createStCustomer, 'function');
   assert.equal(typeof stWorkService.createStProduct, 'function');

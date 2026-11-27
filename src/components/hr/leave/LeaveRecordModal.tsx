@@ -539,7 +539,7 @@ export const LeaveRecordModal: React.FC<LeaveRecordModalProps> = ({
                         ? comboQuery
                         : selectedEmployee
                           ? `${selectedEmployee.employeeCode} — ${selectedEmployee.fullName} (${
-                              selectedEmployee.department || 'Chưa phân bộ phận'
+                              selectedEmployee.department || 'Chưa phân nhóm'
                             })`
                           : comboQuery
                     }

@@ -473,13 +473,13 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                   </div>
                 </div>
 
-                {/* 3. Nhóm / Bộ phận (Department Dropdown) */}
+                {/* 3. Nhóm (Department Dropdown) */}
                 <div>
                   <label
                     htmlFor="monthly-report-dept"
                     className="block text-[11px] font-medium text-slate-500 mb-1"
                   >
-                    Nhóm / Bộ phận
+                    Nhóm
                   </label>
                   <select
                     id="monthly-report-dept"
@@ -941,7 +941,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                     htmlFor="matrix-dept-select"
                     className="block text-xs font-medium text-slate-500 mb-1"
                   >
-                    Nhóm / Bộ phận:
+                    Nhóm:
                   </label>
                   <select
                     id="matrix-dept-select"
@@ -950,7 +950,7 @@ export const AnnualMatrixReportView: React.FC<AnnualMatrixReportViewProps> = ({
                     className="w-full h-8 px-2.5 py-1 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#14539E] focus:ring-2 focus:ring-[#14539E]/20 cursor-pointer"
                   >
                     <option value="ALL">
-                      Tất cả Nhóm / Bộ phận ({groups.length})
+                      Tất cả Nhóm ({groups.length})
                     </option>
                     {groups.map((g) => (
                       <option key={g.id} value={g.name}>

@@ -15,6 +15,14 @@ export type LeaveRecordType =
 
 export type RegimeSubtype = 'Ốm đau / Viện phí' | 'Thai sản' | 'Hiếu / Hỷ' | 'Công tác / Khác';
 
+export interface CompanyDepartment {
+  id: string;
+  name: string;
+  code: string;
+  sortOrder: number;
+  createdAt?: string;
+}
+
 export interface DepartmentGroup {
   id: string;
   companyId?: string | null;

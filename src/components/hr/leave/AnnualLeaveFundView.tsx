@@ -278,11 +278,11 @@ export const AnnualLeaveFundView: React.FC<AnnualLeaveFundViewProps> = ({
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              aria-label="Lọc theo Nhóm hoặc Bộ phận"
+              aria-label="Lọc theo Nhóm"
               data-testid="leave-fund-dept-select"
               className="w-full h-8 px-3 text-xs font-medium bg-white rounded-lg border border-slate-200 text-slate-700 focus:outline-none focus:border-[#14539E] focus:ring-1 focus:ring-[#14539E] transition-colors cursor-pointer"
             >
-              <option value="ALL">Tất cả Nhóm / Bộ phận</option>
+              <option value="ALL">Tất cả Nhóm</option>
               {departmentNames.map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}

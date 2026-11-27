@@ -614,22 +614,22 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
             </select>
           </div>
 
-          {/* Cột 5: Bộ phận */}
+          {/* Cột 5: Nhóm */}
           <div>
             <label
               htmlFor="dept-filter-select"
               className="block text-[11px] font-semibold text-slate-600 mb-1 truncate"
             >
-              Bộ phận:
+              Nhóm:
             </label>
             <select
               id="dept-filter-select"
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              aria-label="Lọc nhật ký theo Nhóm bộ phận"
+              aria-label="Lọc nhật ký theo Nhóm"
               className="w-full px-2.5 py-1.5 text-[16px] sm:text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#0D9488] text-slate-700 font-medium cursor-pointer"
             >
-              <option value="ALL">Tất cả bộ phận</option>
+              <option value="ALL">Tất cả nhóm</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.name}>
                   {g.name}
@@ -698,7 +698,7 @@ export const LeaveLateLogView: React.FC<LeaveLateLogViewProps> = ({
                 className="py-2.5 px-2 bg-slate-50 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
               >
                 <div className="inline-flex items-center gap-1">
-                  <span>BỘ PHẬN</span>
+                  <span>NHÓM</span>
                   {renderSortIcon('department')}
                 </div>
               </th>

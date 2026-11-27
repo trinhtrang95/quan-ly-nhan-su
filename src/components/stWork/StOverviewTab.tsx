@@ -8,7 +8,11 @@ import {
   FileSpreadsheet,
   Minus,
 } from 'lucide-react';
-import { DepartmentGroup } from '../../types/hr';
+import { CompanyDepartment, DepartmentGroup } from '../../types/hr';
+import {
+  DEFAULT_COMPANY_DEPARTMENTS,
+  mergeCompanyDepartmentOptions,
+} from '../../services/stWorkService';
 import {
   computeStOverviewMetrics,
   formatNumberVN,
@@ -27,7 +31,8 @@ export interface StOverviewTabProps {
   productsWithStatus: StProductWithStatus[];
   changeRequests: StChangeRequest[];
   customerQuotes: StCustomerQuote[];
-  groups: DepartmentGroup[];
+  companyDepartments?: CompanyDepartment[];
+  groups?: DepartmentGroup[];
   isLoading: boolean;
   onNavigateTab: (tab: StWorkSubTab) => void;
 }
@@ -36,7 +41,7 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
   productsWithStatus,
   changeRequests,
   customerQuotes,
-  groups,
+  companyDepartments = DEFAULT_COMPANY_DEPARTMENTS,
   isLoading,
   onNavigateTab,
 }) => {
@@ -50,13 +55,14 @@ export const StOverviewTab: React.FC<StOverviewTabProps> = ({
     [periodMode, customYear, customMonth]
   );
 
-  const departmentNames = useMemo(() => {
-    const set = new Set<string>();
-    groups.forEach((g) => {
-      if (g.name?.trim()) set.add(g.name.trim());
-    });
-    return Array.from(set);
-  }, [groups]);
+  const departmentNames = useMemo(
+    () =>
+      mergeCompanyDepartmentOptions(
+        companyDepartments,
+        changeRequests.map((r) => r.department)
+      ),
+    [companyDepartments, changeRequests]
+  );
 
   const metrics = useMemo(
     () =>
