@@ -75,6 +75,7 @@ export interface ZaloScheduleScanModalProps {
     glossaryEntries: OvertimeGlossaryEntry[]
   ) => Promise<string>;
   onLeaveRecordsRefreshed?: (records: OvertimeLeaveCheckEntry[]) => void;
+  onParseScheduleImage?: typeof parseOvertimeScheduleImage;
   onConfirmBlock: (payload: ConfirmableOvertimeBlockPayload) => Promise<void>;
   onConfirmAllBlocks?: (payloads: ConfirmableOvertimeBlockPayload[]) => Promise<void>;
 }
@@ -126,6 +127,7 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
   defaultDate,
   translateMultilineKorean,
   onLeaveRecordsRefreshed,
+  onParseScheduleImage,
   onConfirmBlock,
   onConfirmAllBlocks,
 }) => {
@@ -312,8 +314,9 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
 
     try {
       const targetDate = activeBlock?.overtimeDate || defaultDate || getLocalTodayIsoDate();
+      const analyzeImage = onParseScheduleImage || parseOvertimeScheduleImage;
       const [parsedResult, leaveCheck] = await Promise.all([
-        parseOvertimeScheduleImage({
+        analyzeImage({
           imageBase64: readResult.imageBase64,
           mimeType: readResult.mimeType,
           employees,

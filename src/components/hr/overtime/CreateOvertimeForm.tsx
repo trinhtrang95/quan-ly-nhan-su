@@ -73,6 +73,7 @@ import {
   ConfirmableOvertimeBlockPayload,
   ZaloScheduleScanModal,
 } from './ZaloScheduleScanModal';
+import { parseOvertimeScheduleImage } from '../../../services/overtimeImageService';
 
 export interface OvertimeParticipant {
   employeeId: string;
@@ -2306,6 +2307,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         defaultDate={blockOvertimeDate || shellOvertimeDate || getLocalTodayIsoDate()}
         translateMultilineKorean={translateMultilineKorean}
         onLeaveRecordsRefreshed={(records) => setLiveLeaveRecords(records)}
+        onParseScheduleImage={parseOvertimeScheduleImage}
         onConfirmBlock={(payload) => handleConfirmAiModalPayloads([payload])}
         onConfirmAllBlocks={(payloads) => handleConfirmAiModalPayloads(payloads)}
       />

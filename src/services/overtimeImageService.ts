@@ -38,7 +38,8 @@ export function readImageFileForOvertimeScan(
   });
 }
 
-const CLIENT_FALLBACK_MODELS = [
+const GEMINI_VISION_MODELS = [
+  'gemini-2.5-flash',
   'gemini-4-hydrogen',
   'gemini-3.1-flash-lite',
 ] as const;
@@ -60,14 +61,49 @@ function stripMarkdownJsonFences(raw: string): string {
     .trim();
 }
 
-async function parseViaClientViteKeyFallback(params: {
-  apiKey: string;
+export function resolveBrowserGeminiApiKey(overrideKey?: string): string {
+  if (overrideKey && overrideKey.trim()) {
+    return overrideKey.trim();
+  }
+  const importMetaEnv = (
+    typeof import.meta !== 'undefined'
+      ? (import.meta as { env?: Record<string, string | undefined> }).env
+      : undefined
+  );
+  const processEnv =
+    typeof process !== 'undefined'
+      ? (process.env as Record<string, string | undefined> | undefined)
+      : undefined;
+
+  return (
+    importMetaEnv?.VITE_GEMINI_API_KEY ||
+    importMetaEnv?.GEMINI_API_KEY ||
+    processEnv?.VITE_GEMINI_API_KEY ||
+    processEnv?.GEMINI_API_KEY ||
+    ''
+  ).trim();
+}
+
+export async function parseOvertimeScheduleImage(params: {
   imageBase64: string;
   mimeType: string;
   employees: Employee[];
   defaultDate: string;
+  apiKeyOverride?: string;
 }): Promise<{ blocks: ScannedScheduleBlock[]; modelUsed: string }> {
+  const apiKey = resolveBrowserGeminiApiKey(params.apiKeyOverride);
+  if (!apiKey) {
+    throw new Error('Chưa cấu hình VITE_GEMINI_API_KEY trên môi trường');
+  }
+
   const cleanBase64 = stripBase64DataUrlPrefix(params.imageBase64);
+  const mimeType = (params.mimeType || '').trim();
+  if (!cleanBase64 || !mimeType.startsWith('image/')) {
+    throw new Error(
+      'Dữ liệu ảnh không hợp lệ. Vui lòng dán hoặc chọn lại ảnh lịch tăng ca.'
+    );
+  }
+
   const serializedEmployees = params.employees
     .slice(0, 400)
     .map(
@@ -84,7 +120,7 @@ async function parseViaClientViteKeyFallback(params: {
     '1. BỎ QUA hoàn toàn các dòng/người không tăng ca: ghi "Full time", "Fulltime", "Nghỉ PN", "Nghỉ phép", "Nghỉ", "OFF", hoặc khung giờ hành chính "07:30 - 16:10" / "07:30-16:10" / "7h30 - 16h10".',
     '2. Chuẩn hóa mọi giờ sang định dạng 24 giờ HH:MM (ví dụ: "16h10" -> "16:10", "18h10" -> "18:10", "20h40" -> "20:40", "8h" -> "08:00").',
     '3. Giữ nguyên TOÀN BỘ nội dung đa dòng và các gạch đầu dòng ("- ...", "* ...", "• ...") của Lý do tăng ca trong reasonVi (dùng ký tự xuống dòng \\n giữa các dòng, không gộp hay cắt bớt ý).',
-    '4. Nếu các nhân sự có cùng ngày, cùng lý do tăng ca (kể cả từ ô merged cell), gom vào cùng 1 block trong mảng blocks. Nếu trong cùng block có 1-2 người giờ khác, giữ giờ phổ biến nhất làm startTime/endTime chung và ghi giờ riêng vào participant.startTime / participant.endTime.',
+    '4. Nếu các nhân sự có cùng ngày, cùng lý do tăng ca (kể cả từ ô merged cell), gom vào cùng 1 block trong mảng blocks. Nếu trong cùng block có 1-2 người giờ khác (ví dụ 16:10-20:10 thay vì 16:10-18:10), giữ giờ phổ biến nhất làm startTime/endTime chung và ghi đúng giờ riêng vào participant.startTime / participant.endTime.',
     '5. Nếu có nhiều nhóm lý do hoặc nhiều ngày khác nhau, tách thành nhiều phần tử trong mảng blocks.',
     `6. Ngày mặc định tham chiếu là ${params.defaultDate || 'hôm nay'}; nếu ảnh ghi ngày rõ ràng hãy chuyển sang YYYY-MM-DD, nếu không có ngày thì trả về "".`,
     '7. Đối chiếu tên nhân sự với danh sách hệ thống dưới đây (chỉ điền employeeId khi khớp tên chắc chắn, không phân biệt hoa thường; nếu không tìm thấy hãy đưa tên gốc vào unmatchedNames):',
@@ -97,9 +133,9 @@ async function parseViaClientViteKeyFallback(params: {
   let lastStatus = 500;
   let lastErrorText = '';
 
-  for (const model of CLIENT_FALLBACK_MODELS) {
+  for (const model of GEMINI_VISION_MODELS) {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-      params.apiKey
+      apiKey
     )}`;
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -109,7 +145,7 @@ async function parseViaClientViteKeyFallback(params: {
           {
             role: 'user',
             parts: [
-              { inlineData: { mimeType: params.mimeType, data: cleanBase64 } },
+              { inlineData: { mimeType, data: cleanBase64 } },
               { text: prompt },
             ],
           },
@@ -147,6 +183,7 @@ async function parseViaClientViteKeyFallback(params: {
         'AI không trả về dữ liệu văn bản từ ảnh này. Vui lòng thử ảnh rõ nét hơn.'
       );
     }
+
     const parsed = JSON.parse(rawText) as { blocks?: ScannedScheduleBlock[] };
     return {
       blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
@@ -162,62 +199,4 @@ async function parseViaClientViteKeyFallback(params: {
   throw new Error(
     `Không tìm thấy model Gemini Vision khả dụng (${lastStatus})${lastErrorText ? `: ${lastErrorText}` : '.'}`
   );
-}
-
-export async function parseOvertimeScheduleImage(params: {
-  imageBase64: string;
-  mimeType: string;
-  employees: Employee[];
-  defaultDate: string;
-}): Promise<{ blocks: ScannedScheduleBlock[]; modelUsed?: string }> {
-  const response = await fetch('/api/overtime/parse-schedule-image', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      imageBase64: params.imageBase64,
-      mimeType: params.mimeType,
-      defaultDate: params.defaultDate,
-      employeeList: params.employees.map((emp) => ({
-        id: emp.id,
-        fullName: emp.fullName,
-        employeeCode: emp.employeeCode,
-        department: emp.department,
-      })),
-    }),
-  });
-
-  if (response.status === 404) {
-    const clientViteKey = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
-    if (clientViteKey) {
-      return parseViaClientViteKeyFallback({
-        apiKey: clientViteKey,
-        imageBase64: params.imageBase64,
-        mimeType: params.mimeType,
-        employees: params.employees,
-        defaultDate: params.defaultDate,
-      });
-    }
-    throw new Error(
-      'Không tìm thấy API máy chủ (/api/overtime/parse-schedule-image - 404). Vui lòng tải lại trang hoặc đảm bảo ứng dụng đang chạy kèm máy chủ Node/Express (npm run dev / npm run start).'
-    );
-  }
-
-  const payload = (await response.json().catch(() => ({}))) as {
-    blocks?: ScannedScheduleBlock[];
-    modelUsed?: string;
-    error?: string;
-  };
-
-  if (!response.ok) {
-    throw new Error(
-      payload.error || `Lỗi máy chủ (${response.status}) khi phân tích ảnh lịch tăng ca.`
-    );
-  }
-
-  return {
-    blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
-    modelUsed: payload.modelUsed,
-  };
 }
