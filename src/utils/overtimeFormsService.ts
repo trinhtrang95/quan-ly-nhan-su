@@ -705,6 +705,62 @@ export function buildPrintableDateGroupsFromItems(
   return result;
 }
 
+export type OvertimeA4DensityTier = 'spacious' | 'compact' | 'dense';
+
+export interface OvertimeA4DensityProfile {
+  tier: OvertimeA4DensityTier;
+  cellPaddingClass: string;
+  tableTextClass: string;
+  signatureRowHeightClass: string;
+  sheetSpaceClass: string;
+  dateGroupMarginClass: string;
+  footerClass: string;
+  headerTitleBlockClass: string;
+}
+
+/**
+ * Pure helper: computes A4 sheet vertical density classes based on total employee rows
+ * so the 794px portrait sheet scales cleanly to fit 1 A4 page on print without shrinking horizontal margins.
+ */
+export function computeOvertimeA4Density(
+  totalRows: number
+): OvertimeA4DensityProfile {
+  if (totalRows <= 12) {
+    return {
+      tier: 'spacious',
+      cellPaddingClass: 'py-2',
+      tableTextClass: 'text-[11.5px] leading-[1.35]',
+      signatureRowHeightClass: 'h-16',
+      sheetSpaceClass: 'space-y-3',
+      dateGroupMarginClass: 'mb-3',
+      footerClass: 'mt-2 text-[11px] space-y-0.5 leading-snug',
+      headerTitleBlockClass: 'pt-2',
+    };
+  }
+  if (totalRows <= 22) {
+    return {
+      tier: 'compact',
+      cellPaddingClass: 'py-1',
+      tableTextClass: 'text-[10.5px] leading-[1.25]',
+      signatureRowHeightClass: 'h-13',
+      sheetSpaceClass: 'space-y-2',
+      dateGroupMarginClass: 'mb-2.5',
+      footerClass: 'mt-1.5 text-[10.5px] space-y-0.5 leading-snug',
+      headerTitleBlockClass: 'pt-1',
+    };
+  }
+  return {
+    tier: 'dense',
+    cellPaddingClass: 'py-[2px]',
+    tableTextClass: 'text-[9.5px] leading-[1.15]',
+    signatureRowHeightClass: 'h-11',
+    sheetSpaceClass: 'space-y-1.5',
+    dateGroupMarginClass: 'mb-2',
+    footerClass: 'mt-1 text-[10px] space-y-0 leading-tight',
+    headerTitleBlockClass: 'pt-0.5',
+  };
+}
+
 /**
  * Pure helper: normalizes Vietnamese text for accent-insensitive search.
  */

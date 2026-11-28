@@ -1277,7 +1277,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
           {activePreviewForm && (
             <div
               data-testid="overtime-inline-a4-scroll"
-              className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-100/80 p-3 sm:p-4 overtime-print-scroll print:overflow-visible print:border-0 print:bg-white print:p-0"
+              className="bg-slate-100/80 p-4 flex-1 min-h-0 overflow-y-auto overflow-x-auto flex justify-center items-start rounded-2xl border border-slate-200 overtime-print-scroll print:overflow-visible print:border-0 print:bg-white print:p-0 print:block"
             >
               <OvertimeA4PreviewSheet
                 form={activePreviewForm}
@@ -1332,7 +1332,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
           aria-labelledby="overtime-modal-title"
           className="overtime-print-modal-root fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex flex-col items-center justify-center p-3 sm:p-5"
         >
-          <div className="bg-slate-100 rounded-2xl border border-slate-300 shadow-2xl w-full max-w-[900px] max-h-[92vh] flex flex-col overflow-hidden overtime-print-container">
+          <div className="bg-slate-100 rounded-2xl border border-slate-300 shadow-2xl w-full max-w-[920px] max-h-[92vh] flex flex-col overflow-hidden overtime-print-container">
             <div className="bg-white border-b border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0 no-print">
               <div className="min-w-0">
                 <h2
@@ -1415,7 +1415,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex justify-center overtime-print-scroll">
+            <div className="bg-slate-100/80 p-4 flex-1 min-h-0 overflow-y-auto overflow-x-auto flex justify-center items-start overtime-print-scroll print:overflow-visible print:bg-white print:p-0 print:block">
               <OvertimeA4PreviewSheet
                 form={viewingForm}
                 knownSubGroups={knownSubGroups}

@@ -169,7 +169,7 @@ html[data-dark-mode="true"] ::-webkit-scrollbar-thumb {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm;
+    margin: 8mm 10mm;
   }
   body {
     background: #FFFFFF !important;
@@ -196,13 +196,23 @@ html[data-dark-mode="true"] ::-webkit-scrollbar-thumb {
     overflow: visible !important;
     padding: 0 !important;
     background: #FFFFFF !important;
+    display: block !important;
   }
   .overtime-print-sheet {
     box-shadow: none !important;
+    border: none !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
     max-width: 100% !important;
     min-height: auto !important;
+  }
+  tr,
+  td,
+  th {
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 }
 

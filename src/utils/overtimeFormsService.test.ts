@@ -6,6 +6,7 @@ import {
   buildPrintableDateGroupsFromItems,
   buildUpdatedOvertimeForm,
   calculateHoursBetween,
+  computeOvertimeA4Density,
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
   filterOvertimeForms,
@@ -27,6 +28,12 @@ import {
   type OvertimeFormWithItems,
   type OvertimeLeaveCheckEntry,
 } from './overtimeFormsService';
+import {
+  computeExcelBlockRowHeight,
+  computeExcelDensityConfig,
+  OVERTIME_EXCEL_COLUMN_WIDTHS,
+  overtimeExportService,
+} from './overtimeExportService';
 import type { Employee } from '../types/hr';
 
 const sampleEmployees: Employee[] = [
@@ -945,6 +952,100 @@ describe('overtimeFormsService pure logic', () => {
         employeeMap: empMap,
       }),
       '#4 Phát sinh (27/11) - Lê Văn A'
+    );
+  });
+
+  it('computes 3-tier A4 vertical density classes cleanly without changing horizontal layout', () => {
+    const small = computeOvertimeA4Density(8);
+    assert.equal(small.tier, 'spacious');
+    assert.equal(small.cellPaddingClass, 'py-2');
+    assert.match(small.tableTextClass, /11\.5px/);
+    assert.equal(small.signatureRowHeightClass, 'h-16');
+
+    const medium = computeOvertimeA4Density(18);
+    assert.equal(medium.tier, 'compact');
+    assert.equal(medium.cellPaddingClass, 'py-1');
+    assert.match(medium.tableTextClass, /10\.5px/);
+    assert.equal(medium.signatureRowHeightClass, 'h-13');
+
+    const dense = computeOvertimeA4Density(25);
+    assert.equal(dense.tier, 'dense');
+    assert.equal(dense.cellPaddingClass, 'py-\[2px\]');
+    assert.match(dense.tableTextClass, /9\.5px/);
+    assert.equal(dense.signatureRowHeightClass, 'h-11');
+    assert.equal(dense.dateGroupMarginClass, 'mb-2');
+  });
+
+  it('builds Excel workbook with synchronized 7-column widths, wrapped reason heights, and A4 portrait pageSetup', async () => {
+    const manyEmployees: Employee[] = Array.from({ length: 24 }, (_, idx) => ({
+      ...sampleEmployees[0],
+      id: `emp-${idx + 1}`,
+      employeeCode: `NV${String(idx + 1).padStart(3, '0')}`,
+      fullName: idx === 0 ? 'Nguyễn Hoàng Quang Huy' : `Nhân sự ${idx + 1}`,
+    }));
+
+    const { workbook } = await overtimeExportService.buildWorkbook({
+      department: 'Bộ phận Kỹ thuật',
+      overtimeDate: '2026-11-28',
+      employees: manyEmployees,
+      blocks: [
+        {
+          id: 'blk-1',
+          overtimeDate: '2026-11-28',
+          reasonVi: 'Xử lý sự cố trên line lắp ráp tự động rất dài để kiểm tra tự động xuống dòng\nThay bánh xe máy uốn chân pin S line',
+          reasonKr: '라인 설비 이상 발생 항목 조치\n핀 벤딩기 휠 교체',
+          startTime: '16:10',
+          endTime: '20:10',
+          selectedEmployeeIds: manyEmployees.slice(0, 2).map((e) => e.id),
+        },
+        {
+          id: 'blk-2',
+          overtimeDate: '2026-11-28',
+          reasonVi: 'Trực sản xuất',
+          reasonKr: '생산 당직',
+          startTime: '16:10',
+          endTime: '18:10',
+          selectedEmployeeIds: manyEmployees.slice(2).map((e) => e.id),
+        },
+      ],
+    });
+
+    const sheet = workbook.getWorksheet('TV-PSGC2022');
+    assert.ok(sheet);
+    assert.equal(sheet.getColumn(1).width, OVERTIME_EXCEL_COLUMN_WIDTHS.no);
+    assert.equal(sheet.getColumn(2).width, OVERTIME_EXCEL_COLUMN_WIDTHS.employeeName);
+    const reasonCombinedWidth =
+      (sheet.getColumn(3).width || 0) +
+      (sheet.getColumn(4).width || 0) +
+      (sheet.getColumn(5).width || 0);
+    assert.equal(reasonCombinedWidth, 42);
+    assert.equal(sheet.getColumn(6).width, 11);
+    assert.equal(sheet.getColumn(7).width, 11);
+    assert.equal(sheet.getColumn(8).width, 14);
+    assert.equal(sheet.getColumn(9).width, 10);
+
+    assert.equal(sheet.pageSetup.paperSize, 9);
+    assert.equal(sheet.pageSetup.orientation, 'portrait');
+    assert.equal(sheet.pageSetup.fitToPage, true);
+    assert.equal(sheet.pageSetup.fitToWidth, 1);
+    assert.equal(sheet.pageSetup.fitToHeight, 1);
+    assert.equal(sheet.pageSetup.margins?.left, 0.35);
+    assert.equal(sheet.pageSetup.margins?.right, 0.35);
+
+    // Row 10 is first data row: reason wraps across multiple lines -> taller than dense base 17
+    const firstDataRow = sheet.getRow(10);
+    assert.equal(firstDataRow.getCell('B').value, 'Nguyễn Hoàng Quang Huy');
+    assert.equal(firstDataRow.getCell('C').alignment?.wrapText, true);
+    assert.ok((firstDataRow.height || 0) > computeExcelDensityConfig(24).baseRowHeight);
+
+    // Row 12 is second block with 22 rows and short 2-line reason -> uses dense baseRowHeight 17
+    const denseRow = sheet.getRow(12);
+    assert.equal(denseRow.height, 17);
+
+    // Over 35 rows sets fitToHeight = 0 for clean multi-page pagination
+    assert.equal(computeExcelDensityConfig(36).fitToHeight, 0);
+    assert.ok(
+      computeExcelBlockRowHeight('Dòng 1\nDòng 2\nDòng 3\nDòng 4', 1, 10) >= 60
     );
   });
 });

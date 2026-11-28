@@ -719,6 +719,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             onOpenExistingForm={(form) => void handleStartEditForm(form)}
             onCancelEdit={handleCancelEdit}
             onSaveOnly={handleSaveForm}
+            isActiveForPrint={activeTab === 'create'}
           />
         </div>
       ) : (
