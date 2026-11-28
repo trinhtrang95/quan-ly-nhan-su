@@ -1176,6 +1176,21 @@ function normalizeSearchText(str: string): string {
 }
 
 /**
+ * Pure helper: filters employees by fullName (accent-insensitive) or employeeCode.
+ */
+export function filterEmployeesByQuery<
+  T extends { fullName?: string | null; employeeCode?: string | null }
+>(employees: T[], query: string): T[] {
+  const normQuery = normalizeSearchText(query);
+  if (!normQuery) return employees;
+  return employees.filter((emp) => {
+    const normName = normalizeSearchText(emp.fullName || '');
+    const normCode = normalizeSearchText(emp.employeeCode || '');
+    return normName.includes(normQuery) || normCode.includes(normQuery);
+  });
+}
+
+/**
  * Pure helper: returns true when an overtime form is locked ("Đã chốt").
  */
 export function isOvertimeFormLocked(

@@ -10,6 +10,7 @@ import {
   computeOvertimeA4Density,
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
+  filterEmployeesByQuery,
   filterOvertimeForms,
   formatOvertimeDepartmentHeaderLabel,
   formatOvertimeFormCodeDisplay,
@@ -1299,6 +1300,33 @@ describe('overtimeFormsService pure logic', () => {
     assert.equal(sheet.getRow(10).getCell('C').isMerged, true);
     assert.equal(sheet.getRow(11).getCell('C').master, sheet.getRow(10).getCell('C'));
     assert.notEqual(sheet.getRow(12).getCell('C').master, sheet.getRow(10).getCell('C'));
+  });
+
+  it('filters employees by accented/unaccented Vietnamese name or employeeCode without mutating list', () => {
+    const list = [
+      { id: '1', fullName: 'Nguyễn Đức Hưởng', employeeCode: '13091801' },
+      { id: '2', fullName: 'Đoàn Văn Chiến', employeeCode: '13010601' },
+      { id: '3', fullName: 'Nguyễn Mạnh Đạt', employeeCode: '24010002' },
+    ];
+
+    assert.equal(filterEmployeesByQuery(list, '').length, 3);
+    assert.deepEqual(
+      filterEmployeesByQuery(list, 'duc huong').map((e) => e.id),
+      ['1']
+    );
+    assert.deepEqual(
+      filterEmployeesByQuery(list, 'ĐỨC HƯỞNG').map((e) => e.id),
+      ['1']
+    );
+    assert.deepEqual(
+      filterEmployeesByQuery(list, 'doan').map((e) => e.id),
+      ['2']
+    );
+    assert.deepEqual(
+      filterEmployeesByQuery(list, '2401').map((e) => e.id),
+      ['3']
+    );
+    assert.deepEqual(filterEmployeesByQuery(list, 'khongton'), []);
   });
 });
 

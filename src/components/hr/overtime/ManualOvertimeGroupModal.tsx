@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  Calendar,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -44,6 +43,7 @@ import {
   ConfirmableOvertimeBlockPayload,
   OvertimeModalPresetContext,
 } from './ZaloScheduleScanModal';
+import { filterEmployeesByQuery } from '../../../utils/overtimeFormsService';
 
 export interface ManualOvertimeGroupModalProps {
   isOpen: boolean;
@@ -57,7 +57,6 @@ export interface ManualOvertimeGroupModalProps {
   workShifts: WorkShift[];
   companyHolidays: CompanyHoliday[];
   presetContext?: OvertimeModalPresetContext | null;
-  onSwitchMode?: (mode: 'manual' | 'ai_scan') => void;
   translateMultilineKorean: (
     reasonVi: string,
     glossaryEntries: OvertimeGlossaryEntry[]
@@ -94,22 +93,19 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
   workShifts,
   companyHolidays,
   presetContext = null,
-  onSwitchMode,
   translateMultilineKorean,
   onGlossaryEntriesUpdated,
   onLeaveRecordsRefreshed,
   onConfirm,
   onConfirmMultiple,
 }) => {
-  const pickerRef = useRef<HTMLDivElement | null>(null);
   const reasonDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const [overtimeDate, setOvertimeDate] = useState(
     defaultDate || getLocalTodayIsoDate()
   );
   const [selectedGroupFilter, setSelectedGroupFilter] = useState('ALL');
-  const [employeeQuery, setEmployeeQuery] = useState('');
-  const [isEmployeeListOpen, setIsEmployeeListOpen] = useState(false);
+  const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
 
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<
@@ -212,7 +208,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
       const matchedOpt = departmentOptions.find(
         (opt) => normalizeOvertimeGroupKey(opt) === targetKey
       );
-      initialGroup = matchedOpt || 'ALL';
+      initialGroup = matchedOpt || presetContext.targetGroupName;
     }
 
     const initialEval = evaluateOvertimeDaySchedule({
@@ -225,9 +221,8 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
 
     setOvertimeDate(targetDate);
     setSelectedGroupFilter(initialGroup);
+    setEmployeeSearchQuery('');
     setIncludeTwoConsecutivePrevDays(false);
-    setEmployeeQuery('');
-    setIsEmployeeListOpen(false);
     setSelectedEmployeeIds([]);
     setCustomTimes({});
     setEditingTimeEmpId(null);
@@ -266,9 +261,6 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setIsEmployeeListOpen(false);
-      }
       if (
         reasonDropdownRef.current &&
         !reasonDropdownRef.current.contains(e.target as Node)
@@ -348,25 +340,34 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
   }, [isOpen, onLeaveMap, alreadyRecordedIds]);
 
   const filteredEmployees = useMemo(() => {
-    const available = employees.filter((e) => !alreadyRecordedIds.has(e.id));
-    const normGroup = selectedGroupFilter.trim();
-    const byGroup =
-      !normGroup || normGroup === 'ALL'
-        ? available
-        : available.filter((e) => (e.department || '').trim() === normGroup);
-    const q = employeeQuery.trim().toLowerCase();
-    if (!q) return byGroup;
-    return byGroup.filter(
-      (e) =>
-        e.fullName.toLowerCase().includes(q) ||
-        e.employeeCode.toLowerCase().includes(q) ||
-        e.department.toLowerCase().includes(q)
+    const normGroupKey = normalizeOvertimeGroupKey(selectedGroupFilter);
+    if (!normGroupKey || selectedGroupFilter === 'ALL') {
+      return employees;
+    }
+    return employees.filter(
+      (e) => normalizeOvertimeGroupKey(e.department) === normGroupKey
     );
-  }, [employees, alreadyRecordedIds, selectedGroupFilter, employeeQuery]);
+  }, [employees, selectedGroupFilter]);
 
   const selectableFilteredEmployees = useMemo(
-    () => filteredEmployees.filter((e) => !onLeaveMap.has(e.id)),
-    [filteredEmployees, onLeaveMap]
+    () =>
+      filteredEmployees.filter(
+        (e) => !onLeaveMap.has(e.id) && !alreadyRecordedIds.has(e.id)
+      ),
+    [filteredEmployees, onLeaveMap, alreadyRecordedIds]
+  );
+
+  const displayedEmployees = useMemo(
+    () => filterEmployeesByQuery(filteredEmployees, employeeSearchQuery),
+    [filteredEmployees, employeeSearchQuery]
+  );
+
+  const selectableDisplayedEmployees = useMemo(
+    () =>
+      displayedEmployees.filter(
+        (e) => !onLeaveMap.has(e.id) && !alreadyRecordedIds.has(e.id)
+      ),
+    [displayedEmployees, onLeaveMap, alreadyRecordedIds]
   );
 
   const selectedGroupsForCombobox = useMemo(() => {
@@ -502,20 +503,29 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     }
   };
 
+  const areAllSelectableSelected =
+    selectableDisplayedEmployees.length > 0 &&
+    selectableDisplayedEmployees.every((e) => selectedEmployeeIds.includes(e.id));
+
   const handleSelectAllFiltered = () => {
-    const filteredIds = selectableFilteredEmployees.map((e) => e.id);
-    const allSelected =
-      filteredIds.length > 0 &&
-      filteredIds.every((id) => selectedEmployeeIds.includes(id));
-    if (allSelected) {
+    const visibleIds = selectableDisplayedEmployees.map((e) => e.id);
+    if (areAllSelectableSelected) {
       setSelectedEmployeeIds((prev) =>
-        prev.filter((id) => !filteredIds.includes(id))
+        prev.filter((id) => !visibleIds.includes(id))
       );
     } else {
       setSelectedEmployeeIds((prev) =>
-        Array.from(new Set([...prev, ...filteredIds]))
+        Array.from(new Set([...prev, ...visibleIds]))
       );
     }
+  };
+
+  const handleClearAllSelected = () => {
+    setSelectedEmployeeIds([]);
+    setCustomTimes({});
+    setEditingTimeEmpId(null);
+    setCustomReasons({});
+    setEditingReasonEmpId(null);
   };
 
   const handleRetranslate = async () => {
@@ -752,9 +762,14 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
 
   if (!isOpen) return null;
 
+  const leaveCount = filteredEmployees.filter((e) => onLeaveMap.has(e.id)).length;
+  const dupCount = filteredEmployees.filter(
+    (e) => !onLeaveMap.has(e.id) && alreadyRecordedIds.has(e.id)
+  ).length;
+
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-[1px] flex items-center justify-center p-3 sm:p-4"
+      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-[1px] flex items-center justify-center p-2 sm:p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget && !isConfirming) onClose();
       }}
@@ -764,12 +779,12 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
         aria-modal="true"
         aria-labelledby="manual-ot-group-modal-title"
         data-testid="manual-overtime-group-modal"
-        className="max-w-2xl w-full bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden"
+        className="max-w-5xl w-[95vw] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden"
       >
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 bg-slate-50/70 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="w-7 h-7 rounded-lg bg-blue-100 text-[#14539E] flex items-center justify-center shrink-0">
+        {/* HEADER */}
+        <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-2.5 bg-slate-50/70 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-8 h-8 rounded-lg bg-blue-100 text-[#14539E] flex items-center justify-center shrink-0">
               <Plus className="w-4 h-4 stroke-[2.5]" />
             </span>
             <div className="min-w-0">
@@ -778,8 +793,12 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                 className="text-sm font-bold text-slate-900 truncate"
               >
                 {presetContext?.label
-                  ? `Đăng ký nhóm: ${presetContext.label}`
-                  : 'Thêm nhóm tăng ca thủ công'}
+                  ? `Đăng ký nhóm: ${presetContext.label} • Ngày ${formatIsoToDDMMYYYY(
+                      baseShellDate
+                    )}`
+                  : `Thêm nhóm tăng ca thủ công • Ngày ${formatIsoToDDMMYYYY(
+                      baseShellDate
+                    )}`}
               </h3>
               <p className="text-[11px] text-slate-500 truncate">
                 {isPrevDayMode && includeTwoConsecutivePrevDays ? (
@@ -797,7 +816,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                   <>
                     Ghi nhận phát sinh ngày{' '}
                     <strong className="font-mono text-[#14539E]">
-                      {formatIsoToDDMM(overtimeDate)}
+                      {formatIsoToDDMMYYYY(overtimeDate)}
                     </strong>{' '}
                     vào phiếu{' '}
                     <strong className="font-mono text-slate-700">
@@ -806,7 +825,8 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                   </>
                 ) : (
                   <>
-                    Chọn nhân sự, thời gian và lý do để ghi nhận trực tiếp vào phiếu ngày{' '}
+                    Thiết lập khung giờ, lý do và tích chọn trực tiếp nhân sự tham gia
+                    cho phiếu ngày{' '}
                     <strong className="font-mono text-[#14539E]">
                       {formatIsoToDDMMYYYY(overtimeDate)}
                     </strong>
@@ -816,48 +836,19 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {onSwitchMode && (
-              <div
-                role="tablist"
-                aria-label="Chuyển chế độ đăng ký tăng ca"
-                className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 gap-0.5"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={true}
-                  data-testid="modal-switch-manual-btn"
-                  className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#14539E] text-white cursor-pointer whitespace-nowrap"
-                >
-                  Nhập thủ công
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={false}
-                  data-testid="modal-switch-ai-btn"
-                  onClick={() => onSwitchMode('ai_scan')}
-                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 hover:text-[#14539E] hover:bg-slate-50 cursor-pointer whitespace-nowrap"
-                >
-                  Quét ảnh Zalo AI
-                </button>
-              </div>
-            )}
-            <button
-              type="button"
-              aria-label="Đóng cửa sổ thêm nhóm thủ công"
-              disabled={isConfirming}
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 cursor-pointer transition-colors disabled:opacity-40"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            aria-label="Đóng cửa sổ thêm nhóm thủ công"
+            disabled={isConfirming}
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 cursor-pointer transition-colors disabled:opacity-40 shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+        {/* BODY: BỐ CỤC 2 CỘT (TRÁI 5/12 CẤU HÌNH | PHẢI 7/12 LIST DỌC KHÔNG CUỘN) */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3.5">
           {dayEvaluation.bannerTone !== 'none' && (
             <div
               role="status"
@@ -889,686 +880,653 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
             </div>
           )}
 
-          {/* Bộ phận / Nhóm & Ngày */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div>
-              <label
-                htmlFor="manual-group-dept-select"
-                className="block text-[11px] font-semibold text-slate-600 mb-1"
-              >
-                Lọc bộ phận / nhóm nhân sự
-              </label>
-              <select
-                id="manual-group-dept-select"
-                value={selectedGroupFilter}
-                onChange={(e) => setSelectedGroupFilter(e.target.value)}
-                className="w-full h-8 px-2.5 text-xs font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] cursor-pointer"
-              >
-                <option value="ALL">Tất cả nhóm</option>
-                {departmentOptions.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor="manual-group-date-input"
-                className="block text-[11px] font-semibold text-slate-600 mb-1"
-              >
-                Ngày tăng ca
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="manual-group-date-input"
-                  type="date"
-                  disabled={isPrevDayMode && includeTwoConsecutivePrevDays}
-                  value={overtimeDate}
-                  onChange={(e) => setOvertimeDate(e.target.value)}
-                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] disabled:bg-slate-100 disabled:text-slate-400"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Thanh chọn nhanh ngày phát sinh hôm trước (D-1 / D-2 / cả 2 ngày) */}
-          {isPrevDayMode && (
-            <div
-              data-testid="manual-prev-day-bar"
-              className="rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]"
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-semibold text-slate-700">Chọn nhanh ngày trước:</span>
-                <button
-                  type="button"
-                  data-testid="manual-prev-d1-btn"
-                  onClick={() => {
-                    setIncludeTwoConsecutivePrevDays(false);
-                    setOvertimeDate(prevDayD1);
-                  }}
-                  className={`px-2 py-0.5 rounded-md font-mono font-semibold border cursor-pointer transition-colors ${
-                    !includeTwoConsecutivePrevDays && overtimeDate === prevDayD1
-                      ? 'bg-[#14539E] text-white border-[#14539E]'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-[#14539E]'
-                  }`}
-                >
-                  Hôm qua ({formatIsoToDDMM(prevDayD1)})
-                </button>
-                <button
-                  type="button"
-                  data-testid="manual-prev-d2-btn"
-                  onClick={() => {
-                    setIncludeTwoConsecutivePrevDays(false);
-                    setOvertimeDate(prevDayD2);
-                  }}
-                  className={`px-2 py-0.5 rounded-md font-mono font-semibold border cursor-pointer transition-colors ${
-                    !includeTwoConsecutivePrevDays && overtimeDate === prevDayD2
-                      ? 'bg-[#14539E] text-white border-[#14539E]'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-[#14539E]'
-                  }`}
-                >
-                  2 ngày trước ({formatIsoToDDMM(prevDayD2)})
-                </button>
-              </div>
-
-              <label className="inline-flex items-center gap-1.5 font-semibold text-[#14539E] cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  data-testid="manual-prev-two-days-checkbox"
-                  checked={includeTwoConsecutivePrevDays}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setIncludeTwoConsecutivePrevDays(checked);
-                    if (checked) setOvertimeDate(prevDayD1);
-                  }}
-                  className="w-3.5 h-3.5 rounded border-blue-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
-                />
-                <span>
-                  Ghi nhận cả 2 ngày liên tiếp ({formatIsoToDDMM(prevDayD2)} &amp; {formatIsoToDDMM(prevDayD1)})
-                </span>
-              </label>
-            </div>
-          )}
-
-          {/* Chọn nhân sự */}
-          <div className="space-y-2" ref={pickerRef}>
-            <div className="flex items-center justify-between gap-2">
-              <label
-                htmlFor="manual-group-emp-search"
-                className="text-[11px] font-semibold text-slate-600"
-              >
-                Nhân sự ({selectedEmployeeIds.length} đã chọn)
-                {onLeaveMap.size > 0 && (
-                  <span className="text-rose-600 font-normal ml-1.5">
-                    ({onLeaveMap.size} đang nghỉ)
-                  </span>
-                )}
-              </label>
-              {selectedEmployeeIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedEmployeeIds([]);
-                    setCustomTimes({});
-                    setEditingTimeEmpId(null);
-                    setCustomReasons({});
-                    setEditingReasonEmpId(null);
-                  }}
-                  className="text-[11px] font-medium text-slate-500 hover:text-red-600 cursor-pointer"
-                >
-                  Bỏ chọn hết
-                </button>
-              )}
-            </div>
-
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="manual-group-emp-search"
-                data-testid="manual-group-emp-search"
-                type="text"
-                value={employeeQuery}
-                onFocus={() => setIsEmployeeListOpen(true)}
-                onClick={() => setIsEmployeeListOpen(true)}
-                onChange={(e) => {
-                  setEmployeeQuery(e.target.value);
-                  if (!isEmployeeListOpen) setIsEmployeeListOpen(true);
-                }}
-                placeholder="Bấm để chọn hoặc tìm mã, tên nhân sự..."
-                className="w-full h-8 pl-8 pr-12 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-              />
-              <button
-                type="button"
-                aria-label="Mở danh sách nhân sự"
-                onClick={() => setIsEmployeeListOpen((prev) => !prev)}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-[#14539E] cursor-pointer"
-              >
-                <ChevronDown
-                  className={`w-3.5 h-3.5 transition-transform ${
-                    isEmployeeListOpen ? 'rotate-180 text-[#14539E]' : ''
-                  }`}
-                />
-              </button>
-
-              {isEmployeeListOpen && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* KHỐI TRÁI (5/12): NGÀY PHÁT SINH (NẾU CÓ) + GIỜ CHUNG + LÝ DO VIỆT / HÀN */}
+            <div className="lg:col-span-5 space-y-3.5">
+              {isPrevDayMode && (
                 <div
-                  data-testid="manual-group-emp-dropdown"
-                  className="absolute left-0 right-0 top-full mt-1 z-30 rounded-lg border border-slate-200 bg-white shadow-xl overflow-hidden"
+                  data-testid="manual-prev-day-bar"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 px-2.5 py-2 text-[11px]"
                 >
-                  <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500">
-                      {selectableFilteredEmployees.length} nhân sự khả dụng
-                    </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
-                      disabled={selectableFilteredEmployees.length === 0}
-                      onClick={handleSelectAllFiltered}
-                      className="font-semibold text-[#14539E] hover:underline cursor-pointer disabled:opacity-40"
+                      data-testid="manual-prev-d1-btn"
+                      onClick={() => {
+                        setIncludeTwoConsecutivePrevDays(false);
+                        setOvertimeDate(prevDayD1);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg font-mono font-semibold border cursor-pointer transition-colors ${
+                        !includeTwoConsecutivePrevDays && overtimeDate === prevDayD1
+                          ? 'bg-[#14539E] text-white border-[#14539E]'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-[#14539E]'
+                      }`}
                     >
-                      {selectableFilteredEmployees.length > 0 &&
-                      selectableFilteredEmployees.every((e) =>
-                        selectedEmployeeIds.includes(e.id)
-                      )
-                        ? 'Bỏ chọn tất cả'
-                        : 'Chọn tất cả'}
+                      Hôm qua ({formatIsoToDDMM(prevDayD1)})
                     </button>
-                  </div>
-                  <div className="max-h-52 overflow-y-auto p-1.5 space-y-1">
-                    {filteredEmployees.length === 0 ? (
-                      <div className="py-4 text-center text-xs text-slate-400">
-                        Không có nhân sự khả dụng phù hợp.
-                      </div>
-                    ) : (
-                      filteredEmployees.map((emp) => {
-                        const leave = onLeaveMap.get(emp.id);
-                        const isLeave = Boolean(leave);
-                        const isSelected =
-                          !isLeave && selectedEmployeeIds.includes(emp.id);
-                        return (
-                          <button
-                            key={emp.id}
-                            type="button"
-                            disabled={isLeave}
-                            data-testid={`manual-emp-option-${emp.employeeCode || emp.id}`}
-                            onClick={() => handleToggleEmployee(emp.id)}
-                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs transition-colors ${
-                              isLeave
-                                ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
-                                : isSelected
-                                  ? 'bg-blue-50 text-slate-900 font-semibold cursor-pointer'
-                                  : 'hover:bg-slate-100 text-slate-700 cursor-pointer'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span
-                                className={`w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 ${
-                                  isSelected
-                                    ? 'bg-[#14539E] border-[#14539E] text-white'
-                                    : 'border-slate-300 bg-white'
-                                }`}
-                              >
-                                {isSelected && (
-                                  <Check className="w-2.5 h-2.5 stroke-[3]" />
-                                )}
-                              </span>
-                              <span className="truncate">{emp.fullName}</span>
-                              <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                                ({emp.employeeCode})
-                              </span>
-                            </div>
-                            {leave ? (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
-                                {getLeaveTypeShortLabel(leave)}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 shrink-0">
-                                {emp.department}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                  <div className="px-2.5 py-1.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500">
-                      Đã chọn:{' '}
-                      <strong className="text-[#14539E]">
-                        {selectedEmployeeIds.length}
-                      </strong>
-                    </span>
                     <button
                       type="button"
-                      onClick={() => setIsEmployeeListOpen(false)}
-                      className="px-2.5 py-0.5 rounded bg-[#14539E] text-white font-semibold cursor-pointer"
+                      data-testid="manual-prev-d2-btn"
+                      onClick={() => {
+                        setIncludeTwoConsecutivePrevDays(false);
+                        setOvertimeDate(prevDayD2);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg font-mono font-semibold border cursor-pointer transition-colors ${
+                        !includeTwoConsecutivePrevDays && overtimeDate === prevDayD2
+                          ? 'bg-[#14539E] text-white border-[#14539E]'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-[#14539E]'
+                      }`}
                     >
-                      Xong
+                      Hôm kia ({formatIsoToDDMM(prevDayD2)})
                     </button>
                   </div>
+                  <label className="inline-flex items-center gap-1.5 font-semibold text-[#14539E] cursor-pointer select-none whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      data-testid="manual-prev-two-days-checkbox"
+                      checked={includeTwoConsecutivePrevDays}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIncludeTwoConsecutivePrevDays(checked);
+                        if (checked) setOvertimeDate(prevDayD1);
+                      }}
+                      className="w-3.5 h-3.5 rounded border-blue-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
+                    />
+                    <span>Cả 2 ngày</span>
+                  </label>
                 </div>
               )}
+
+              {/* HÀNG 1: Giờ bắt đầu & Giờ kết thúc (chung) */}
+              <div className="space-y-2.5 rounded-xl border border-slate-200/80 bg-slate-50/50 p-3">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label
+                      htmlFor="manual-group-start-time"
+                      className="block text-[11px] font-semibold text-slate-600 mb-1"
+                    >
+                      Giờ bắt đầu (chung)
+                    </label>
+                    <div className="relative">
+                      <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="manual-group-start-time"
+                        data-testid="manual-group-start-input"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={5}
+                        value={startTime}
+                        onChange={(e) => {
+                          setIsStartManuallyEdited(true);
+                          setStartTime(sanitize24hTimeInput(e.target.value));
+                        }}
+                        onBlur={() =>
+                          setStartTime((prev) =>
+                            normalize24hTime(
+                              prev,
+                              dayEvaluation.suggestedStartTime || '16:10'
+                            )
+                          )
+                        }
+                        className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="manual-group-end-time"
+                      className="block text-[11px] font-semibold text-slate-600 mb-1"
+                    >
+                      Giờ kết thúc (chung)
+                    </label>
+                    <div className="relative">
+                      <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="manual-group-end-time"
+                        data-testid="manual-group-end-input"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={5}
+                        value={endTime}
+                        onChange={(e) => {
+                          setIsEndManuallyEdited(true);
+                          setEndTime(sanitize24hTimeInput(e.target.value));
+                        }}
+                        onBlur={() =>
+                          setEndTime((prev) =>
+                            normalize24hTime(
+                              prev,
+                              dayEvaluation.suggestedDefaultEndTime || '18:10'
+                            )
+                          )
+                        }
+                        className="w-full h-9 pl-8 pr-2.5 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] font-semibold text-slate-500 shrink-0">
+                    Chọn nhanh giờ ra:
+                  </span>
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
+                    {QUICK_END_PRESETS.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => {
+                          setIsEndManuallyEdited(true);
+                          setEndTime(t);
+                        }}
+                        className={`h-7 px-2.5 text-[11px] font-mono font-semibold rounded-lg border transition-colors cursor-pointer ${
+                          endTime === t
+                            ? 'bg-[#14539E] text-white border-[#14539E]'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-[#14539E]'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* HÀNG 2: Lý do (Tiếng Việt & Tiếng Hàn) xếp dọc gọn gàng */}
+              <div className="space-y-3 rounded-xl border border-slate-200/80 bg-slate-50/50 p-3">
+                <div ref={reasonDropdownRef} className="relative">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label
+                      htmlFor="manual-group-reason-vi"
+                      className="text-[11px] font-semibold text-slate-600"
+                    >
+                      Lý do (Tiếng Việt)
+                    </label>
+                    {isTranslating && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-[#14539E]">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>Đang dịch...</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <textarea
+                      id="manual-group-reason-vi"
+                      data-testid="manual-group-reason-vi"
+                      rows={3}
+                      value={reasonVi}
+                      onFocus={() => setIsReasonDropdownOpen(true)}
+                      onChange={(e) => {
+                        setReasonVi(e.target.value);
+                        if (!isReasonDropdownOpen) setIsReasonDropdownOpen(true);
+                      }}
+                      placeholder="Chọn từ điển hoặc nhập lý do tăng ca..."
+                      className="w-full pl-2.5 pr-7 py-1.5 text-xs leading-snug text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] resize-y"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Mở từ điển lý do"
+                      onClick={() => setIsReasonDropdownOpen((prev) => !prev)}
+                      className="absolute right-1.5 top-1.5 p-1 text-slate-400 hover:text-[#14539E] cursor-pointer"
+                    >
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${
+                          isReasonDropdownOpen ? 'rotate-180 text-[#14539E]' : ''
+                        }`}
+                      />
+                    </button>
+                    {isReasonDropdownOpen && filteredGlossary.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-lg border border-slate-200 bg-white shadow-xl max-h-48 overflow-y-auto p-1 space-y-0.5">
+                        {filteredGlossary.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setReasonVi(item.reasonVi);
+                              setReasonKr(item.reasonKr);
+                              setIsKrManuallyEdited(false);
+                              setIsReasonDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-md text-[11px] hover:bg-blue-50 flex items-center justify-between gap-2 cursor-pointer"
+                          >
+                            <span className="line-clamp-2 text-slate-700 font-medium">
+                              {item.reasonVi}
+                            </span>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label
+                      htmlFor="manual-group-reason-kr"
+                      className="text-[11px] font-semibold text-slate-600"
+                    >
+                      Lý do (Tiếng Hàn)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void handleRetranslate()}
+                      className="text-[10px] font-medium text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Dịch gợi ý</span>
+                    </button>
+                  </div>
+                  <textarea
+                    id="manual-group-reason-kr"
+                    data-testid="manual-group-reason-kr"
+                    rows={3}
+                    value={reasonKr}
+                    onChange={(e) => {
+                      setReasonKr(e.target.value);
+                      setIsKrManuallyEdited(true);
+                    }}
+                    placeholder="생산 당직 (Tự động gợi ý từ từ điển)..."
+                    className="w-full px-2.5 py-1.5 text-xs leading-snug text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] resize-y"
+                  />
+                </div>
+              </div>
             </div>
 
-            {selectedEmployeeIds.length > 0 && (
-              <div className="space-y-2 pt-0.5">
-                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
-                  {selectedEmployeeIds.map((empId) => {
-                    const emp = employeeMap.get(empId);
-                    if (!emp) return null;
-                    const empStart = customTimes[empId]?.startTime || startTime;
-                    const empEnd = customTimes[empId]?.endTime || endTime;
-                    const isCustom = Boolean(customTimes[empId]);
-                    const isEditing = editingTimeEmpId === empId;
-                    const customReasonEntry = customReasons[empId];
+            {/* KHỐI PHẢI (7/12): DANH SÁCH NHÂN SỰ DẠNG LIST DỌC 1 CỘT (MỞ TOÀN BỘ KHÔNG CUỘN) */}
+            <div className="lg:col-span-7 space-y-2.5 overflow-visible">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-slate-200">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-bold text-slate-800">
+                    Nhân sự trong nhóm ({selectedEmployeeIds.length}/
+                    {selectableFilteredEmployees.length} đã chọn)
+                  </span>
+                  {leaveCount > 0 && (
+                    <span className="text-[11px] text-rose-600 font-medium">
+                      • {leaveCount} đang nghỉ
+                    </span>
+                  )}
+                  {dupCount > 0 && (
+                    <span className="text-[11px] text-amber-700 font-medium">
+                      • {dupCount} đã có lịch
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={employeeSearchQuery}
+                      onChange={(e) => setEmployeeSearchQuery(e.target.value)}
+                      data-testid="manual-emp-search-input"
+                      aria-label="Tìm kiếm nhân sự theo tên hoặc mã nhân viên"
+                      placeholder="Tìm tên hoặc mã NV..."
+                      className="w-44 sm:w-52 h-8 pl-7 pr-6 text-xs text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                    />
+                    {employeeSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setEmployeeSearchQuery('')}
+                        data-testid="manual-emp-search-clear-btn"
+                        aria-label="Xóa từ khóa tìm kiếm"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={selectableDisplayedEmployees.length === 0}
+                    onClick={handleSelectAllFiltered}
+                    data-testid="manual-select-all-btn"
+                    className="h-8 px-2.5 rounded-lg border border-[#14539E]/30 bg-blue-50/70 hover:bg-blue-100 text-[#14539E] text-[11px] font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                  >
+                    {areAllSelectableSelected ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+                  </button>
+                  {!employeeSearchQuery.trim() &&
+                    selectedEmployeeIds.length > 0 &&
+                    !areAllSelectableSelected && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllSelected}
+                        data-testid="manual-clear-all-btn"
+                        className="h-8 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                      >
+                        Bỏ chọn hết
+                      </button>
+                    )}
+                </div>
+              </div>
+
+              {filteredEmployees.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-xs text-slate-400">
+                  Không có nhân sự nào thuộc nhóm này.
+                </div>
+              ) : displayedEmployees.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-xs text-slate-500 space-y-1.5">
+                  <div>
+                    Không tìm thấy nhân sự phù hợp với &ldquo;
+                    <strong className="text-slate-700">{employeeSearchQuery.trim()}</strong>
+                    &rdquo;.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEmployeeSearchQuery('')}
+                    className="text-[11px] font-semibold text-[#14539E] hover:underline cursor-pointer"
+                  >
+                    Xóa từ khóa tìm kiếm
+                  </button>
+                </div>
+              ) : (
+                <div
+                  data-testid="manual-employees-list"
+                  className="flex flex-col gap-1.5 overflow-visible"
+                >
+                  {displayedEmployees.map((emp) => {
+                    const leave = onLeaveMap.get(emp.id);
+                    const isLeave = Boolean(leave);
+                    const isDup = !isLeave && alreadyRecordedIds.has(emp.id);
+                    const isDisabled = isLeave || isDup;
+                    const isSelected =
+                      !isDisabled && selectedEmployeeIds.includes(emp.id);
+
+                    const empStart = customTimes[emp.id]?.startTime || startTime;
+                    const empEnd = customTimes[emp.id]?.endTime || endTime;
+                    const isCustomTime = Boolean(customTimes[emp.id]);
+                    const isEditingTime = editingTimeEmpId === emp.id;
+
+                    const customReasonEntry = customReasons[emp.id];
                     const hasCustomReason = Boolean(
                       customReasonEntry &&
                         ((customReasonEntry.reasonVi || '').trim() ||
                           (customReasonEntry.reasonKr || '').trim())
                     );
-                    const isEditingReason = editingReasonEmpId === empId;
+                    const isEditingReason = editingReasonEmpId === emp.id;
+                    const entry = customReasonEntry || {
+                      reasonVi: '',
+                      reasonKr: '',
+                    };
 
                     return (
                       <div
-                        key={empId}
-                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] ${
-                          isCustom || hasCustomReason
-                            ? 'bg-amber-50 border-amber-300 text-slate-800'
-                            : 'bg-blue-50/75 border-blue-200 text-slate-800'
+                        key={emp.id}
+                        data-testid={`manual-emp-card-${emp.employeeCode || emp.id}`}
+                        data-selected={isSelected ? 'true' : 'false'}
+                        className={`w-full rounded-lg border transition-colors ${
+                          isDisabled
+                            ? 'border-slate-200 bg-slate-50/90 opacity-60'
+                            : isSelected
+                              ? isCustomTime || hasCustomReason
+                                ? 'border-amber-300 bg-amber-50/75 shadow-2xs'
+                                : 'border-[#14539E] bg-blue-50/70 shadow-2xs'
+                              : 'border-slate-200 bg-white hover:border-[#14539E]/55 hover:bg-blue-50/25'
                         }`}
                       >
-                        <span className="font-medium truncate max-w-[140px]">
-                          {emp.fullName}
-                        </span>
-                        {isEditing ? (
-                          <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
-                            <input
-                              type="text"
-                              maxLength={5}
-                              value={empStart}
-                              onChange={(e) =>
-                                setCustomTimes((prev) => ({
-                                  ...prev,
-                                  [empId]: {
-                                    startTime: sanitize24hTimeInput(e.target.value),
-                                    endTime: prev[empId]?.endTime || endTime,
-                                  },
-                                }))
-                              }
-                              onBlur={() =>
-                                setCustomTimes((prev) => ({
-                                  ...prev,
-                                  [empId]: {
-                                    startTime: normalize24hTime(empStart, startTime),
-                                    endTime: prev[empId]?.endTime || endTime,
-                                  },
-                                }))
-                              }
-                              className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded"
-                            />
-                            <span className="text-[10px] text-slate-400">-</span>
-                            <input
-                              type="text"
-                              maxLength={5}
-                              value={empEnd}
-                              onChange={(e) =>
-                                setCustomTimes((prev) => ({
-                                  ...prev,
-                                  [empId]: {
-                                    startTime: prev[empId]?.startTime || startTime,
-                                    endTime: sanitize24hTimeInput(e.target.value),
-                                  },
-                                }))
-                              }
-                              onBlur={() =>
-                                setCustomTimes((prev) => ({
-                                  ...prev,
-                                  [empId]: {
-                                    startTime: prev[empId]?.startTime || startTime,
-                                    endTime: normalize24hTime(empEnd, endTime),
-                                  },
-                                }))
-                              }
-                              className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setEditingTimeEmpId(null)}
-                              className="p-0.5 text-emerald-600 cursor-pointer"
-                            >
-                              <Check className="w-2.5 h-2.5" />
-                            </button>
-                          </div>
-                        ) : (
+                        <div className="w-full flex items-center justify-between gap-2 px-3 py-2">
                           <button
                             type="button"
-                            onClick={() => setEditingTimeEmpId(empId)}
-                            className="text-[10px] font-mono px-1 py-0.5 rounded border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] cursor-pointer"
+                            disabled={isDisabled}
+                            data-testid={`manual-emp-option-${emp.employeeCode || emp.id}`}
+                            onClick={() => handleToggleEmployee(emp.id)}
+                            className={`flex-1 min-w-0 text-left flex items-center gap-2.5 ${
+                              isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'
+                            }`}
                           >
-                            {empStart}-{empEnd}
+                            <span
+                              className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
+                                isSelected
+                                  ? 'bg-[#14539E] border-[#14539E] text-white'
+                                  : 'border-slate-300 bg-white'
+                              }`}
+                            >
+                              {isSelected && (
+                                <Check className="w-2.5 h-2.5 stroke-[3]" />
+                              )}
+                            </span>
+                            <div className="min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                              <span
+                                className={`text-xs truncate ${
+                                  isSelected
+                                    ? 'font-bold text-slate-900'
+                                    : 'font-semibold text-slate-700'
+                                }`}
+                              >
+                                {emp.fullName}
+                              </span>
+                              <span className="text-[11px] font-mono text-slate-400 shrink-0">
+                                {emp.employeeCode}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-medium shrink-0">
+                                {emp.department}
+                              </span>
+                            </div>
                           </button>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isLeave ? (
+                              <span
+                                title={getLeaveTypeShortLabel(leave!)}
+                                className="text-[10px] px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold whitespace-nowrap"
+                              >
+                                Đang nghỉ
+                              </span>
+                            ) : isDup ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold whitespace-nowrap">
+                                Đã có lịch
+                              </span>
+                            ) : isSelected ? (
+                              <>
+                                {isEditingTime ? (
+                                  <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-md border border-[#14539E]">
+                                    <input
+                                      type="text"
+                                      maxLength={5}
+                                      aria-label={`Giờ bắt đầu của ${emp.fullName}`}
+                                      value={empStart}
+                                      onChange={(e) =>
+                                        setCustomTimes((prev) => ({
+                                          ...prev,
+                                          [emp.id]: {
+                                            startTime: sanitize24hTimeInput(
+                                              e.target.value
+                                            ),
+                                            endTime:
+                                              prev[emp.id]?.endTime || endTime,
+                                          },
+                                        }))
+                                      }
+                                      onBlur={() =>
+                                        setCustomTimes((prev) => ({
+                                          ...prev,
+                                          [emp.id]: {
+                                            startTime: normalize24hTime(
+                                              empStart,
+                                              startTime
+                                            ),
+                                            endTime:
+                                              prev[emp.id]?.endTime || endTime,
+                                          },
+                                        }))
+                                      }
+                                      className="w-11 h-5 text-[10px] font-mono text-center border border-slate-200 rounded"
+                                    />
+                                    <span className="text-[10px] text-slate-400">
+                                      -
+                                    </span>
+                                    <input
+                                      type="text"
+                                      maxLength={5}
+                                      aria-label={`Giờ kết thúc của ${emp.fullName}`}
+                                      value={empEnd}
+                                      onChange={(e) =>
+                                        setCustomTimes((prev) => ({
+                                          ...prev,
+                                          [emp.id]: {
+                                            startTime:
+                                              prev[emp.id]?.startTime || startTime,
+                                            endTime: sanitize24hTimeInput(
+                                              e.target.value
+                                            ),
+                                          },
+                                        }))
+                                      }
+                                      onBlur={() =>
+                                        setCustomTimes((prev) => ({
+                                          ...prev,
+                                          [emp.id]: {
+                                            startTime:
+                                              prev[emp.id]?.startTime || startTime,
+                                            endTime: normalize24hTime(
+                                              empEnd,
+                                              endTime
+                                            ),
+                                          },
+                                        }))
+                                      }
+                                      className="w-11 h-5 text-[10px] font-mono text-center border border-slate-200 rounded"
+                                    />
+                                    <button
+                                      type="button"
+                                      aria-label="Xong chỉnh giờ riêng"
+                                      onClick={() => setEditingTimeEmpId(null)}
+                                      className="p-0.5 text-emerald-600 cursor-pointer"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    title="Bấm để chỉnh giờ riêng cho người này"
+                                    onClick={() => setEditingTimeEmpId(emp.id)}
+                                    className={`text-[11px] font-mono px-2 py-0.5 rounded-md border cursor-pointer transition-colors whitespace-nowrap ${
+                                      isCustomTime
+                                        ? 'border-amber-400 bg-amber-100 text-amber-900 font-bold'
+                                        : 'border-slate-200 bg-white text-slate-600 hover:border-[#14539E] hover:text-[#14539E]'
+                                    }`}
+                                  >
+                                    {empStart} - {empEnd}
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  title="Thêm lý do tăng ca riêng cho người này"
+                                  aria-label={`Thêm lý do tăng ca riêng cho ${emp.fullName}`}
+                                  data-testid={`manual-custom-reason-btn-${emp.employeeCode || emp.id}`}
+                                  onClick={() =>
+                                    setEditingReasonEmpId((prev) =>
+                                      prev === emp.id ? null : emp.id
+                                    )
+                                  }
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+                                    hasCustomReason || isEditingReason
+                                      ? 'border-amber-400 bg-amber-100 text-amber-800'
+                                      : 'border-slate-200 bg-white text-slate-500 hover:text-[#14539E] hover:border-[#14539E]'
+                                  }`}
+                                >
+                                  <FileEdit className="w-3 h-3" />
+                                  {hasCustomReason && <span>Riêng</span>}
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {isSelected && isEditingReason && (
+                          <div
+                            data-testid="manual-custom-reason-editor"
+                            className="px-3 pb-2.5 pt-2 border-t border-amber-200/80 bg-amber-50/55 space-y-1.5 rounded-b-lg"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[10px] font-semibold text-amber-900">
+                                Lý do riêng (đẩy xuống cuối nhóm &amp; tách ô riêng)
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={translatingCustomEmpId === emp.id}
+                                  onClick={() =>
+                                    void handleTranslateCustomReason(emp.id)
+                                  }
+                                  className="text-[10px] font-semibold text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer disabled:opacity-50"
+                                >
+                                  {translatingCustomEmpId === emp.id ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="w-3 h-3" />
+                                  )}
+                                  <span>Dịch gợi ý</span>
+                                </button>
+                                {hasCustomReason && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleClearCustomReason(emp.id)}
+                                    className="text-[10px] font-semibold text-rose-600 hover:underline cursor-pointer"
+                                  >
+                                    Xóa
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingReasonEmpId(null)}
+                                  className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+                                >
+                                  Thu gọn
+                                </button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                data-testid="manual-custom-reason-vi-input"
+                                value={entry.reasonVi}
+                                onChange={(e) =>
+                                  handleUpdateCustomReason(
+                                    emp.id,
+                                    'reasonVi',
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="Lý do riêng (Tiếng Việt)..."
+                                className="w-full h-7 px-2 text-[11px] rounded-md border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
+                              />
+                              <input
+                                type="text"
+                                data-testid="manual-custom-reason-kr-input"
+                                value={entry.reasonKr}
+                                onChange={(e) =>
+                                  handleUpdateCustomReason(
+                                    emp.id,
+                                    'reasonKr',
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="Lý do riêng (Tiếng Hàn)..."
+                                className="w-full h-7 px-2 text-[11px] rounded-md border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
+                              />
+                            </div>
+                          </div>
                         )}
-                        <button
-                          type="button"
-                          title="Thêm lý do tăng ca riêng cho người này"
-                          aria-label={`Thêm lý do tăng ca riêng cho ${emp.fullName}`}
-                          data-testid={`manual-custom-reason-btn-${emp.employeeCode || emp.id}`}
-                          onClick={() =>
-                            setEditingReasonEmpId((prev) =>
-                              prev === empId ? null : empId
-                            )
-                          }
-                          className={`p-0.5 rounded border cursor-pointer transition-colors ${
-                            hasCustomReason || isEditingReason
-                              ? 'border-amber-400 bg-amber-100 text-amber-800'
-                              : 'border-transparent text-slate-400 hover:text-[#14539E] hover:bg-white'
-                          }`}
-                        >
-                          <FileEdit className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Bỏ chọn ${emp.fullName}`}
-                          onClick={() => handleToggleEmployee(empId)}
-                          className="p-0.5 text-slate-400 hover:text-red-600 cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
                       </div>
                     );
                   })}
                 </div>
-
-                {editingReasonEmpId &&
-                  employeeMap.get(editingReasonEmpId) &&
-                  selectedEmployeeIds.includes(editingReasonEmpId) && (() => {
-                    const targetEmp = employeeMap.get(editingReasonEmpId)!;
-                    const entry = customReasons[editingReasonEmpId] || {
-                      reasonVi: '',
-                      reasonKr: '',
-                    };
-                    const hasEntry = Boolean(
-                      entry.reasonVi.trim() || entry.reasonKr.trim()
-                    );
-                    return (
-                      <div
-                        data-testid="manual-custom-reason-editor"
-                        className="rounded-xl border border-amber-300 bg-amber-50/70 p-2.5 space-y-1.5"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold text-amber-900">
-                            Lý do tăng ca riêng — {targetEmp.fullName}{' '}
-                            <span className="font-normal text-amber-700">
-                              (tự động đẩy xuống cuối nhóm &amp; tách ô riêng)
-                            </span>
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={translatingCustomEmpId === editingReasonEmpId}
-                              onClick={() =>
-                                void handleTranslateCustomReason(editingReasonEmpId)
-                              }
-                              className="text-[10px] font-semibold text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer disabled:opacity-50"
-                            >
-                              {translatingCustomEmpId === editingReasonEmpId ? (
-                                <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                              ) : (
-                                <Sparkles className="w-2.5 h-2.5" />
-                              )}
-                              <span>Dịch gợi ý</span>
-                            </button>
-                            {hasEntry && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleClearCustomReason(editingReasonEmpId)
-                                }
-                                className="text-[10px] font-semibold text-rose-600 hover:underline cursor-pointer"
-                              >
-                                Xóa lý do riêng
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setEditingReasonEmpId(null)}
-                              className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
-                            >
-                              Thu gọn
-                            </button>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            data-testid="manual-custom-reason-vi-input"
-                            value={entry.reasonVi}
-                            onChange={(e) =>
-                              handleUpdateCustomReason(
-                                editingReasonEmpId,
-                                'reasonVi',
-                                e.target.value
-                              )
-                            }
-                            placeholder="Lý do riêng (Tiếng Việt)..."
-                            className="w-full h-7 px-2 text-xs rounded-lg border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
-                          />
-                          <input
-                            type="text"
-                            data-testid="manual-custom-reason-kr-input"
-                            value={entry.reasonKr}
-                            onChange={(e) =>
-                              handleUpdateCustomReason(
-                                editingReasonEmpId,
-                                'reasonKr',
-                                e.target.value
-                              )
-                            }
-                            placeholder="Lý do riêng (Tiếng Hàn)..."
-                            className="w-full h-7 px-2 text-xs rounded-lg border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })()}
-              </div>
-            )}
-          </div>
-
-          {/* Giờ bắt đầu & Giờ kết thúc (24h HH:mm + quick presets) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div>
-              <label
-                htmlFor="manual-group-start-time"
-                className="block text-[11px] font-semibold text-slate-600 mb-1"
-              >
-                Giờ bắt đầu (chung)
-              </label>
-              <div className="relative">
-                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="manual-group-start-time"
-                  data-testid="manual-group-start-input"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={5}
-                  value={startTime}
-                  onChange={(e) => {
-                    setIsStartManuallyEdited(true);
-                    setStartTime(sanitize24hTimeInput(e.target.value));
-                  }}
-                  onBlur={() =>
-                    setStartTime((prev) =>
-                      normalize24hTime(
-                        prev,
-                        dayEvaluation.suggestedStartTime || '16:10'
-                      )
-                    )
-                  }
-                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label
-                htmlFor="manual-group-end-time"
-                className="block text-[11px] font-semibold text-slate-600 mb-1"
-              >
-                Giờ kết thúc (chung)
-              </label>
-              <div className="relative">
-                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="manual-group-end-time"
-                  data-testid="manual-group-end-input"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={5}
-                  value={endTime}
-                  onChange={(e) => {
-                    setIsEndManuallyEdited(true);
-                    setEndTime(sanitize24hTimeInput(e.target.value));
-                  }}
-                  onBlur={() =>
-                    setEndTime((prev) =>
-                      normalize24hTime(
-                        prev,
-                        dayEvaluation.suggestedDefaultEndTime || '18:10'
-                      )
-                    )
-                  }
-                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                {QUICK_END_PRESETS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setIsEndManuallyEdited(true);
-                      setEndTime(t);
-                    }}
-                    className={`px-2 py-0.5 text-[10px] font-mono font-medium rounded border transition-colors cursor-pointer ${
-                      endTime === t
-                        ? 'bg-[#14539E] text-white border-[#14539E]'
-                        : 'border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-[#14539E]'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Lý do (Tiếng Việt & Tiếng Hàn) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div ref={reasonDropdownRef} className="relative">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <label
-                  htmlFor="manual-group-reason-vi"
-                  className="text-[11px] font-semibold text-slate-600"
-                >
-                  Lý do (Tiếng Việt)
-                </label>
-                {isTranslating && (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-[#14539E]">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Đang dịch...</span>
-                  </span>
-                )}
-              </div>
-              <div className="relative">
-                <textarea
-                  id="manual-group-reason-vi"
-                  data-testid="manual-group-reason-vi"
-                  rows={3}
-                  value={reasonVi}
-                  onFocus={() => setIsReasonDropdownOpen(true)}
-                  onChange={(e) => {
-                    setReasonVi(e.target.value);
-                    if (!isReasonDropdownOpen) setIsReasonDropdownOpen(true);
-                  }}
-                  placeholder="Chọn từ điển hoặc nhập lý do tăng ca..."
-                  className="w-full pl-2.5 pr-7 py-1.5 text-xs leading-snug text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] resize-y"
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsReasonDropdownOpen((prev) => !prev)}
-                  className="absolute right-1.5 top-1.5 p-1 text-slate-400 hover:text-[#14539E] cursor-pointer"
-                >
-                  <ChevronDown
-                    className={`w-3.5 h-3.5 transition-transform ${
-                      isReasonDropdownOpen ? 'rotate-180 text-[#14539E]' : ''
-                    }`}
-                  />
-                </button>
-                {isReasonDropdownOpen && filteredGlossary.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-lg border border-slate-200 bg-white shadow-xl max-h-44 overflow-y-auto p-1 space-y-0.5">
-                    {filteredGlossary.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          setReasonVi(item.reasonVi);
-                          setReasonKr(item.reasonKr);
-                          setIsKrManuallyEdited(false);
-                          setIsReasonDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-2 py-1.5 rounded-md text-[11px] hover:bg-blue-50 flex items-center justify-between gap-2 cursor-pointer"
-                      >
-                        <span className="line-clamp-2 text-slate-700 font-medium">
-                          {item.reasonVi}
-                        </span>
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <label
-                  htmlFor="manual-group-reason-kr"
-                  className="text-[11px] font-semibold text-slate-600"
-                >
-                  Lý do (Tiếng Hàn)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => void handleRetranslate()}
-                  className="text-[10px] font-medium text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Dịch gợi ý</span>
-                </button>
-              </div>
-              <textarea
-                id="manual-group-reason-kr"
-                data-testid="manual-group-reason-kr"
-                rows={3}
-                value={reasonKr}
-                onChange={(e) => {
-                  setReasonKr(e.target.value);
-                  setIsKrManuallyEdited(true);
-                }}
-                placeholder="생산 당직 (Tự động gợi ý từ từ điển)..."
-                className="w-full px-2.5 py-1.5 text-xs leading-snug text-slate-800 placeholder:text-slate-400 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] resize-y"
-              />
+              )}
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-4 py-3 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2 shrink-0">
-          <div className="text-[11px] text-slate-500">
+        {/* FOOTER */}
+        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2 shrink-0">
+          <div className="text-xs text-slate-600">
             Đã chọn{' '}
-            <strong className="text-[#14539E]">
+            <strong className="text-[#14539E] tabular-nums">
               {selectedEmployeeIds.length}
             </strong>{' '}
             nhân sự
@@ -1578,7 +1536,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
               type="button"
               disabled={isConfirming}
               onClick={onClose}
-              className="h-9 px-3.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="h-9 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               Đóng
             </button>
@@ -1587,7 +1545,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
               disabled={isConfirming}
               data-testid="confirm-manual-overtime-group-btn"
               onClick={() => void handleSubmit()}
-              className="h-9 px-4 rounded-xl bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="h-9 px-5 rounded-xl bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               {isConfirming ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />

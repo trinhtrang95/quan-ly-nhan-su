@@ -51,6 +51,7 @@ import {
   OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
   OvertimeStandardGroupDef,
+  OvertimeStandardGroupId,
   OvertimeSupabaseActionError,
   reconstructBlocksFromItems,
   reorderOvertimeBlocks,
@@ -162,6 +163,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   >(null);
   const [activeModalPreset, setActiveModalPreset] =
     useState<OvertimeModalPresetContext | null>(null);
+  const [selectedStandardGroupId, setSelectedStandardGroupId] =
+    useState<OvertimeStandardGroupId | null>(null);
   const [manualOrderFormIds, setManualOrderFormIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -301,6 +304,13 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
   const isActiveFormLocked = Boolean(
     activePreviewForm && isOvertimeFormLocked(activePreviewForm)
+  );
+
+  const selectedStandardGroupDef = useMemo(
+    () =>
+      OVERTIME_STANDARD_GROUPS.find((g) => g.id === selectedStandardGroupId) ||
+      null,
+    [selectedStandardGroupId]
   );
 
   // Giữ selectedPreviewFormId đồng bộ khi danh sách lọc thay đổi
@@ -937,6 +947,15 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 <span className="text-[10px] font-mono font-semibold text-[#14539E] bg-blue-50 px-1.5 py-0.5 rounded shrink-0">
                   {formatDateToFormStyle(activeTargetDate)}
                 </span>
+                {selectedStandardGroupDef && (
+                  <span
+                    data-testid="selected-standard-group-pill"
+                    title={`Đang chọn nhóm: ${selectedStandardGroupDef.label}`}
+                    className="text-[10px] font-semibold text-[#14539E] bg-blue-50 border border-[#14539E]/25 px-1.5 py-0.5 rounded truncate max-w-[105px]"
+                  >
+                    {selectedStandardGroupDef.label}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
@@ -944,15 +963,26 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   type="button"
                   disabled={isActiveFormLocked || !onAppendBlocksToDate}
                   onClick={() =>
-                    openRegistrationModal('manual', { presetType: 'custom' })
+                    openRegistrationModal(
+                      'manual',
+                      selectedStandardGroupDef
+                        ? buildPresetFromStandardGroup(selectedStandardGroupDef)
+                        : { presetType: 'custom' }
+                    )
                   }
                   data-testid="open-manual-group-modal-btn"
                   title={
                     isActiveFormLocked
                       ? 'Phiếu đã chốt — khóa thêm nhóm'
+                      : selectedStandardGroupDef
+                        ? `Thêm thủ công: ${selectedStandardGroupDef.label}`
+                        : 'Thêm nhóm tăng ca thủ công'
+                  }
+                  aria-label={
+                    selectedStandardGroupDef
+                      ? `Thêm thủ công nhóm ${selectedStandardGroupDef.label}`
                       : 'Thêm nhóm tăng ca thủ công'
                   }
-                  aria-label="Thêm nhóm tăng ca thủ công"
                   className="h-7 w-7 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -962,15 +992,26 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   type="button"
                   disabled={isActiveFormLocked || !onAppendBlocksToDate}
                   onClick={() =>
-                    openRegistrationModal('ai_scan', { presetType: 'custom' })
+                    openRegistrationModal(
+                      'ai_scan',
+                      selectedStandardGroupDef
+                        ? buildPresetFromStandardGroup(selectedStandardGroupDef)
+                        : { presetType: 'custom' }
+                    )
                   }
                   data-testid="open-zalo-scan-modal-btn"
                   title={
                     isActiveFormLocked
                       ? 'Phiếu đã chốt — khóa quét ảnh Zalo'
+                      : selectedStandardGroupDef
+                        ? `Quét ảnh Zalo AI: ${selectedStandardGroupDef.label}`
+                        : 'Quét ảnh lịch tăng ca từ Zalo (AI)'
+                  }
+                  aria-label={
+                    selectedStandardGroupDef
+                      ? `Quét ảnh Zalo AI nhóm ${selectedStandardGroupDef.label}`
                       : 'Quét ảnh lịch tăng ca từ Zalo (AI)'
                   }
-                  aria-label="Quét ảnh lịch tăng ca từ Zalo (AI)"
                   className="h-7 w-7 rounded-lg border border-[#14539E]/35 bg-blue-50/70 hover:bg-[#14539E] text-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                 >
                   <Camera className="w-3.5 h-3.5" />
@@ -985,6 +1026,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               {OVERTIME_STANDARD_GROUPS.map((def) => {
                 const status = groupStatusMap[def.id];
                 const isRegistered = Boolean(status?.isRegistered);
+                const isHighlighted = selectedStandardGroupId === def.id;
                 const matchingIdx =
                   status && status.matchingBlockIndices.length === 1
                     ? status.matchingBlockIndices[0]
@@ -1003,29 +1045,25 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     key={def.id}
                     data-testid={`overtime-standard-group-${def.id}`}
                     data-registered={isRegistered ? 'true' : 'false'}
+                    data-selected={isHighlighted ? 'true' : 'false'}
                     className={`rounded-lg border transition-colors flex items-center justify-between gap-1.5 ${
-                      isRegistered
-                        ? 'border-emerald-200/80 bg-emerald-50/40 hover:bg-emerald-50/80'
-                        : 'border-slate-200/80 bg-slate-50/60 hover:bg-white'
+                      isHighlighted
+                        ? 'border-[#14539E] bg-blue-50 ring-1 ring-[#14539E]/25 shadow-2xs'
+                        : isRegistered
+                          ? 'border-emerald-200/80 bg-emerald-50/40 hover:bg-emerald-50/80'
+                          : 'border-slate-200/80 bg-slate-50/60 hover:bg-white'
                     }`}
                   >
                     <button
                       type="button"
-                      disabled={isActiveFormLocked || !onAppendBlocksToDate}
-                      onClick={() =>
-                        openRegistrationModal(
-                          'manual',
-                          buildPresetFromStandardGroup(def)
-                        )
-                      }
+                      onClick={() => setSelectedStandardGroupId(def.id)}
+                      aria-pressed={isHighlighted}
                       title={
-                        isActiveFormLocked
-                          ? 'Phiếu đã chốt — không thể thêm mới'
-                          : isRegistered
-                            ? `${def.label} • Đã đăng ký (${status.badgeText}) — bấm để thêm tiếp`
-                            : `Đăng ký nhanh nhóm ${def.label}`
+                        isHighlighted
+                          ? `Đang chọn nhóm ${def.label} — bấm + hoặc Camera ở trên để đăng ký`
+                          : `Chọn nhóm ${def.label}`
                       }
-                      className="flex-1 min-w-0 py-1 px-2 text-xs flex items-center justify-between gap-2 text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-75"
+                      className="flex-1 min-w-0 py-1 px-2 text-xs flex items-center justify-between gap-2 text-left cursor-pointer"
                     >
                       <span className="min-w-0 flex items-center gap-1.5">
                         {isRegistered ? (
@@ -1036,13 +1074,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                           </span>
                         ) : (
-                          <Circle className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                          <Circle
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isHighlighted ? 'text-[#14539E]' : 'text-slate-300'
+                            }`}
+                          />
                         )}
                         <span
                           className={`truncate ${
-                            isRegistered
-                              ? 'font-semibold text-slate-900'
-                              : 'font-medium text-slate-600'
+                            isHighlighted
+                              ? 'font-bold text-[#14539E]'
+                              : isRegistered
+                                ? 'font-semibold text-slate-900'
+                                : 'font-medium text-slate-600'
                           }`}
                         >
                           {def.order}. {def.label}
@@ -1400,7 +1444,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         workShifts={effectiveWorkShifts}
         companyHolidays={companyHolidays}
         presetContext={activeModalPreset}
-        onSwitchMode={(mode) => setActiveRegModalMode(mode)}
         translateMultilineKorean={translateMultilineKorean}
         onGlossaryEntriesUpdated={onGlossaryEntriesUpdated}
         onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
@@ -1418,7 +1461,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         existingPreviewBlocks={activeBlocks}
         defaultDate={activeTargetDate}
         presetContext={activeModalPreset}
-        onSwitchMode={(mode) => setActiveRegModalMode(mode)}
         translateMultilineKorean={translateMultilineKorean}
         onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
         onParseScheduleImage={parseOvertimeScheduleImage}
