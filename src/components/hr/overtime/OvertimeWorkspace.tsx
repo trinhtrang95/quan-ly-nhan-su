@@ -666,7 +666,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
 
       {/* Tab 1: Nhật ký phiếu tăng ca */}
       {activeTab === 'log' && (
-        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+        <div className="flex-1 min-h-0 h-full overflow-y-auto lg:overflow-hidden p-3 flex flex-col print:h-auto print:overflow-visible print:p-0">
           <OvertimeLog
             forms={forms}
             employees={employees}

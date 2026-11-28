@@ -18,6 +18,7 @@ import {
   isOvertimeTimeBold,
   reconstructBlocksFromItems,
   reorderOvertimeBlocks,
+  formatOvertimeGroupCompactLabel,
   resolveDefaultPrimaryOvertimeDate,
   resolveDepartmentLabel,
   resolveOvertimeMainDepartment,
@@ -755,6 +756,196 @@ describe('overtimeFormsService pure logic', () => {
     assert.deepEqual(reconstructed.map((b) => b.id), ['b2', 'b1']);
     assert.equal(reconstructed[0].participants[0].totalHours, 3.5);
     assert.equal(reconstructed[1].participants[0].totalHours, 2.5);
+  });
+
+  it('formats compact 1-line group labels for normal, special (Trực sản xuất, Văn phòng, Phát sinh), and duplicate groups', () => {
+    const empMap = new Map<string, Employee>([
+      [
+        'e1',
+        {
+          id: 'e1',
+          employeeCode: 'NV01',
+          fullName: 'Nguyễn Hoàng Long',
+          dob: '',
+          gender: 'Nam',
+          cccd: '',
+          phone: '',
+          address: '',
+          department: 'Bảo trì',
+          position: 'NV',
+          joinDate: '',
+          status: 'Đang làm việc',
+          standardAnnualLeave: 12,
+          avatarUrl: '',
+        },
+      ],
+      [
+        'e2',
+        {
+          id: 'e2',
+          employeeCode: 'NV02',
+          fullName: 'Nguyễn Thành Công',
+          dob: '',
+          gender: 'Nam',
+          cccd: '',
+          phone: '',
+          address: '',
+          department: 'PE',
+          position: 'NV',
+          joinDate: '',
+          status: 'Đang làm việc',
+          standardAnnualLeave: 12,
+          avatarUrl: '',
+        },
+      ],
+      [
+        'e3',
+        {
+          id: 'e3',
+          employeeCode: 'NV03',
+          fullName: 'Trần Văn Nam',
+          dob: '',
+          gender: 'Nam',
+          cccd: '',
+          phone: '',
+          address: '',
+          department: 'AUTO 1',
+          position: 'NV',
+          joinDate: '',
+          status: 'Đang làm việc',
+          standardAnnualLeave: 12,
+          avatarUrl: '',
+        },
+      ],
+      [
+        'e4',
+        {
+          id: 'e4',
+          employeeCode: 'NV04',
+          fullName: 'Kiều Thị Minh Lý',
+          dob: '',
+          gender: 'Nữ',
+          cccd: '',
+          phone: '',
+          address: '',
+          department: 'Văn Phòng',
+          position: 'NV',
+          joinDate: '',
+          status: 'Đang làm việc',
+          standardAnnualLeave: 12,
+          avatarUrl: '',
+        },
+      ],
+      [
+        'e5',
+        {
+          id: 'e5',
+          employeeCode: 'NV05',
+          fullName: 'Lê Văn A',
+          dob: '',
+          gender: 'Nam',
+          cccd: '',
+          phone: '',
+          address: '',
+          department: 'ST',
+          position: 'NV',
+          joinDate: '',
+          status: 'Đang làm việc',
+          standardAnnualLeave: 12,
+          avatarUrl: '',
+        },
+      ],
+    ]);
+
+    const blocks: OvertimeBlockInput[] = [
+      {
+        id: 'g1',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Trực sản xuất',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e1', 'e2'],
+        participants: [
+          { employeeId: 'e1', startTime: '16:10', endTime: '18:10' },
+          { employeeId: 'e2', startTime: '16:10', endTime: '18:10' },
+        ],
+      },
+      {
+        id: 'g2',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Lắp ráp máy',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e3'],
+        participants: [{ employeeId: 'e3', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'g3',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Hiệu chuẩn',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '19:10',
+        selectedEmployeeIds: ['e4'],
+        participants: [{ employeeId: 'e4', startTime: '16:10', endTime: '19:10' }],
+      },
+      {
+        id: 'g4',
+        overtimeDate: '2026-11-27',
+        reasonVi: 'Kiểm tra đơn hàng',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e5'],
+        participants: [{ employeeId: 'e5', startTime: '16:10', endTime: '18:10' }],
+      },
+    ];
+
+    assert.equal(
+      formatOvertimeGroupCompactLabel({
+        block: blocks[0],
+        index: 0,
+        formOvertimeDate: '2026-11-28',
+        allBlocks: blocks,
+        employeeMap: empMap,
+      }),
+      '#1 Trực sản xuất - Nguyễn Hoàng Long, Nguyễn Thành Công'
+    );
+
+    assert.equal(
+      formatOvertimeGroupCompactLabel({
+        block: blocks[1],
+        index: 1,
+        formOvertimeDate: '2026-11-28',
+        allBlocks: blocks,
+        employeeMap: empMap,
+      }),
+      '#2 AUTO 1'
+    );
+
+    assert.equal(
+      formatOvertimeGroupCompactLabel({
+        block: blocks[2],
+        index: 2,
+        formOvertimeDate: '2026-11-28',
+        allBlocks: blocks,
+        employeeMap: empMap,
+      }),
+      '#3 Văn Phòng - Kiều Thị Minh Lý'
+    );
+
+    assert.equal(
+      formatOvertimeGroupCompactLabel({
+        block: blocks[3],
+        index: 3,
+        formOvertimeDate: '2026-11-28',
+        allBlocks: blocks,
+        employeeMap: empMap,
+      }),
+      '#4 Phát sinh (27/11) - Lê Văn A'
+    );
   });
 });
 

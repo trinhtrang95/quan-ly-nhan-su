@@ -37,10 +37,10 @@ import {
 } from '../../../utils/overtimeExportService';
 import {
   buildMergedEmployeesForExport,
-  DEFAULT_OVERTIME_DEPARTMENT,
   fetchOvertimeFormById,
   filterOvertimeForms,
   formatOvertimeFormCodeDisplay,
+  formatOvertimeGroupCompactLabel,
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
   OvertimeBlockInput,
@@ -272,6 +272,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         : [],
     [activePreviewForm]
   );
+
+  const fallbackNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of activePreviewForm?.items || []) {
+      const id = item.employee_id?.trim();
+      const name = item.employee_name?.trim();
+      if (id && name && !map.has(id)) {
+        map.set(id, name);
+      }
+    }
+    return map;
+  }, [activePreviewForm]);
 
   const isActiveFormLocked = Boolean(
     activePreviewForm && isOvertimeFormLocked(activePreviewForm)
@@ -641,20 +653,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     window.print();
   };
 
-  const resolveBlockDepartmentSummary = (block: OvertimeBlockInput): string => {
-    const depts = new Set<string>();
-    for (const p of block.participants || []) {
-      const d = employeeMap.get(p.employeeId)?.department?.trim();
-      if (d) depts.add(d);
+  const handlePrintForm = (form: OvertimeFormWithItems) => {
+    if (activePreviewForm?.id === form.id) {
+      window.print();
+      return;
     }
-    if (depts.size === 0) return DEFAULT_OVERTIME_DEPARTMENT;
-    const arr = Array.from(depts);
-    if (arr.length <= 2) return arr.join(', ');
-    return `${arr.slice(0, 2).join(', ')} (+${arr.length - 2})`;
+    setSelectedPreviewFormId(form.id);
+    window.setTimeout(() => {
+      window.print();
+    }, 80);
   };
 
   return (
-    <div className="flex flex-col gap-3 min-h-0">
+    <div className="flex-1 min-h-0 h-full flex flex-col gap-2.5 lg:overflow-hidden print:h-auto print:overflow-visible">
       {/* Cảnh báo nhẹ khi DB Supabase chưa có cột deleted_at trên overtime_form_items */}
       {schemaNeedsMigration && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 no-print">
@@ -679,17 +690,17 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* Bố cục 2 cột: Cột trái (~4/10): Lịch thu gọn + Danh sách nhóm | Cột phải (~6/10): Bảng tóm tắt + Xem trước A4 */}
-      <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* Bố cục 2 cột vừa khít 1 màn hình desktop: Cột trái (Lịch thu gọn + Nhóm tăng ca) | Cột phải (Bảng tóm tắt + Xem trước A4 cuộn độc lập) */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 lg:overflow-hidden print:h-auto print:overflow-visible">
         {/* CỘT TRÁI */}
-        <aside className="w-full lg:w-[370px] xl:w-[400px] shrink-0 space-y-3 no-print">
+        <aside className="w-full lg:w-[350px] xl:w-[380px] shrink-0 lg:h-full min-h-0 flex flex-col gap-2.5 no-print">
           {/* Nửa trên: Lịch tháng thu gọn */}
           <div
             data-testid="overtime-log-calendar-card"
             aria-label="Lịch chọn ngày tăng ca"
-            className="bg-white border border-slate-200 rounded-2xl p-3 shadow-2xs space-y-2"
+            className="shrink-0 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs space-y-1.5"
           >
-            {/* Thanh điều hướng tháng + năm + Hôm nay + Tạo/Mở vỏ phiếu */}
+            {/* Thanh điều hướng tháng + năm + Hôm nay + All */}
             <div className="flex items-center justify-between gap-1">
               <div className="flex items-center gap-1 min-w-0">
                 <button
@@ -752,30 +763,23 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   type="button"
                   onClick={handleCalendarTodayClick}
                   data-testid="calendar-today-btn"
-                  className="h-7 px-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#14539E] text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  className="h-7 px-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#14539E] text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   Hôm nay
                 </button>
                 <button
                   type="button"
-                  disabled={isCreatingShell}
-                  onClick={() => void handleCreateShellClick()}
-                  data-testid="create-overtime-shell-icon-btn"
-                  title={
-                    selectedDateFilter
-                      ? `Tạo / Mở vỏ phiếu ngày ${formatDateToFormStyle(
-                          selectedDateFilter
-                        )}`
-                      : 'Tạo / Mở vỏ phiếu hôm nay'
-                  }
-                  aria-label="Tạo hoặc mở vỏ phiếu tăng ca"
-                  className="h-7 w-7 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                  onClick={() => setSelectedDateFilter(null)}
+                  data-testid="calendar-show-all-month-btn"
+                  aria-pressed={selectedDateFilter === null}
+                  title="Xem tất cả phiếu trong tháng"
+                  className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    selectedDateFilter === null
+                      ? 'bg-[#14539E] text-white border border-[#14539E]'
+                      : 'border border-slate-200 bg-white hover:bg-slate-100 text-slate-700'
+                  }`}
                 >
-                  {isCreatingShell ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <FilePlus2 className="w-3.5 h-3.5" />
-                  )}
+                  All
                 </button>
               </div>
             </div>
@@ -787,7 +791,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 return (
                   <div
                     key={label}
-                    className={`py-1 text-[10px] font-bold uppercase tracking-wide ${
+                    className={`py-0.5 text-[10px] font-bold uppercase tracking-wide ${
                       isSundayHeader
                         ? 'bg-slate-100/80 text-slate-500 rounded-md'
                         : 'text-slate-500'
@@ -799,7 +803,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               })}
             </div>
 
-            {/* Lưới các ngày thu gọn */}
+            {/* Lưới các ngày siêu gọn (h-6) */}
             <div className="grid grid-cols-7 gap-0.5">
               {calendarGridCells.map((cell) => {
                 if (!cell.inCurrentMonth) {
@@ -807,7 +811,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     <div
                       key={cell.isoDate}
                       aria-hidden="true"
-                      className={`h-8 flex flex-col items-center justify-center text-[11px] tabular-nums select-none ${
+                      className={`h-6 flex items-center justify-center text-[11px] tabular-nums select-none ${
                         cell.isSunday
                           ? 'bg-slate-100/50 text-slate-300 rounded-md'
                           : 'text-slate-300'
@@ -857,93 +861,39 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           ? `${formatDateToFormStyle(cell.isoDate)} • Đã có phiếu (chưa chốt)`
                           : formatDateToFormStyle(cell.isoDate)
                     }
-                    className={`h-8 py-0.5 flex flex-col items-center justify-center gap-0.5 text-[11px] tabular-nums transition-colors cursor-pointer ${cellStyle} ${todayRing}`}
+                    className={`h-6 flex flex-col items-center justify-center text-[11px] tabular-nums transition-colors cursor-pointer ${cellStyle} ${todayRing}`}
                   >
-                    <span className="leading-none">{cell.day}</span>
-                    <span className="h-2.5 flex items-center justify-center">
-                      {cell.formStatus === 'locked' ? (
-                        <Lock
-                          data-testid={`calendar-lock-${cell.isoDate}`}
-                          className={`w-2.5 h-2.5 ${
-                            isSelected ? 'text-white' : 'text-[#14539E]'
-                          }`}
-                        />
-                      ) : cell.formStatus === 'open' ? (
-                        <span
-                          data-testid={`calendar-dot-${cell.isoDate}`}
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            isSelected ? 'bg-white' : 'bg-[#14539E]'
-                          }`}
-                        />
-                      ) : null}
-                    </span>
+                    <span className="text-[10px] leading-none">{cell.day}</span>
+                    {cell.formStatus === 'locked' ? (
+                      <Lock
+                        data-testid={`calendar-lock-${cell.isoDate}`}
+                        className={`w-2 h-2 mt-0.5 ${
+                          isSelected ? 'text-white' : 'text-[#14539E]'
+                        }`}
+                      />
+                    ) : cell.formStatus === 'open' ? (
+                      <span
+                        data-testid={`calendar-dot-${cell.isoDate}`}
+                        className={`w-1 h-1 rounded-full mt-0.5 ${
+                          isSelected ? 'bg-white' : 'bg-[#14539E]'
+                        }`}
+                      />
+                    ) : null}
                   </button>
                 );
               })}
             </div>
-
-            {/* Chú thích & Xem tất cả ngày trong tháng */}
-            <div className="pt-2 border-t border-slate-100 space-y-1.5">
-              <div className="flex items-center justify-between text-[10px] text-slate-500 gap-2">
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#14539E] inline-block" />
-                    <span>Chưa chốt</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <Lock className="w-2.5 h-2.5 text-[#14539E]" />
-                    <span>Đã chốt</span>
-                  </span>
-                </div>
-                <span className="tabular-nums font-medium text-slate-600">
-                  {String(calendarMonth).padStart(2, '0')}/{calendarYear}
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSelectedDateFilter(null)}
-                data-testid="calendar-show-all-month-btn"
-                className={`w-full h-7 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
-                  selectedDateFilter === null
-                    ? 'bg-blue-50 border-[#14539E]/30 text-[#14539E]'
-                    : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
-                }`}
-              >
-                {selectedDateFilter === null
-                  ? `Đang xem tất cả ngày Tháng ${String(calendarMonth).padStart(2, '0')}/${calendarYear}`
-                  : 'Xem tất cả ngày trong tháng'}
-              </button>
-            </div>
           </div>
 
-          {/* Nửa dưới: Card "Các nhóm tăng ca ngày DD/MM/YYYY" */}
+          {/* Nửa dưới: Card "Nhóm tăng ca" siêu gọn (chỉ 1 dòng / nhóm) */}
           <div
             data-testid="overtime-day-groups-card"
-            className="bg-white border border-slate-200 rounded-2xl p-3 shadow-2xs space-y-2.5"
+            className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs gap-2"
           >
-            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
-              <div className="min-w-0">
-                <h3 className="text-xs font-bold text-slate-900 truncate">
-                  Các nhóm tăng ca ngày{' '}
-                  <span className="font-mono text-[#14539E]">
-                    {formatDateToFormStyle(activeTargetDate)}
-                  </span>
-                </h3>
-                <p className="text-[11px] text-slate-500 tabular-nums mt-0.5">
-                  {activePreviewForm ? (
-                    <>
-                      <span className="font-mono font-semibold text-slate-700">
-                        {formatOvertimeFormCodeDisplay(activePreviewForm.form_code)}
-                      </span>
-                      {' • '}
-                      {formatNumberVN(activeBlocks.length)} nhóm
-                    </>
-                  ) : (
-                    'Chưa có vỏ phiếu — bấm + hoặc Camera để ghi nhận'
-                  )}
-                </p>
-              </div>
+            <div className="shrink-0 flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+              <h3 className="text-xs font-bold text-slate-900">
+                Nhóm tăng ca
+              </h3>
 
               <div className="flex items-center gap-1 shrink-0">
                 <button
@@ -980,35 +930,24 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </div>
             </div>
 
-            {isActiveFormLocked && (
-              <div className="rounded-lg bg-blue-50/80 border border-blue-200 px-2.5 py-1.5 text-[11px] text-[#14539E] flex items-center gap-1.5">
-                <Lock className="w-3 h-3 shrink-0" />
-                <span>Phiếu đã chốt — khóa thêm mới và đổi thứ tự nhóm.</span>
-              </div>
-            )}
-
             {activeBlocks.length === 0 ? (
-              <div className="py-5 px-3 text-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 space-y-1.5">
-                <p className="text-xs font-medium text-slate-600">
-                  Chưa có nhóm tăng ca nào cho ngày{' '}
-                  <span className="font-mono font-semibold">
-                    {formatDateToFormStyle(activeTargetDate)}
-                  </span>
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  Bấm nút <strong>+</strong> (Thủ công) hoặc{' '}
-                  <strong>Camera</strong> (Quét ảnh Zalo AI) ở góc trên để thêm
-                  nhóm.
+              <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-4 px-3 text-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60">
+                <p className="text-xs font-medium text-slate-500">
+                  Chưa có nhóm tăng ca ({formatDateToFormStyle(activeTargetDate)})
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-0.5">
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-0.5">
                 {activeBlocks.map((block, idx) => {
-                  const deptSummary = resolveBlockDepartmentSummary(block);
-                  const blockHours = (block.participants || []).reduce(
-                    (sum, p) => sum + (Number(p.totalHours) || 0),
-                    0
-                  );
+                  const compactLabel = formatOvertimeGroupCompactLabel({
+                    block,
+                    index: idx,
+                    formOvertimeDate:
+                      activePreviewForm?.overtime_date || activeTargetDate,
+                    allBlocks: activeBlocks,
+                    employeeMap,
+                    fallbackNamesById,
+                  });
                   const canMoveUp =
                     !isActiveFormLocked && !isReordering && idx > 0;
                   const canMoveDown =
@@ -1020,58 +959,36 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     <div
                       key={block.id || `grp-${idx}`}
                       data-testid={`overtime-group-card-${idx}`}
-                      className="rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-white p-2.5 space-y-1.5 transition-colors"
+                      title={compactLabel}
+                      className="rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-white py-1 px-2 text-xs flex items-center justify-between gap-2 transition-colors"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="px-1.5 py-0.5 rounded bg-[#14539E] text-white font-mono text-[10px] font-bold shrink-0">
-                            #{idx + 1}
-                          </span>
-                          <span className="text-[11px] font-bold text-slate-800 truncate">
-                            {deptSummary}
-                          </span>
-                        </div>
+                      <span className="min-w-0 truncate font-medium text-slate-800">
+                        {compactLabel}
+                      </span>
 
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          <button
-                            type="button"
-                            disabled={!canMoveUp}
-                            onClick={() => void handleReorderBlock(idx, 'up')}
-                            data-testid={`move-group-up-${idx}`}
-                            title="Di chuyển nhóm lên trên"
-                            aria-label={`Di chuyển nhóm #${idx + 1} lên`}
-                            className="h-6 w-6 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                          >
-                            <ArrowUp className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!canMoveDown}
-                            onClick={() => void handleReorderBlock(idx, 'down')}
-                            data-testid={`move-group-down-${idx}`}
-                            title="Di chuyển nhóm xuống dưới"
-                            aria-label={`Di chuyển nhóm #${idx + 1} xuống`}
-                            className="h-6 w-6 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                          >
-                            <ArrowDown className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="text-[11px] text-slate-700 leading-snug line-clamp-2">
-                        {block.reasonVi || '(Chưa nhập lý do tăng ca)'}
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 pt-0.5 tabular-nums">
-                        <span className="font-mono font-semibold text-slate-700">
-                          {block.startTime} – {block.endTime}
-                        </span>
-                        <span>
-                          {formatNumberVN(block.participants.length)} người
-                          {blockHours > 0
-                            ? ` • ${formatNumberVN(blockHours)} giờ`
-                            : ''}
-                        </span>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={!canMoveUp}
+                          onClick={() => void handleReorderBlock(idx, 'up')}
+                          data-testid={`move-group-up-${idx}`}
+                          title="Di chuyển nhóm lên trên"
+                          aria-label={`Di chuyển nhóm #${idx + 1} lên`}
+                          className="h-5 w-5 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ArrowUp className="w-2.5 h-2.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canMoveDown}
+                          onClick={() => void handleReorderBlock(idx, 'down')}
+                          data-testid={`move-group-down-${idx}`}
+                          title="Di chuyển nhóm xuống dưới"
+                          aria-label={`Di chuyển nhóm #${idx + 1} xuống`}
+                          className="h-5 w-5 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ArrowDown className="w-2.5 h-2.5" />
+                        </button>
                       </div>
                     </div>
                   );
@@ -1081,47 +998,47 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
           </div>
         </aside>
 
-        {/* CỘT PHẢI: Bảng tóm tắt + Xem trước A4 TV-PSGC2022 */}
-        <div className="flex-1 min-w-0 w-full space-y-3">
+        {/* CỘT PHẢI: Bảng tóm tắt cố định ở trên + duy nhất khung Xem trước A4 TV-PSGC2022 cuộn bên dưới */}
+        <div className="flex-1 min-w-0 w-full lg:h-full min-h-0 flex flex-col gap-2.5 print:h-auto print:overflow-visible">
           {/* Bảng tóm tắt phiếu tăng ca */}
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs no-print">
-            <div className="overflow-x-auto">
+          <div className="shrink-0 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs no-print">
+            <div className="overflow-x-auto max-h-[190px] overflow-y-auto">
               <table className="w-full border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                    <th className="py-2.5 px-3 w-12 text-center">STT</th>
-                    <th className="py-2.5 px-3 min-w-[140px]">Mã phiếu</th>
-                    <th className="py-2.5 px-3 min-w-[130px]">Ngày tăng ca</th>
-                    <th className="py-2.5 px-3 w-32 text-center">Trạng thái</th>
-                    <th className="py-2.5 px-3 w-52 text-left">Thao tác</th>
+                <thead className="sticky top-0 z-10 bg-slate-50">
+                  <tr className="border-b border-slate-200 bg-slate-50/95 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                    <th className="py-2 px-3 w-12 text-center">STT</th>
+                    <th className="py-2 px-3 min-w-[130px]">Mã phiếu</th>
+                    <th className="py-2 px-3 min-w-[115px]">Ngày tăng ca</th>
+                    <th className="py-2 px-3 w-28 text-center">Trạng thái</th>
+                    <th className="py-2 px-3 w-56 text-left">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {isLoading ? (
                     Array.from({ length: 2 }).map((_, idx) => (
-                      <tr key={`skeleton-${idx}`} className="h-12 animate-pulse">
-                        <td className="py-2.5 px-3 text-center">
+                      <tr key={`skeleton-${idx}`} className="h-11 animate-pulse">
+                        <td className="py-2 px-3 text-center">
                           <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
                         </td>
-                        <td className="py-2.5 px-3">
+                        <td className="py-2 px-3">
                           <div className="h-3.5 w-28 bg-slate-200 rounded" />
                         </td>
-                        <td className="py-2.5 px-3">
+                        <td className="py-2 px-3">
                           <div className="h-3.5 w-24 bg-slate-200 rounded" />
                         </td>
-                        <td className="py-2.5 px-3">
+                        <td className="py-2 px-3">
                           <div className="h-5 w-20 bg-slate-200 rounded-full mx-auto" />
                         </td>
-                        <td className="py-2.5 px-3">
-                          <div className="h-7 w-44 bg-slate-200 rounded" />
+                        <td className="py-2 px-3">
+                          <div className="h-7 w-48 bg-slate-200 rounded" />
                         </td>
                       </tr>
                     ))
                   ) : filteredForms.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-10 px-6 text-center">
+                      <td colSpan={5} className="py-6 px-6 text-center">
                         <div className="max-w-md mx-auto flex flex-col items-center">
-                          <FileText className="w-8 h-8 text-slate-300 mb-2.5" />
+                          <FileText className="w-7 h-7 text-slate-300 mb-2" />
                           <p className="text-sm font-semibold text-slate-800">
                             {selectedDateFilter
                               ? `Chưa có phiếu tăng ca nào trong ngày ${formatDateToFormStyle(
@@ -1132,9 +1049,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 ).padStart(2, '0')}/${calendarYear}`}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
-                            Bấm <strong>Tạo vỏ phiếu</strong> hoặc bấm{' '}
-                            <strong>+</strong> / <strong>Camera</strong> ở cột
-                            trái để thêm nhóm tăng ca ngay.
+                            Bấm <strong>+</strong> hoặc <strong>Camera</strong>{' '}
+                            ở cột trái để thêm nhóm tăng ca ngay.
                           </p>
                           {(onCreateOrOpenShell || onSwitchToCreate) && (
                             <button
@@ -1142,7 +1058,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                               disabled={isCreatingShell}
                               onClick={() => void handleCreateShellClick()}
                               data-testid="empty-state-create-shell-btn"
-                              className="mt-3.5 h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                              className="mt-3 h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
                             >
                               {isCreatingShell ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1189,22 +1105,22 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                           }`}
                         >
                           {/* 1. STT */}
-                          <td className="py-2.5 px-3 text-center font-mono text-slate-500 tabular-nums">
+                          <td className="py-2 px-3 text-center font-mono text-slate-500 tabular-nums">
                             {formatNumberVN(index + 1)}
                           </td>
 
                           {/* 2. Mã phiếu */}
-                          <td className="py-2.5 px-3 font-mono font-semibold text-[#14539E] tabular-nums whitespace-nowrap">
+                          <td className="py-2 px-3 font-mono font-semibold text-[#14539E] tabular-nums whitespace-nowrap">
                             {displayCode}
                           </td>
 
                           {/* 3. Ngày tăng ca */}
-                          <td className="py-2.5 px-3 font-mono text-slate-800 font-semibold tabular-nums whitespace-nowrap">
+                          <td className="py-2 px-3 font-mono text-slate-800 font-semibold tabular-nums whitespace-nowrap">
                             {formatDateToFormStyle(form.overtime_date || '')}
                           </td>
 
                           {/* 4. Trạng thái */}
-                          <td className="py-2.5 px-3 text-center">
+                          <td className="py-2 px-3 text-center">
                             {isLocked ? (
                               <span
                                 data-testid={`form-status-locked-${form.id}`}
@@ -1226,19 +1142,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                             )}
                           </td>
 
-                          {/* 5. Thao tác: Xem -> Sửa -> Xuất Excel -> Chốt/Mở khóa -> Xóa */}
+                          {/* 5. Thao tác: Xem -> Sửa -> Xuất Excel -> In -> Chốt/Mở khóa -> Xóa */}
                           <td
-                            className="py-2.5 px-3 text-left"
+                            className="py-2 px-3 text-left"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="inline-flex items-center justify-start gap-1">
-                              {/* Xem phiếu */}
+                              {/* 1) Xem phiếu */}
                               <button
                                 type="button"
                                 disabled={isViewingLoading}
                                 onClick={() => void handleViewForm(form)}
                                 className="h-7 w-7 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
-                                title="Xem / In khổ A4"
+                                title="Xem phiếu"
                                 aria-label={`Xem phiếu ${displayCode}`}
                               >
                                 {isViewingLoading ? (
@@ -1248,7 +1164,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 )}
                               </button>
 
-                              {/* Sửa chi tiết */}
+                              {/* 2) Sửa phiếu */}
                               <button
                                 type="button"
                                 disabled={isLocked}
@@ -1259,18 +1175,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 title={
                                   isLocked
                                     ? 'Phiếu đã chốt — không thể sửa'
-                                    : 'Sửa / Nhập chi tiết'
+                                    : 'Sửa phiếu'
                                 }
                                 aria-label={
                                   isLocked
                                     ? `Phiếu ${displayCode} đã chốt, khóa chức năng sửa`
-                                    : `Sửa / Nhập chi tiết phiếu ${displayCode}`
+                                    : `Sửa phiếu ${displayCode}`
                                 }
                               >
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
 
-                              {/* Xuất Excel trực tiếp */}
+                              {/* 3) Xuất Excel */}
                               <button
                                 type="button"
                                 disabled={
@@ -1278,12 +1194,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 }
                                 onClick={() => void handleExportFormExcel(form)}
                                 data-testid={`export-excel-btn-${form.id}`}
-                                className="h-7 w-7 rounded-lg border border-emerald-300 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-600 hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
-                                title={
-                                  form.items.length === 0
-                                    ? 'Phiếu chưa có dữ liệu nhân sự để xuất Excel'
-                                    : 'Xuất file Excel TV-PSGC2022'
-                                }
+                                className="h-7 w-7 rounded-lg border border-emerald-200 bg-emerald-50/70 text-emerald-600 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                title="Xuất Excel"
                                 aria-label={`Xuất Excel phiếu ${displayCode}`}
                               >
                                 {isExporting ? (
@@ -1293,7 +1205,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 )}
                               </button>
 
-                              {/* Chốt / Mở khóa */}
+                              {/* 4) In phiếu */}
+                              <button
+                                type="button"
+                                onClick={() => handlePrintForm(form)}
+                                data-testid={`print-form-btn-${form.id}`}
+                                className="h-7 w-7 rounded-lg border border-[#14539E]/30 bg-blue-50/50 text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer"
+                                title="In phiếu"
+                                aria-label={`In phiếu ${displayCode}`}
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* 5) Chốt / Mở khóa phiếu */}
                               {isLocked ? (
                                 <button
                                   type="button"
@@ -1318,7 +1242,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 </button>
                               )}
 
-                              {/* Xóa mềm */}
+                              {/* 6) Xóa mềm */}
                               <button
                                 type="button"
                                 disabled={isLocked}
@@ -1349,61 +1273,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             </div>
           </div>
 
-          {/* Khung xem trước trực tiếp A4 chuẩn TV-PSGC2022 */}
+          {/* Khung xem trước trực tiếp A4 chuẩn TV-PSGC2022 (duy nhất khung này cuộn dọc trên desktop) */}
           {activePreviewForm && (
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
-              <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2 no-print">
-                <div className="flex items-center gap-2 min-w-0 text-xs">
-                  <span className="font-mono font-bold text-[#14539E]">
-                    {formatOvertimeFormCodeDisplay(activePreviewForm.form_code)}
-                  </span>
-                  <span className="text-slate-300">•</span>
-                  <span className="font-semibold text-slate-700 truncate">
-                    Xem trước biểu mẫu TV-PSGC2022
-                  </span>
-                  <span className="text-slate-300">•</span>
-                  <span className="text-slate-500 tabular-nums whitespace-nowrap">
-                    {formatNumberVN(activePreviewForm.total_participants)} lượt •{' '}
-                    {formatNumberVN(activePreviewForm.total_hours)} giờ
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    disabled={
-                      exportingFormId === activePreviewForm.id ||
-                      activePreviewForm.items.length === 0
-                    }
-                    onClick={() => void handleExportFormExcel(activePreviewForm)}
-                    className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-45 whitespace-nowrap"
-                  >
-                    {exportingFormId === activePreviewForm.id ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <FileSpreadsheet className="w-3 h-3" />
-                    )}
-                    <span>Xuất Excel</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePrint}
-                    className="h-7 px-2.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Printer className="w-3 h-3" />
-                    <span>In</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 sm:p-4 bg-slate-100/75 overflow-x-auto">
-                <OvertimeA4PreviewSheet
-                  form={activePreviewForm}
-                  knownSubGroups={knownSubGroups}
-                  variant="inline"
-                  isPrintableTarget={!viewingForm}
-                />
-              </div>
+            <div
+              data-testid="overtime-inline-a4-scroll"
+              className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-100/80 p-3 sm:p-4 overtime-print-scroll print:overflow-visible print:border-0 print:bg-white print:p-0"
+            >
+              <OvertimeA4PreviewSheet
+                form={activePreviewForm}
+                knownSubGroups={knownSubGroups}
+                variant="inline"
+                isPrintableTarget={!viewingForm}
+              />
             </div>
           )}
         </div>

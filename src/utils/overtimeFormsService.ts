@@ -492,6 +492,109 @@ export function reorderOvertimeBlocks<T>(
   return next;
 }
 
+function formatIsoToCompactDDMM(isoDate: string): string {
+  const m = (isoDate || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return isoDate;
+  return `${m[3]}/${m[2]}`;
+}
+
+export function resolveOvertimeGroupBaseLabel(
+  block: OvertimeBlockInput,
+  formOvertimeDate: string,
+  employeeMap: Map<string, Employee>
+): { baseName: string; isSpecial: boolean } {
+  const blockDate = (block.overtimeDate || '').trim().slice(0, 10);
+  const formDate = (formOvertimeDate || '').trim().slice(0, 10);
+  if (blockDate && formDate && blockDate !== formDate) {
+    return {
+      baseName: `Phát sinh (${formatIsoToCompactDDMM(blockDate)})`,
+      isSpecial: true,
+    };
+  }
+
+  const reason = (block.reasonVi || '').trim();
+  if (/trực\s*sản\s*xuất/i.test(reason)) {
+    return { baseName: 'Trực sản xuất', isSpecial: true };
+  }
+
+  const depts: string[] = [];
+  const seen = new Set<string>();
+  for (const p of block.participants || []) {
+    const dept = employeeMap.get(p.employeeId)?.department?.trim();
+    if (dept && !seen.has(dept)) {
+      seen.add(dept);
+      depts.push(dept);
+    }
+  }
+
+  const baseName =
+    depts.length > 0 ? depts.join(', ') : DEFAULT_OVERTIME_DEPARTMENT;
+  const isOffice = depts.some((d) => /văn\s*phòng/i.test(d));
+  return { baseName, isSpecial: isOffice };
+}
+
+/**
+ * Pure helper: formats a compact 1-line label for an overtime group card.
+ * Default: `#STT Tên nhóm`.
+ * For special groups (`Trực sản xuất`, `Văn phòng`, out-of-date `Phát sinh (DD/MM)`)
+ * or duplicate group names in the same form: `#STT Tên nhóm - Tên người tăng ca`.
+ */
+export function formatOvertimeGroupCompactLabel(params: {
+  block: OvertimeBlockInput;
+  index: number;
+  formOvertimeDate: string;
+  allBlocks: OvertimeBlockInput[];
+  employeeMap: Map<string, Employee>;
+  fallbackNamesById?: Map<string, string>;
+}): string {
+  const {
+    block,
+    index,
+    formOvertimeDate,
+    allBlocks,
+    employeeMap,
+    fallbackNamesById,
+  } = params;
+  const { baseName, isSpecial } = resolveOvertimeGroupBaseLabel(
+    block,
+    formOvertimeDate,
+    employeeMap
+  );
+
+  const normalizedBase = baseName.trim().toLowerCase();
+  let sameNameCount = 0;
+  for (const b of allBlocks || []) {
+    const res = resolveOvertimeGroupBaseLabel(b, formOvertimeDate, employeeMap);
+    if (res.baseName.trim().toLowerCase() === normalizedBase) {
+      sameNameCount += 1;
+    }
+  }
+
+  const shouldIncludeNames = isSpecial || sameNameCount > 1;
+  if (!shouldIncludeNames) {
+    return `#${index + 1} ${baseName}`;
+  }
+
+  const names: string[] = [];
+  const seenIds = new Set<string>();
+  for (const p of block.participants || []) {
+    if (!p.employeeId || seenIds.has(p.employeeId)) continue;
+    seenIds.add(p.employeeId);
+    const fullName =
+      employeeMap.get(p.employeeId)?.fullName?.trim() ||
+      fallbackNamesById?.get(p.employeeId)?.trim();
+    if (fullName) {
+      names.push(fullName);
+    }
+  }
+
+  if (names.length === 0) {
+    return `#${index + 1} ${baseName}`;
+  }
+
+  return `#${index + 1} ${baseName} - ${names.join(', ')}`;
+}
+
 /**
  * Pure helper: builds employee lookup entries from stored items merged with current employees
  * so historical forms keep accurate names even if an employee was later edited or removed.
