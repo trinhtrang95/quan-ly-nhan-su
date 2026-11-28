@@ -703,6 +703,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             glossaryEntries={glossaryEntries}
             workShifts={workShifts}
             companyHolidays={companyHolidays}
+            overtimeSettings={overtimeSettings}
             isLoading={isLoadingForms}
             schemaNeedsMigration={schemaNeedsMigration}
             onRefresh={() => loadForms({ silent: false })}

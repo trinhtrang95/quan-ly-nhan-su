@@ -8,6 +8,7 @@ import {
   FileEdit,
   Info,
   Loader2,
+  Pencil,
   Plus,
   Search,
   Sparkles,
@@ -28,6 +29,7 @@ import {
   normalizeTargetGroups,
   OvertimeBlockInput,
   OvertimeGlossaryEntry,
+  OvertimeGroupEditSeed,
   OvertimeLeaveCheckEntry,
   shiftIsoDateDays,
   upsertOvertimeGlossaryEntry,
@@ -57,6 +59,8 @@ export interface ManualOvertimeGroupModalProps {
   workShifts: WorkShift[];
   companyHolidays: CompanyHoliday[];
   presetContext?: OvertimeModalPresetContext | null;
+  editSeed?: OvertimeGroupEditSeed | null;
+  onResolvePrevDayEditSeed?: (targetIsoDate: string) => OvertimeGroupEditSeed | null;
   translateMultilineKorean: (
     reasonVi: string,
     glossaryEntries: OvertimeGlossaryEntry[]
@@ -64,6 +68,10 @@ export interface ManualOvertimeGroupModalProps {
   onGlossaryEntriesUpdated?: (entries: OvertimeGlossaryEntry[]) => void;
   onLeaveRecordsRefreshed?: (records: OvertimeLeaveCheckEntry[]) => void;
   onConfirm: (payload: ConfirmableOvertimeBlockPayload) => Promise<void>;
+  onConfirmEdit?: (
+    payload: ConfirmableOvertimeBlockPayload,
+    editingBlockIndices: number[]
+  ) => Promise<void>;
   onConfirmMultiple?: (payloads: ConfirmableOvertimeBlockPayload[]) => Promise<void>;
 }
 
@@ -93,13 +101,21 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
   workShifts,
   companyHolidays,
   presetContext = null,
+  editSeed = null,
+  onResolvePrevDayEditSeed,
   translateMultilineKorean,
   onGlossaryEntriesUpdated,
   onLeaveRecordsRefreshed,
   onConfirm,
+  onConfirmEdit,
   onConfirmMultiple,
 }) => {
   const reasonDropdownRef = useRef<HTMLDivElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const lastEditSeedRef = useRef<OvertimeGroupEditSeed | null>(null);
+  const [activeEditSeed, setActiveEditSeed] =
+    useState<OvertimeGroupEditSeed | null>(editSeed);
+  const isEditMode = Boolean(activeEditSeed);
 
   const [overtimeDate, setOvertimeDate] = useState(
     defaultDate || getLocalTodayIsoDate()
@@ -184,21 +200,28 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     employeeMap,
   ]);
 
-  // Reset form each time modal opens (applying clicked-group preset context)
+  // Reset form only when modal opens (or editSeed changes), ignoring background prop updates while open
   useEffect(() => {
-    if (!isOpen) return;
-    const baseDate = defaultDate || getLocalTodayIsoDate();
-    let targetDate = baseDate;
-    let initialGroup = 'ALL';
-    let initialReasonVi = '';
-    let initialReasonKr = '';
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      lastEditSeedRef.current = null;
+      setActiveEditSeed(null);
+      return;
+    }
 
-    if (presetContext?.presetType === 'prev_day') {
-      targetDate = shiftIsoDateDays(baseDate, -1);
-    } else if (presetContext?.presetType === 'production_duty') {
-      initialReasonVi = 'Trực sản xuất';
-      initialReasonKr = '생산 당직';
-    } else if (
+    const justOpened = !wasOpenRef.current;
+    const editSeedChanged = editSeed !== lastEditSeedRef.current;
+    if (!justOpened && !editSeedChanged) {
+      return;
+    }
+
+    wasOpenRef.current = true;
+    lastEditSeedRef.current = editSeed;
+
+    const baseDate = defaultDate || getLocalTodayIsoDate();
+    let initialGroup = 'ALL';
+
+    if (
       presetContext?.presetType === 'group' &&
       presetContext.targetGroupName
     ) {
@@ -209,6 +232,44 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
         (opt) => normalizeOvertimeGroupKey(opt) === targetKey
       );
       initialGroup = matchedOpt || presetContext.targetGroupName;
+    }
+
+    if (editSeed) {
+      setActiveEditSeed(editSeed);
+      setOvertimeDate(editSeed.overtimeDate || baseDate);
+      setSelectedGroupFilter(initialGroup);
+      setEmployeeSearchQuery('');
+      setIncludeTwoConsecutivePrevDays(false);
+      setSelectedEmployeeIds([...editSeed.selectedEmployeeIds]);
+      setCustomTimes({ ...editSeed.customTimes });
+      setEditingTimeEmpId(null);
+      setCustomReasons({ ...editSeed.customReasons });
+      setEditingReasonEmpId(null);
+      setTranslatingCustomEmpId(null);
+      setStartTime(editSeed.startTime || '16:10');
+      setEndTime(editSeed.endTime || '18:10');
+      setIsStartManuallyEdited(true);
+      setIsEndManuallyEdited(true);
+      setReasonVi(editSeed.reasonVi || '');
+      setReasonKr(editSeed.reasonKr || '');
+      setIsKrManuallyEdited(Boolean((editSeed.reasonKr || '').trim()));
+      setIsReasonDropdownOpen(false);
+      setIsTranslating(false);
+      setIsConfirming(false);
+      setErrorMessage(null);
+      return;
+    }
+
+    setActiveEditSeed(null);
+    let targetDate = baseDate;
+    let initialReasonVi = '';
+    let initialReasonKr = '';
+
+    if (presetContext?.presetType === 'prev_day') {
+      targetDate = shiftIsoDateDays(baseDate, -1);
+    } else if (presetContext?.presetType === 'production_duty') {
+      initialReasonVi = 'Trực sản xuất';
+      initialReasonKr = '생산 당직';
     }
 
     const initialEval = evaluateOvertimeDaySchedule({
@@ -240,7 +301,15 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     setIsTranslating(false);
     setIsConfirming(false);
     setErrorMessage(null);
-  }, [isOpen, defaultDate, presetContext, departmentOptions, companyHolidays, workShifts]);
+  }, [
+    isOpen,
+    editSeed,
+    defaultDate,
+    presetContext,
+    departmentOptions,
+    companyHolidays,
+    workShifts,
+  ]);
 
   // Sync suggested start/end when schedule shifts and user hasn't manually overridden
   useEffect(() => {
@@ -272,9 +341,15 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
+  const editingBlockIndexSet = useMemo(
+    () => new Set((activeEditSeed ?? editSeed)?.editingBlockIndices || []),
+    [activeEditSeed, editSeed]
+  );
+
   const getAlreadyRecordedIdsForDate = (isoDate: string) => {
     const set = new Set<string>();
-    for (const block of existingBlocks || []) {
+    (existingBlocks || []).forEach((block, idx) => {
+      if (editingBlockIndexSet.has(idx)) return;
       if ((block.overtimeDate || '') === isoDate) {
         for (const p of block.participants || []) {
           if (p.employeeId) set.add(p.employeeId);
@@ -283,7 +358,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
           if (id) set.add(id);
         }
       }
-    }
+    });
     return set;
   };
 
@@ -300,6 +375,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     return getAlreadyRecordedIdsForDate(overtimeDate);
   }, [
     existingBlocks,
+    editingBlockIndexSet,
     overtimeDate,
     isPrevDayMode,
     includeTwoConsecutivePrevDays,
@@ -748,7 +824,11 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
         finalKr,
         normalizedCustomReasons
       );
-      await onConfirm(singlePayload);
+      if (activeEditSeed && onConfirmEdit) {
+        await onConfirmEdit(singlePayload, activeEditSeed.editingBlockIndices);
+      } else {
+        await onConfirm(singlePayload);
+      }
     } catch (err) {
       setErrorMessage(
         err instanceof Error && err.message
@@ -785,20 +865,32 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
         <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-2.5 bg-slate-50/70 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="w-8 h-8 rounded-lg bg-blue-100 text-[#14539E] flex items-center justify-center shrink-0">
-              <Plus className="w-4 h-4 stroke-[2.5]" />
+              {isEditMode ? (
+                <Pencil className="w-4 h-4" />
+              ) : (
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+              )}
             </span>
             <div className="min-w-0">
               <h3
                 id="manual-ot-group-modal-title"
                 className="text-sm font-bold text-slate-900 truncate"
               >
-                {presetContext?.label
-                  ? `Đăng ký nhóm: ${presetContext.label} • Ngày ${formatIsoToDDMMYYYY(
-                      baseShellDate
-                    )}`
-                  : `Thêm nhóm tăng ca thủ công • Ngày ${formatIsoToDDMMYYYY(
-                      baseShellDate
-                    )}`}
+                {isEditMode
+                  ? presetContext?.label
+                    ? `Sửa nhóm: ${presetContext.label} • Ngày ${formatIsoToDDMMYYYY(
+                        baseShellDate
+                      )}`
+                    : `Sửa nhóm tăng ca • Ngày ${formatIsoToDDMMYYYY(
+                        baseShellDate
+                      )}`
+                  : presetContext?.label
+                    ? `Đăng ký nhóm: ${presetContext.label} • Ngày ${formatIsoToDDMMYYYY(
+                        baseShellDate
+                      )}`
+                    : `Thêm nhóm tăng ca thủ công • Ngày ${formatIsoToDDMMYYYY(
+                        baseShellDate
+                      )}`}
               </h3>
               <p className="text-[11px] text-slate-500 truncate">
                 {isPrevDayMode && includeTwoConsecutivePrevDays ? (
@@ -894,6 +986,30 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                       data-testid="manual-prev-d1-btn"
                       onClick={() => {
                         setIncludeTwoConsecutivePrevDays(false);
+                        if (isEditMode && onResolvePrevDayEditSeed) {
+                          const nextSeed = onResolvePrevDayEditSeed(prevDayD1);
+                          if (nextSeed) {
+                            setActiveEditSeed(nextSeed);
+                            setOvertimeDate(nextSeed.overtimeDate);
+                            setStartTime(nextSeed.startTime);
+                            setEndTime(nextSeed.endTime);
+                            setIsStartManuallyEdited(true);
+                            setIsEndManuallyEdited(true);
+                            setReasonVi(nextSeed.reasonVi);
+                            setReasonKr(nextSeed.reasonKr);
+                            setIsKrManuallyEdited(
+                              Boolean(nextSeed.reasonKr.trim())
+                            );
+                            setSelectedEmployeeIds([
+                              ...nextSeed.selectedEmployeeIds,
+                            ]);
+                            setCustomTimes({ ...nextSeed.customTimes });
+                            setCustomReasons({ ...nextSeed.customReasons });
+                            setEditingTimeEmpId(null);
+                            setEditingReasonEmpId(null);
+                            return;
+                          }
+                        }
                         setOvertimeDate(prevDayD1);
                       }}
                       className={`px-2.5 py-1 rounded-lg font-mono font-semibold border cursor-pointer transition-colors ${
@@ -909,6 +1025,30 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                       data-testid="manual-prev-d2-btn"
                       onClick={() => {
                         setIncludeTwoConsecutivePrevDays(false);
+                        if (isEditMode && onResolvePrevDayEditSeed) {
+                          const nextSeed = onResolvePrevDayEditSeed(prevDayD2);
+                          if (nextSeed) {
+                            setActiveEditSeed(nextSeed);
+                            setOvertimeDate(nextSeed.overtimeDate);
+                            setStartTime(nextSeed.startTime);
+                            setEndTime(nextSeed.endTime);
+                            setIsStartManuallyEdited(true);
+                            setIsEndManuallyEdited(true);
+                            setReasonVi(nextSeed.reasonVi);
+                            setReasonKr(nextSeed.reasonKr);
+                            setIsKrManuallyEdited(
+                              Boolean(nextSeed.reasonKr.trim())
+                            );
+                            setSelectedEmployeeIds([
+                              ...nextSeed.selectedEmployeeIds,
+                            ]);
+                            setCustomTimes({ ...nextSeed.customTimes });
+                            setCustomReasons({ ...nextSeed.customReasons });
+                            setEditingTimeEmpId(null);
+                            setEditingReasonEmpId(null);
+                            return;
+                          }
+                        }
                         setOvertimeDate(prevDayD2);
                       }}
                       className={`px-2.5 py-1 rounded-lg font-mono font-semibold border cursor-pointer transition-colors ${
@@ -920,20 +1060,22 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                       Hôm kia ({formatIsoToDDMM(prevDayD2)})
                     </button>
                   </div>
-                  <label className="inline-flex items-center gap-1.5 font-semibold text-[#14539E] cursor-pointer select-none whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      data-testid="manual-prev-two-days-checkbox"
-                      checked={includeTwoConsecutivePrevDays}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIncludeTwoConsecutivePrevDays(checked);
-                        if (checked) setOvertimeDate(prevDayD1);
-                      }}
-                      className="w-3.5 h-3.5 rounded border-blue-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
-                    />
-                    <span>Cả 2 ngày</span>
-                  </label>
+                  {!isEditMode && (
+                    <label className="inline-flex items-center gap-1.5 font-semibold text-[#14539E] cursor-pointer select-none whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        data-testid="manual-prev-two-days-checkbox"
+                        checked={includeTwoConsecutivePrevDays}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIncludeTwoConsecutivePrevDays(checked);
+                          if (checked) setOvertimeDate(prevDayD1);
+                        }}
+                        className="w-3.5 h-3.5 rounded border-blue-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
+                      />
+                      <span>Cả 2 ngày</span>
+                    </label>
+                  )}
                 </div>
               )}
 
@@ -1059,6 +1201,9 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                       onFocus={() => setIsReasonDropdownOpen(true)}
                       onChange={(e) => {
                         setReasonVi(e.target.value);
+                        if (isEditMode) {
+                          setIsKrManuallyEdited(false);
+                        }
                         if (!isReasonDropdownOpen) setIsReasonDropdownOpen(true);
                       }}
                       placeholder="Chọn từ điển hoặc nhập lý do tăng ca..."
@@ -1553,9 +1698,11 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                 <Check className="w-3.5 h-3.5 stroke-[2.5]" />
               )}
               <span>
-                {isPrevDayMode && includeTwoConsecutivePrevDays
-                  ? 'Ghi nhận 2 ngày liên tiếp'
-                  : 'Xác nhận & Ghi nhận nhóm'}
+                {isEditMode
+                  ? 'Cập nhật & Lưu nhóm'
+                  : isPrevDayMode && includeTwoConsecutivePrevDays
+                    ? 'Ghi nhận 2 ngày liên tiếp'
+                    : 'Xác nhận & Ghi nhận nhóm'}
               </span>
             </button>
           </div>

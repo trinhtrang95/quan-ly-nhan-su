@@ -39,7 +39,9 @@ import {
 } from '../../../utils/overtimeExportService';
 import {
   analyzeOvertimeFormGroupStatus,
+  applyEditedStandardGroupToBlocks,
   buildMergedEmployeesForExport,
+  extractStandardGroupEditSeed,
   fetchOvertimeFormById,
   filterOvertimeForms,
   formatOvertimeFormCodeDisplay,
@@ -49,6 +51,7 @@ import {
   OvertimeBlockInput,
   OvertimeFormWithItems,
   OvertimeGlossaryEntry,
+  OvertimeGroupEditSeed,
   OvertimeLeaveCheckEntry,
   OvertimeStandardGroupDef,
   OvertimeStandardGroupId,
@@ -60,8 +63,13 @@ import {
   translateMultilineKorean,
 } from '../../../services/hrService';
 import {
+  calculateActualOvertimeHours,
   type CompanyHoliday,
   createDefaultAdminShift,
+  DEFAULT_OVERTIME_SETTINGS,
+  evaluateOvertimeDaySchedule,
+  getWeekdayKeyFromIsoDate,
+  type OvertimeSettings,
   type WorkShift,
 } from '../../../utils/workScheduleLogic';
 import {
@@ -90,6 +98,7 @@ export interface OvertimeLogProps {
   glossaryEntries?: OvertimeGlossaryEntry[];
   workShifts?: WorkShift[];
   companyHolidays?: CompanyHoliday[];
+  overtimeSettings?: OvertimeSettings;
   isLoading: boolean;
   schemaNeedsMigration?: boolean;
   onRefresh: () => Promise<void> | void;
@@ -120,6 +129,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   glossaryEntries = [],
   workShifts,
   companyHolidays = [],
+  overtimeSettings,
   isLoading,
   schemaNeedsMigration = false,
   onRefresh,
@@ -163,6 +173,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   >(null);
   const [activeModalPreset, setActiveModalPreset] =
     useState<OvertimeModalPresetContext | null>(null);
+  const [editingModalSeed, setEditingModalSeed] =
+    useState<OvertimeGroupEditSeed | null>(null);
   const [selectedStandardGroupId, setSelectedStandardGroupId] =
     useState<OvertimeStandardGroupId | null>(null);
   const [manualOrderFormIds, setManualOrderFormIds] = useState<Set<string>>(
@@ -200,6 +212,11 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         ? workShifts
         : [createDefaultAdminShift()],
     [workShifts]
+  );
+
+  const effectiveOvertimeSettings = useMemo(
+    () => overtimeSettings || { ...DEFAULT_OVERTIME_SETTINGS },
+    [overtimeSettings]
   );
 
   const employeeMap = useMemo(
@@ -313,6 +330,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     [selectedStandardGroupId]
   );
 
+  const selectedStandardGroupStatus = selectedStandardGroupId
+    ? groupStatusMap[selectedStandardGroupId]
+    : null;
+
+  const canEditSelectedStandardGroup = Boolean(
+    !isActiveFormLocked &&
+      activePreviewForm &&
+      onUpdateFormBlocks &&
+      selectedStandardGroupDef &&
+      selectedStandardGroupStatus?.isRegistered
+  );
+
   // Giữ selectedPreviewFormId đồng bộ khi danh sách lọc thay đổi
   useEffect(() => {
     if (selectedDateFilter) {
@@ -405,8 +434,30 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     preset?: OvertimeModalPresetContext | null
   ) => {
     if (isActiveFormLocked || !onAppendBlocksToDate) return;
+    setEditingModalSeed(null);
     setActiveModalPreset(preset ?? null);
     setActiveRegModalMode(mode);
+  };
+
+  const handleOpenEditSelectedGroupModal = () => {
+    if (
+      !canEditSelectedStandardGroup ||
+      !selectedStandardGroupDef ||
+      !activePreviewForm
+    ) {
+      return;
+    }
+    const shellDate = activePreviewForm.overtime_date || activeTargetDate;
+    const seed = extractStandardGroupEditSeed({
+      blocks: activeBlocks,
+      groupDef: selectedStandardGroupDef,
+      shellOvertimeDate: shellDate,
+      employeeMap,
+    });
+    if (!seed) return;
+    setActiveModalPreset(buildPresetFromStandardGroup(selectedStandardGroupDef));
+    setEditingModalSeed(seed);
+    setActiveRegModalMode('manual');
   };
 
   const buildPresetFromStandardGroup = (
@@ -468,6 +519,68 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       }
       setSelectedPreviewFormId(updated.id);
       setActiveRegModalMode(null);
+      setEditingModalSeed(null);
+    } catch (error) {
+      handleSupabaseError(error);
+      throw error;
+    }
+  };
+
+  const handleConfirmEditGroup = async (
+    payload: ConfirmableOvertimeBlockPayload,
+    editingBlockIndices: number[]
+  ) => {
+    if (!activePreviewForm || !onUpdateFormBlocks) return;
+    const groupDef =
+      (editingModalSeed
+        ? OVERTIME_STANDARD_GROUPS.find((g) => g.id === editingModalSeed.groupId)
+        : selectedStandardGroupDef) || null;
+    if (!groupDef) return;
+
+    const shellDate = activePreviewForm.overtime_date || activeTargetDate;
+    const nextBlocks = applyEditedStandardGroupToBlocks({
+      existingBlocks: activeBlocks,
+      editingBlockIndices,
+      groupDef,
+      editedPayload: payload,
+      shellOvertimeDate: shellDate,
+      employeeMap,
+      computeHours: (isoDate, empId, startTime, endTime) => {
+        const empDept = (employeeMap.get(empId)?.department || '').trim();
+        const evalRes = evaluateOvertimeDaySchedule({
+          isoDate,
+          holidays: companyHolidays,
+          shifts: effectiveWorkShifts,
+          departmentName: empDept || 'ALL',
+          employeeDepartments: empDept ? [empDept] : [],
+        });
+        const isWeekendOrHoliday =
+          evalRes.dayKind === 'weekly_off' ||
+          evalRes.dayKind === 'holiday' ||
+          evalRes.dayKind === 'compensatory_off' ||
+          (Boolean(isoDate && /^\d{4}-\d{2}-\d{2}$/.test(isoDate)) &&
+            getWeekdayKeyFromIsoDate(isoDate) === 'sun');
+        return calculateActualOvertimeHours(
+          isoDate,
+          startTime,
+          endTime,
+          isWeekendOrHoliday,
+          effectiveOvertimeSettings
+        ).netHours;
+      },
+      preserveManualOrder: manualOrderFormIds.has(activePreviewForm.id),
+    });
+
+    try {
+      const updated = await onUpdateFormBlocks(activePreviewForm, nextBlocks);
+      setSelectedPreviewFormId(updated.id);
+      setActiveRegModalMode(null);
+      setEditingModalSeed(null);
+      onShowToast?.(
+        `Đã cập nhật nhóm ${groupDef.label} trên phiếu ${formatOvertimeFormCodeDisplay(
+          updated.form_code
+        )}.`
+      );
     } catch (error) {
       handleSupabaseError(error);
       throw error;
@@ -939,9 +1052,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             data-testid="overtime-day-groups-card"
             className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs gap-1.5"
           >
-            <div className="shrink-0 flex items-center justify-between gap-2 pb-1 border-b border-slate-100">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <h3 className="text-xs font-bold text-slate-900 truncate">
+            <div className="shrink-0 flex items-center justify-between gap-1.5 pb-1 border-b border-slate-100">
+              <div className="flex items-center gap-1 min-w-0">
+                <h3 className="text-xs font-bold text-slate-900 shrink-0">
                   Nhóm tăng ca
                 </h3>
                 <span className="text-[10px] font-mono font-semibold text-[#14539E] bg-blue-50 px-1.5 py-0.5 rounded shrink-0">
@@ -951,7 +1064,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   <span
                     data-testid="selected-standard-group-pill"
                     title={`Đang chọn nhóm: ${selectedStandardGroupDef.label}`}
-                    className="text-[10px] font-semibold text-[#14539E] bg-blue-50 border border-[#14539E]/25 px-1.5 py-0.5 rounded truncate max-w-[105px]"
+                    className="text-[10px] font-semibold text-[#14539E] bg-blue-50 border border-[#14539E]/25 px-1.5 py-0.5 rounded truncate max-w-[78px] xl:max-w-[100px]"
                   >
                     {selectedStandardGroupDef.label}
                   </span>
@@ -959,6 +1072,22 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  disabled={!canEditSelectedStandardGroup}
+                  onClick={handleOpenEditSelectedGroupModal}
+                  data-testid="edit-selected-group-btn"
+                  title="Sửa nhóm tăng ca đang chọn"
+                  aria-label={
+                    selectedStandardGroupDef
+                      ? `Sửa nhóm tăng ca ${selectedStandardGroupDef.label}`
+                      : 'Sửa nhóm tăng ca đang chọn'
+                  }
+                  className="h-7 w-7 rounded-lg border border-[#14539E]/35 bg-blue-50/70 hover:bg-[#14539E] text-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-slate-100 disabled:hover:text-slate-400 disabled:cursor-not-allowed"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+
                 <button
                   type="button"
                   disabled={isActiveFormLocked || !onAppendBlocksToDate}
@@ -971,13 +1100,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     )
                   }
                   data-testid="open-manual-group-modal-btn"
-                  title={
-                    isActiveFormLocked
-                      ? 'Phiếu đã chốt — khóa thêm nhóm'
-                      : selectedStandardGroupDef
-                        ? `Thêm thủ công: ${selectedStandardGroupDef.label}`
-                        : 'Thêm nhóm tăng ca thủ công'
-                  }
+                  title="Thêm nhóm tăng ca thủ công"
                   aria-label={
                     selectedStandardGroupDef
                       ? `Thêm thủ công nhóm ${selectedStandardGroupDef.label}`
@@ -1000,13 +1123,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     )
                   }
                   data-testid="open-zalo-scan-modal-btn"
-                  title={
-                    isActiveFormLocked
-                      ? 'Phiếu đã chốt — khóa quét ảnh Zalo'
-                      : selectedStandardGroupDef
-                        ? `Quét ảnh Zalo AI: ${selectedStandardGroupDef.label}`
-                        : 'Quét ảnh lịch tăng ca từ Zalo (AI)'
-                  }
+                  title="Quét ảnh lịch tăng ca từ Zalo (AI)"
                   aria-label={
                     selectedStandardGroupDef
                       ? `Quét ảnh Zalo AI nhóm ${selectedStandardGroupDef.label}`
@@ -1431,10 +1548,13 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       </div>
 
-      {/* Modal Thêm nhóm tăng ca thủ công */}
+      {/* Modal Thêm / Sửa nhóm tăng ca thủ công */}
       <ManualOvertimeGroupModal
         isOpen={activeRegModalMode === 'manual'}
-        onClose={() => setActiveRegModalMode(null)}
+        onClose={() => {
+          setActiveRegModalMode(null);
+          setEditingModalSeed(null);
+        }}
         defaultDate={activeTargetDate}
         employees={employees}
         groups={groups}
@@ -1444,10 +1564,30 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         workShifts={effectiveWorkShifts}
         companyHolidays={companyHolidays}
         presetContext={activeModalPreset}
+        editSeed={editingModalSeed}
+        onResolvePrevDayEditSeed={(targetIsoDate) => {
+          if (!activePreviewForm) return null;
+          const prevDayDef = OVERTIME_STANDARD_GROUPS.find(
+            (g) => g.id === 'prev_day'
+          );
+          if (!prevDayDef) return null;
+          const candidate = extractStandardGroupEditSeed({
+            blocks: activeBlocks,
+            groupDef: prevDayDef,
+            shellOvertimeDate: activePreviewForm.overtime_date || activeTargetDate,
+            employeeMap,
+            preferredPriorDate: targetIsoDate,
+          });
+          if (!candidate || candidate.overtimeDate !== targetIsoDate) {
+            return null;
+          }
+          return candidate;
+        }}
         translateMultilineKorean={translateMultilineKorean}
         onGlossaryEntriesUpdated={onGlossaryEntriesUpdated}
         onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
         onConfirm={(payload) => handleConfirmManualPayloads([payload])}
+        onConfirmEdit={handleConfirmEditGroup}
         onConfirmMultiple={handleConfirmManualPayloads}
       />
 

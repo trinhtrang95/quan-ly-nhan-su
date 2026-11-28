@@ -13,6 +13,7 @@ import {
 import {
   calculateActualOvertimeHours,
   DEFAULT_OVERTIME_SETTINGS,
+  normalize24hTime,
 } from './workScheduleLogic';
 
 function formatDateToFormStyleLocal(isoDate: string): string {
@@ -680,6 +681,411 @@ export function analyzeOvertimeFormGroupStatus(
   }
 
   return result;
+}
+
+export interface OvertimeGroupEditSeed {
+  groupId: OvertimeStandardGroupId;
+  editingBlockIndices: number[];
+  overtimeDate: string;
+  startTime: string;
+  endTime: string;
+  reasonVi: string;
+  reasonKr: string;
+  selectedEmployeeIds: string[];
+  customTimes: Record<string, { startTime: string; endTime: string }>;
+  customReasons: Record<string, { reasonVi: string; reasonKr: string }>;
+}
+
+/**
+ * Pure helper: extracts the current registered data of a standard overtime group
+ * (shared times, shared Vietnamese/Korean reasons, selected employees, and per-employee
+ * custom times/reasons) so the Manual Overtime Group Modal can reopen in Edit mode.
+ */
+export function extractStandardGroupEditSeed(params: {
+  blocks: OvertimeBlockInput[];
+  groupDef: OvertimeStandardGroupDef;
+  shellOvertimeDate: string;
+  employeeMap: Map<string, Employee>;
+  preferredPriorDate?: string;
+}): OvertimeGroupEditSeed | null {
+  const {
+    blocks,
+    groupDef,
+    shellOvertimeDate,
+    employeeMap,
+    preferredPriorDate,
+  } = params;
+  const cleanShellDate = (shellOvertimeDate || '').trim().slice(0, 10);
+  const statusMap = analyzeOvertimeFormGroupStatus(
+    blocks,
+    cleanShellDate,
+    employeeMap
+  );
+  const groupStatus = statusMap[groupDef.id];
+  if (
+    !groupStatus ||
+    !groupStatus.isRegistered ||
+    groupStatus.matchingBlockIndices.length === 0
+  ) {
+    return null;
+  }
+
+  let editingBlockIndices = [...groupStatus.matchingBlockIndices];
+  let resolvedDate = cleanShellDate;
+
+  if (groupDef.id === 'prev_day') {
+    const priorDates = Array.from(
+      new Set(
+        editingBlockIndices
+          .map((idx) => (blocks[idx]?.overtimeDate || '').trim().slice(0, 10))
+          .filter(Boolean)
+      )
+    ).sort();
+
+    const d1 = shiftIsoDateDays(cleanShellDate, -1);
+    const d2 = shiftIsoDateDays(cleanShellDate, -2);
+    const cleanPref = (preferredPriorDate || '').trim().slice(0, 10);
+
+    if (cleanPref && priorDates.includes(cleanPref)) {
+      resolvedDate = cleanPref;
+    } else if (priorDates.includes(d1)) {
+      resolvedDate = d1;
+    } else if (priorDates.includes(d2)) {
+      resolvedDate = d2;
+    } else {
+      resolvedDate = priorDates[priorDates.length - 1] || d1;
+    }
+
+    const filteredIndices = editingBlockIndices.filter(
+      (idx) => (blocks[idx]?.overtimeDate || '').trim().slice(0, 10) === resolvedDate
+    );
+    if (filteredIndices.length > 0) {
+      editingBlockIndices = filteredIndices;
+    }
+  } else {
+    const firstBlockDate = (
+      blocks[editingBlockIndices[0]]?.overtimeDate || ''
+    )
+      .trim()
+      .slice(0, 10);
+    resolvedDate = firstBlockDate || cleanShellDate;
+  }
+
+  const targetDeptKey =
+    groupDef.presetType === 'group' && groupDef.targetGroupName
+      ? normalizeOvertimeGroupKey(groupDef.targetGroupName)
+      : '';
+
+  const primaryBlock = blocks[editingBlockIndices[0]];
+  if (!primaryBlock) return null;
+
+  const commonReasonVi = (primaryBlock.reasonVi || '').trim();
+  const commonReasonKr = (primaryBlock.reasonKr || '').trim();
+  const fallbackStart = normalize24hTime(
+    (primaryBlock.startTime || '').replace(/h/i, ':'),
+    '16:10'
+  );
+  const fallbackEnd = normalize24hTime(
+    (primaryBlock.endTime || '').replace(/h/i, ':'),
+    '18:10'
+  );
+
+  interface CollectedParticipant {
+    employeeId: string;
+    startTime: string;
+    endTime: string;
+    reasonVi: string;
+    reasonKr: string;
+    blockReasonVi: string;
+    blockReasonKr: string;
+  }
+
+  const collected: CollectedParticipant[] = [];
+  const seenEmpIds = new Set<string>();
+
+  for (const idx of editingBlockIndices) {
+    const block = blocks[idx];
+    if (!block) continue;
+    const blockStart = normalize24hTime(
+      (block.startTime || '').replace(/h/i, ':'),
+      fallbackStart
+    );
+    const blockEnd = normalize24hTime(
+      (block.endTime || '').replace(/h/i, ':'),
+      fallbackEnd
+    );
+    const rawParticipants: OvertimeParticipantInput[] =
+      Array.isArray(block.participants) && block.participants.length > 0
+        ? block.participants
+        : (block.selectedEmployeeIds || []).map((id) => ({
+            employeeId: id,
+            startTime: blockStart,
+            endTime: blockEnd,
+          }));
+
+    for (const p of rawParticipants) {
+      if (!p.employeeId || seenEmpIds.has(p.employeeId)) continue;
+      if (targetDeptKey) {
+        const empDeptKey = normalizeOvertimeGroupKey(
+          employeeMap.get(p.employeeId)?.department
+        );
+        if (empDeptKey !== targetDeptKey) continue;
+      }
+      seenEmpIds.add(p.employeeId);
+      collected.push({
+        employeeId: p.employeeId,
+        startTime: normalize24hTime(
+          (p.startTime || '').replace(/h/i, ':'),
+          blockStart
+        ),
+        endTime: normalize24hTime(
+          (p.endTime || '').replace(/h/i, ':'),
+          blockEnd
+        ),
+        reasonVi: (p.reasonVi || '').trim(),
+        reasonKr: (p.reasonKr || '').trim(),
+        blockReasonVi: (block.reasonVi || '').trim(),
+        blockReasonKr: (block.reasonKr || '').trim(),
+      });
+    }
+  }
+
+  // Pick the most frequent (startTime, endTime) pair as the common time range
+  let commonStart = fallbackStart;
+  let commonEnd = fallbackEnd;
+  if (collected.length > 0) {
+    const pairCounts = new Map<string, { count: number; start: string; end: string }>();
+    for (const item of collected) {
+      const key = `${item.startTime}::${item.endTime}`;
+      const prev = pairCounts.get(key);
+      if (prev) {
+        prev.count += 1;
+      } else {
+        pairCounts.set(key, { count: 1, start: item.startTime, end: item.endTime });
+      }
+    }
+    let bestCount = -1;
+    const fallbackPairKey = `${fallbackStart}::${fallbackEnd}`;
+    for (const [key, entry] of pairCounts.entries()) {
+      if (
+        entry.count > bestCount ||
+        (entry.count === bestCount && key === fallbackPairKey)
+      ) {
+        bestCount = entry.count;
+        commonStart = entry.start;
+        commonEnd = entry.end;
+      }
+    }
+  }
+
+  const selectedEmployeeIds: string[] = [];
+  const customTimes: Record<string, { startTime: string; endTime: string }> = {};
+  const customReasons: Record<string, { reasonVi: string; reasonKr: string }> = {};
+
+  for (const item of collected) {
+    selectedEmployeeIds.push(item.employeeId);
+    if (item.startTime !== commonStart || item.endTime !== commonEnd) {
+      customTimes[item.employeeId] = {
+        startTime: item.startTime,
+        endTime: item.endTime,
+      };
+    }
+
+    const effectiveVi = item.reasonVi || item.blockReasonVi;
+    const effectiveKr =
+      item.reasonVi || item.reasonKr ? item.reasonKr : item.blockReasonKr;
+    if (
+      hasParticipantCustomReason(
+        { reasonVi: effectiveVi, reasonKr: effectiveKr },
+        commonReasonVi,
+        commonReasonKr
+      )
+    ) {
+      customReasons[item.employeeId] = {
+        reasonVi: effectiveVi || commonReasonVi,
+        reasonKr: effectiveKr,
+      };
+    }
+  }
+
+  return {
+    groupId: groupDef.id,
+    editingBlockIndices,
+    overtimeDate: resolvedDate,
+    startTime: commonStart,
+    endTime: commonEnd,
+    reasonVi: commonReasonVi,
+    reasonKr: commonReasonKr,
+    selectedEmployeeIds,
+    customTimes,
+    customReasons,
+  };
+}
+
+export interface EditedGroupBlockInput {
+  overtimeDate: string;
+  startTime: string;
+  endTime: string;
+  reasonVi: string;
+  reasonKr: string;
+  selectedEmployeeIds: string[];
+  customTimes: Record<string, { startTime: string; endTime: string }>;
+  customReasons?: Record<string, { reasonVi: string; reasonKr: string }>;
+}
+
+/**
+ * Pure helper: overwrites the targeted `editingBlockIndices` in `existingBlocks`
+ * with the edited group block (preserving block ID and any residual participants
+ * belonging to other departments if a source block was mixed), without creating duplicates.
+ */
+export function applyEditedStandardGroupToBlocks(params: {
+  existingBlocks: OvertimeBlockInput[];
+  editingBlockIndices: number[];
+  groupDef: OvertimeStandardGroupDef;
+  editedPayload: EditedGroupBlockInput;
+  shellOvertimeDate: string;
+  employeeMap: Map<string, Employee>;
+  computeHours?: (
+    isoDate: string,
+    empId: string,
+    startTime: string,
+    endTime: string
+  ) => number;
+  preserveManualOrder?: boolean;
+}): OvertimeBlockInput[] {
+  const {
+    existingBlocks,
+    editingBlockIndices,
+    groupDef,
+    editedPayload,
+    shellOvertimeDate,
+    employeeMap,
+    computeHours,
+    preserveManualOrder = false,
+  } = params;
+
+  const sortedIndices = Array.from(
+    new Set(
+      editingBlockIndices.filter(
+        (idx) => Number.isInteger(idx) && idx >= 0 && idx < existingBlocks.length
+      )
+    )
+  ).sort((a, b) => a - b);
+
+  const firstEditIndex =
+    sortedIndices.length > 0 ? sortedIndices[0] : existingBlocks.length;
+  const primaryOrigBlock =
+    sortedIndices.length > 0 ? existingBlocks[sortedIndices[0]] : undefined;
+
+  const resolvedDate =
+    (editedPayload.overtimeDate || shellOvertimeDate).trim().slice(0, 10) ||
+    shellOvertimeDate;
+  const normStart = normalize24hTime(editedPayload.startTime, '16:10');
+  const normEnd = normalize24hTime(editedPayload.endTime, '18:10');
+  const cleanReasonVi = (editedPayload.reasonVi || '').trim();
+  const cleanReasonKr = (editedPayload.reasonKr || '').trim();
+
+  const rawParticipants: OvertimeParticipantInput[] =
+    editedPayload.selectedEmployeeIds.map((empId) => {
+      const custom = editedPayload.customTimes[empId];
+      const pStart = custom?.startTime
+        ? normalize24hTime(custom.startTime, normStart)
+        : normStart;
+      const pEnd = custom?.endTime
+        ? normalize24hTime(custom.endTime, normEnd)
+        : normEnd;
+      const customReason = editedPayload.customReasons?.[empId];
+      const customVi = (customReason?.reasonVi || '').trim();
+      const customKr = (customReason?.reasonKr || '').trim();
+      const hasCustom = Boolean(
+        (customVi && customVi !== cleanReasonVi) ||
+          (customKr && customKr !== cleanReasonKr)
+      );
+
+      return {
+        employeeId: empId,
+        startTime: pStart,
+        endTime: pEnd,
+        totalHours: computeHours
+          ? computeHours(resolvedDate, empId, pStart, pEnd)
+          : calculateHoursBetween(pStart, pEnd),
+        ...(hasCustom
+          ? {
+              reasonVi: customVi || cleanReasonVi,
+              reasonKr: customKr,
+            }
+          : {}),
+      };
+    });
+
+  const sortedParticipants = sortParticipantsByReasonScope(
+    rawParticipants,
+    cleanReasonVi,
+    cleanReasonKr
+  );
+
+  const updatedBlock: OvertimeBlockInput = {
+    id:
+      primaryOrigBlock?.id ||
+      `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    overtimeDate: resolvedDate,
+    reasonVi: cleanReasonVi,
+    reasonKr: cleanReasonKr,
+    startTime: normStart,
+    endTime: normEnd,
+    selectedEmployeeIds: sortedParticipants.map((p) => p.employeeId),
+    participants: sortedParticipants,
+  };
+
+  // Preserve participants from other departments if an edited block happened to be mixed
+  const residualBlocks: OvertimeBlockInput[] = [];
+  if (groupDef.presetType === 'group' && groupDef.targetGroupName) {
+    const targetDeptKey = normalizeOvertimeGroupKey(groupDef.targetGroupName);
+    for (const idx of sortedIndices) {
+      const orig = existingBlocks[idx];
+      if (!orig) continue;
+      const remainingParticipants = (orig.participants || []).filter((p) => {
+        const deptKey = normalizeOvertimeGroupKey(
+          employeeMap.get(p.employeeId)?.department
+        );
+        return deptKey !== targetDeptKey;
+      });
+      if (remainingParticipants.length > 0) {
+        residualBlocks.push({
+          ...orig,
+          id: `${orig.id}-rem-${idx}`,
+          selectedEmployeeIds: remainingParticipants.map((p) => p.employeeId),
+          participants: remainingParticipants,
+        });
+      }
+    }
+  }
+
+  const editingSet = new Set(sortedIndices);
+  const nextBlocks: OvertimeBlockInput[] = [];
+  let inserted = false;
+
+  existingBlocks.forEach((block, idx) => {
+    if (idx === firstEditIndex) {
+      nextBlocks.push(updatedBlock);
+      nextBlocks.push(...residualBlocks);
+      inserted = true;
+      return;
+    }
+    if (editingSet.has(idx)) {
+      return;
+    }
+    nextBlocks.push(block);
+  });
+
+  if (!inserted) {
+    nextBlocks.push(updatedBlock);
+    nextBlocks.push(...residualBlocks);
+  }
+
+  return preserveManualOrder
+    ? nextBlocks
+    : sortOvertimeBlocksByStandardOrder(nextBlocks, shellOvertimeDate, employeeMap);
 }
 
 /**

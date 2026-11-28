@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   analyzeOvertimeFormGroupStatus,
+  applyEditedStandardGroupToBlocks,
   buildOnLeaveEmployeeMapForDate,
   buildOvertimeFormItemsFromBlocks,
   buildPrintableDateGroupsFromItems,
@@ -10,6 +11,7 @@ import {
   computeOvertimeA4Density,
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
+  extractStandardGroupEditSeed,
   filterEmployeesByQuery,
   filterOvertimeForms,
   formatOvertimeDepartmentHeaderLabel,
@@ -1327,6 +1329,131 @@ describe('overtimeFormsService pure logic', () => {
       ['3']
     );
     assert.deepEqual(filterEmployeesByQuery(list, 'khongton'), []);
+  });
+
+  it('extracts standard group edit seed preserving shared/custom times & reasons and overwrites the block without duplication', () => {
+    const emps: Employee[] = [
+      { ...sampleEmployees[0], id: 'e-truc-1', employeeCode: 'NV01', fullName: 'Trực Một', department: 'AUTO 1' },
+      { ...sampleEmployees[0], id: 'e-truc-2', employeeCode: 'NV02', fullName: 'Trực Hai', department: 'PE' },
+      { ...sampleEmployees[0], id: 'e-bt-1', employeeCode: 'NV03', fullName: 'Bảo Trì Một', department: 'Bảo trì' },
+      { ...sampleEmployees[0], id: 'e-bt-2', employeeCode: 'NV04', fullName: 'Bảo Trì Hai', department: 'Bảo trì' },
+    ];
+    const empMap = new Map(emps.map((e) => [e.id, e]));
+
+    const blocks: OvertimeBlockInput[] = [
+      {
+        id: 'blk-prod',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Trực sản xuất',
+        reasonKr: '생산 당직',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-truc-1', 'e-truc-2'],
+        participants: [
+          { employeeId: 'e-truc-1', startTime: '16:10', endTime: '18:10' },
+          {
+            employeeId: 'e-truc-2',
+            startTime: '16:10',
+            endTime: '20:10',
+            reasonVi: 'Trực sản xuất & hỗ trợ đổi model',
+            reasonKr: '생산 당직 및 모델 변경 지원',
+          },
+        ],
+      },
+      {
+        id: 'blk-bt',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Bảo dưỡng máy CNC',
+        reasonKr: 'CNC 설비 보수',
+        startTime: '16:10',
+        endTime: '19:10',
+        selectedEmployeeIds: ['e-bt-1'],
+        participants: [
+          { employeeId: 'e-bt-1', startTime: '16:10', endTime: '19:10' },
+        ],
+      },
+    ];
+
+    const prodDef = OVERTIME_STANDARD_GROUPS.find((g) => g.id === 'production_duty')!;
+    const iotDef = OVERTIME_STANDARD_GROUPS.find((g) => g.id === 'iot')!;
+    const btDef = OVERTIME_STANDARD_GROUPS.find((g) => g.id === 'bao_tri')!;
+
+    // Unregistered group returns null
+    assert.equal(
+      extractStandardGroupEditSeed({
+        blocks,
+        groupDef: iotDef,
+        shellOvertimeDate: '2026-11-30',
+        employeeMap: empMap,
+      }),
+      null
+    );
+
+    // Production duty seed extracts shared + custom times & reasons accurately
+    const prodSeed = extractStandardGroupEditSeed({
+      blocks,
+      groupDef: prodDef,
+      shellOvertimeDate: '2026-11-30',
+      employeeMap: empMap,
+    });
+    assert.ok(prodSeed);
+    assert.deepEqual(prodSeed.editingBlockIndices, [0]);
+    assert.equal(prodSeed.startTime, '16:10');
+    assert.equal(prodSeed.endTime, '18:10');
+    assert.equal(prodSeed.reasonVi, 'Trực sản xuất');
+    assert.equal(prodSeed.reasonKr, '생산 당직');
+    assert.deepEqual(prodSeed.selectedEmployeeIds, ['e-truc-1', 'e-truc-2']);
+    assert.deepEqual(prodSeed.customTimes, {
+      'e-truc-2': { startTime: '16:10', endTime: '20:10' },
+    });
+    assert.deepEqual(prodSeed.customReasons, {
+      'e-truc-2': {
+        reasonVi: 'Trực sản xuất & hỗ trợ đổi model',
+        reasonKr: '생산 당직 및 모델 변경 지원',
+      },
+    });
+
+    // Editing Bảo trì: add e-bt-2 and change endTime to 20:40 -> overwrites blk-bt in place (no duplicate block)
+    const btSeed = extractStandardGroupEditSeed({
+      blocks,
+      groupDef: btDef,
+      shellOvertimeDate: '2026-11-30',
+      employeeMap: empMap,
+    });
+    assert.ok(btSeed);
+    assert.deepEqual(btSeed.editingBlockIndices, [1]);
+
+    const updatedBlocks = applyEditedStandardGroupToBlocks({
+      existingBlocks: blocks,
+      editingBlockIndices: btSeed.editingBlockIndices,
+      groupDef: btDef,
+      editedPayload: {
+        overtimeDate: '2026-11-30',
+        startTime: '16:10',
+        endTime: '20:40',
+        reasonVi: 'Bảo dưỡng máy CNC & kiểm tra khí nén',
+        reasonKr: 'CNC 설비 보수 및 공압 점검',
+        selectedEmployeeIds: ['e-bt-1', 'e-bt-2'],
+        customTimes: {},
+        customReasons: {},
+      },
+      shellOvertimeDate: '2026-11-30',
+      employeeMap: empMap,
+    });
+
+    assert.equal(updatedBlocks.length, 2);
+    assert.equal(updatedBlocks[0].id, 'blk-prod');
+    assert.equal(updatedBlocks[1].id, 'blk-bt');
+    assert.equal(updatedBlocks[1].endTime, '20:40');
+    assert.deepEqual(updatedBlocks[1].selectedEmployeeIds, ['e-bt-1', 'e-bt-2']);
+
+    const nextStatus = analyzeOvertimeFormGroupStatus(
+      updatedBlocks,
+      '2026-11-30',
+      empMap
+    );
+    assert.equal(nextStatus.bao_tri.count, 2);
+    assert.equal(nextStatus.bao_tri.badgeText, '2 người');
   });
 });
 

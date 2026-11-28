@@ -44,6 +44,7 @@ export type {
 // ==========================================
 export {
   analyzeOvertimeFormGroupStatus,
+  applyEditedStandardGroupToBlocks,
   buildMergedEmployeesForExport,
   buildOvertimeFormItemsFromBlocks,
   buildOnLeaveEmployeeMapForDate,
@@ -55,6 +56,7 @@ export {
   DEFAULT_OVERTIME_DEPARTMENT,
   evaluateOvertimeDateConflict,
   extractActiveFormWorkDates,
+  extractStandardGroupEditSeed,
   extractUniqueBlockDates,
   fetchActiveLeaveRecordsForOvertimeCheck,
   fetchOvertimeFormById,
@@ -101,6 +103,7 @@ export type {
   BuildPrintableGroupsOptions,
   CreateOrOpenOvertimeShellResult,
   CreateOrOpenShellAction,
+  EditedGroupBlockInput,
   EvaluateOvertimeDateConflictParams,
   OvertimeA4DensityProfile,
   OvertimeA4DensityTier,
@@ -111,6 +114,7 @@ export type {
   OvertimeFormItemRecord,
   OvertimeFormRecord,
   OvertimeFormWithItems,
+  OvertimeGroupEditSeed,
   OvertimeLeaveCheckEntry,
   OvertimeParticipantInput,
   OvertimeRealtimeChangeEvent,
