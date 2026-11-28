@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
+  FileEdit,
   Info,
   Loader2,
   Plus,
@@ -24,10 +25,12 @@ import {
   findExactGlossaryMatch,
   getLeaveTypeShortLabel,
   getLocalTodayIsoDate,
+  normalizeOvertimeGroupKey,
   normalizeTargetGroups,
   OvertimeBlockInput,
   OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
+  shiftIsoDateDays,
   upsertOvertimeGlossaryEntry,
 } from '../../../services/hrService';
 import {
@@ -37,7 +40,10 @@ import {
   sanitize24hTimeInput,
   type WorkShift,
 } from '../../../utils/workScheduleLogic';
-import { ConfirmableOvertimeBlockPayload } from './ZaloScheduleScanModal';
+import {
+  ConfirmableOvertimeBlockPayload,
+  OvertimeModalPresetContext,
+} from './ZaloScheduleScanModal';
 
 export interface ManualOvertimeGroupModalProps {
   isOpen: boolean;
@@ -50,6 +56,8 @@ export interface ManualOvertimeGroupModalProps {
   glossaryEntries: OvertimeGlossaryEntry[];
   workShifts: WorkShift[];
   companyHolidays: CompanyHoliday[];
+  presetContext?: OvertimeModalPresetContext | null;
+  onSwitchMode?: (mode: 'manual' | 'ai_scan') => void;
   translateMultilineKorean: (
     reasonVi: string,
     glossaryEntries: OvertimeGlossaryEntry[]
@@ -57,6 +65,7 @@ export interface ManualOvertimeGroupModalProps {
   onGlossaryEntriesUpdated?: (entries: OvertimeGlossaryEntry[]) => void;
   onLeaveRecordsRefreshed?: (records: OvertimeLeaveCheckEntry[]) => void;
   onConfirm: (payload: ConfirmableOvertimeBlockPayload) => Promise<void>;
+  onConfirmMultiple?: (payloads: ConfirmableOvertimeBlockPayload[]) => Promise<void>;
 }
 
 const QUICK_END_PRESETS = ['18:10', '19:10', '20:10', '20:40'] as const;
@@ -65,6 +74,12 @@ function formatIsoToDDMMYYYY(isoDate: string): string {
   const m = (isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return isoDate;
   return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function formatIsoToDDMM(isoDate: string): string {
+  const m = (isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return isoDate;
+  return `${m[3]}/${m[2]}`;
 }
 
 export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> = ({
@@ -78,10 +93,13 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
   glossaryEntries,
   workShifts,
   companyHolidays,
+  presetContext = null,
+  onSwitchMode,
   translateMultilineKorean,
   onGlossaryEntriesUpdated,
   onLeaveRecordsRefreshed,
   onConfirm,
+  onConfirmMultiple,
 }) => {
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const reasonDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -98,6 +116,17 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     Record<string, { startTime: string; endTime: string }>
   >({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
+  const [customReasons, setCustomReasons] = useState<
+    Record<string, { reasonVi: string; reasonKr: string }>
+  >({});
+  const [editingReasonEmpId, setEditingReasonEmpId] = useState<string | null>(
+    null
+  );
+  const [translatingCustomEmpId, setTranslatingCustomEmpId] = useState<
+    string | null
+  >(null);
+  const [includeTwoConsecutivePrevDays, setIncludeTwoConsecutivePrevDays] =
+    useState(false);
 
   const [startTime, setStartTime] = useState('16:10');
   const [endTime, setEndTime] = useState('18:10');
@@ -128,6 +157,17 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     return Array.from(names);
   }, [groups, employees]);
 
+  const baseShellDate = defaultDate || getLocalTodayIsoDate();
+  const prevDayD1 = useMemo(
+    () => shiftIsoDateDays(baseShellDate, -1),
+    [baseShellDate]
+  );
+  const prevDayD2 = useMemo(
+    () => shiftIsoDateDays(baseShellDate, -2),
+    [baseShellDate]
+  );
+  const isPrevDayMode = presetContext?.presetType === 'prev_day';
+
   const dayEvaluation = useMemo(() => {
     const empDepts = selectedEmployeeIds
       .map((id) => employeeMap.get(id)?.department?.trim() || '')
@@ -148,36 +188,64 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     employeeMap,
   ]);
 
-  // Reset form each time modal opens
+  // Reset form each time modal opens (applying clicked-group preset context)
   useEffect(() => {
     if (!isOpen) return;
-    const targetDate = defaultDate || getLocalTodayIsoDate();
+    const baseDate = defaultDate || getLocalTodayIsoDate();
+    let targetDate = baseDate;
+    let initialGroup = 'ALL';
+    let initialReasonVi = '';
+    let initialReasonKr = '';
+
+    if (presetContext?.presetType === 'prev_day') {
+      targetDate = shiftIsoDateDays(baseDate, -1);
+    } else if (presetContext?.presetType === 'production_duty') {
+      initialReasonVi = 'Trực sản xuất';
+      initialReasonKr = '생산 당직';
+    } else if (
+      presetContext?.presetType === 'group' &&
+      presetContext.targetGroupName
+    ) {
+      const targetKey = normalizeOvertimeGroupKey(
+        presetContext.targetGroupName
+      );
+      const matchedOpt = departmentOptions.find(
+        (opt) => normalizeOvertimeGroupKey(opt) === targetKey
+      );
+      initialGroup = matchedOpt || 'ALL';
+    }
+
     const initialEval = evaluateOvertimeDaySchedule({
       isoDate: targetDate,
       holidays: companyHolidays,
       shifts: workShifts,
-      departmentName: 'ALL',
+      departmentName: initialGroup,
       employeeDepartments: [],
     });
+
     setOvertimeDate(targetDate);
-    setSelectedGroupFilter('ALL');
+    setSelectedGroupFilter(initialGroup);
+    setIncludeTwoConsecutivePrevDays(false);
     setEmployeeQuery('');
     setIsEmployeeListOpen(false);
     setSelectedEmployeeIds([]);
     setCustomTimes({});
     setEditingTimeEmpId(null);
+    setCustomReasons({});
+    setEditingReasonEmpId(null);
+    setTranslatingCustomEmpId(null);
     setStartTime(initialEval.suggestedStartTime || '16:10');
     setEndTime(initialEval.suggestedDefaultEndTime || '18:10');
     setIsStartManuallyEdited(false);
     setIsEndManuallyEdited(false);
-    setReasonVi('');
-    setReasonKr('');
+    setReasonVi(initialReasonVi);
+    setReasonKr(initialReasonKr);
     setIsKrManuallyEdited(false);
     setIsReasonDropdownOpen(false);
     setIsTranslating(false);
     setIsConfirming(false);
     setErrorMessage(null);
-  }, [isOpen, defaultDate, companyHolidays, workShifts]);
+  }, [isOpen, defaultDate, presetContext, departmentOptions, companyHolidays, workShifts]);
 
   // Sync suggested start/end when schedule shifts and user hasn't manually overridden
   useEffect(() => {
@@ -212,10 +280,10 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
-  const alreadyRecordedIds = useMemo(() => {
+  const getAlreadyRecordedIdsForDate = (isoDate: string) => {
     const set = new Set<string>();
     for (const block of existingBlocks || []) {
-      if ((block.overtimeDate || '') === overtimeDate) {
+      if ((block.overtimeDate || '') === isoDate) {
         for (const p of block.participants || []) {
           if (p.employeeId) set.add(p.employeeId);
         }
@@ -225,12 +293,48 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
       }
     }
     return set;
-  }, [existingBlocks, overtimeDate]);
+  };
 
-  const onLeaveMap = useMemo(
-    () => buildOnLeaveEmployeeMapForDate(overtimeDate, leaveRecords, employees),
-    [overtimeDate, leaveRecords, employees]
-  );
+  const alreadyRecordedIds = useMemo(() => {
+    if (isPrevDayMode && includeTwoConsecutivePrevDays) {
+      const s1 = getAlreadyRecordedIdsForDate(prevDayD1);
+      const s2 = getAlreadyRecordedIdsForDate(prevDayD2);
+      const both = new Set<string>();
+      for (const id of s1) {
+        if (s2.has(id)) both.add(id);
+      }
+      return both;
+    }
+    return getAlreadyRecordedIdsForDate(overtimeDate);
+  }, [
+    existingBlocks,
+    overtimeDate,
+    isPrevDayMode,
+    includeTwoConsecutivePrevDays,
+    prevDayD1,
+    prevDayD2,
+  ]);
+
+  const onLeaveMap = useMemo(() => {
+    if (isPrevDayMode && includeTwoConsecutivePrevDays) {
+      const m1 = buildOnLeaveEmployeeMapForDate(prevDayD1, leaveRecords, employees);
+      const m2 = buildOnLeaveEmployeeMapForDate(prevDayD2, leaveRecords, employees);
+      const both = new Map<string, (typeof leaveRecords)[number]>();
+      for (const [id, rec] of m1.entries()) {
+        if (m2.has(id)) both.set(id, rec);
+      }
+      return both;
+    }
+    return buildOnLeaveEmployeeMapForDate(overtimeDate, leaveRecords, employees);
+  }, [
+    overtimeDate,
+    leaveRecords,
+    employees,
+    isPrevDayMode,
+    includeTwoConsecutivePrevDays,
+    prevDayD1,
+    prevDayD2,
+  ]);
 
   // Drop selected employees who have an active leave or were already recorded on date change
   useEffect(() => {
@@ -328,11 +432,74 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
 
   const handleToggleEmployee = (empId: string) => {
     if (onLeaveMap.has(empId) || alreadyRecordedIds.has(empId)) return;
-    setSelectedEmployeeIds((prev) =>
-      prev.includes(empId)
-        ? prev.filter((id) => id !== empId)
-        : [...prev, empId]
-    );
+    setSelectedEmployeeIds((prev) => {
+      const exists = prev.includes(empId);
+      if (exists) {
+        setCustomTimes((ct) => {
+          if (!ct[empId]) return ct;
+          const next = { ...ct };
+          delete next[empId];
+          return next;
+        });
+        setCustomReasons((cr) => {
+          if (!cr[empId]) return cr;
+          const next = { ...cr };
+          delete next[empId];
+          return next;
+        });
+        if (editingTimeEmpId === empId) setEditingTimeEmpId(null);
+        if (editingReasonEmpId === empId) setEditingReasonEmpId(null);
+        return prev.filter((id) => id !== empId);
+      }
+      return [...prev, empId];
+    });
+  };
+
+  const handleUpdateCustomReason = (
+    empId: string,
+    field: 'reasonVi' | 'reasonKr',
+    value: string
+  ) => {
+    setCustomReasons((prev) => {
+      const curr = prev[empId] || { reasonVi: '', reasonKr: '' };
+      return {
+        ...prev,
+        [empId]: { ...curr, [field]: value },
+      };
+    });
+  };
+
+  const handleClearCustomReason = (empId: string) => {
+    setCustomReasons((prev) => {
+      if (!prev[empId]) return prev;
+      const next = { ...prev };
+      delete next[empId];
+      return next;
+    });
+    if (editingReasonEmpId === empId) {
+      setEditingReasonEmpId(null);
+    }
+  };
+
+  const handleTranslateCustomReason = async (empId: string) => {
+    const customVi = (customReasons[empId]?.reasonVi || '').trim();
+    if (!customVi) return;
+    setTranslatingCustomEmpId(empId);
+    try {
+      const translated = await translateMultilineKorean(
+        customVi,
+        glossaryEntries
+      );
+      setCustomReasons((prev) => ({
+        ...prev,
+        [empId]: {
+          reasonVi: prev[empId]?.reasonVi || customVi,
+          reasonKr: translated,
+        },
+      }));
+    } finally {
+      setTranslatingCustomEmpId((prev) => (prev === empId ? null : prev));
+    }
   };
 
   const handleSelectAllFiltered = () => {
@@ -366,6 +533,53 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
     }
   };
 
+  const buildPayloadForDate = async (
+    targetIsoDate: string,
+    candidateEmployeeIds: string[],
+    normStart: string,
+    normEnd: string,
+    cleanVi: string,
+    finalKr: string,
+    normalizedCustomReasons: Record<
+      string,
+      { reasonVi: string; reasonKr: string }
+    >
+  ): Promise<ConfirmableOvertimeBlockPayload> => {
+    const normalizedCustomTimes: Record<
+      string,
+      { startTime: string; endTime: string }
+    > = {};
+    const filteredCustomReasons: Record<
+      string,
+      { reasonVi: string; reasonKr: string }
+    > = {};
+
+    for (const empId of candidateEmployeeIds) {
+      const c = customTimes[empId];
+      if (c) {
+        const pStart = normalize24hTime(c.startTime, normStart);
+        const pEnd = normalize24hTime(c.endTime, normEnd);
+        if (pStart !== normStart || pEnd !== normEnd) {
+          normalizedCustomTimes[empId] = { startTime: pStart, endTime: pEnd };
+        }
+      }
+      if (normalizedCustomReasons[empId]) {
+        filteredCustomReasons[empId] = normalizedCustomReasons[empId];
+      }
+    }
+
+    return {
+      overtimeDate: targetIsoDate,
+      startTime: normStart,
+      endTime: normEnd,
+      reasonVi: cleanVi,
+      reasonKr: finalKr,
+      selectedEmployeeIds: [...candidateEmployeeIds],
+      customTimes: normalizedCustomTimes,
+      customReasons: filteredCustomReasons,
+    };
+  };
+
   const handleSubmit = async () => {
     if (isConfirming) return;
     setErrorMessage(null);
@@ -381,7 +595,6 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
 
     setIsConfirming(true);
     try {
-      const resolvedDate = overtimeDate || defaultDate || getLocalTodayIsoDate();
       const latestCheck = await fetchActiveLeaveRecordsForOvertimeCheck(
         employees
       ).catch(() => null);
@@ -391,31 +604,6 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
           : leaveRecords;
       if (latestCheck && latestCheck.source === 'supabase') {
         onLeaveRecordsRefreshed?.(latestCheck.records);
-      }
-
-      const freshLeaveMap = buildOnLeaveEmployeeMapForDate(
-        resolvedDate,
-        activeLeaves,
-        employees
-      );
-      const conflictIds = selectedEmployeeIds.filter((id) =>
-        freshLeaveMap.has(id)
-      );
-      if (conflictIds.length > 0) {
-        const conflictSet = new Set(conflictIds);
-        setSelectedEmployeeIds((prev) =>
-          prev.filter((id) => !conflictSet.has(id))
-        );
-        const names = conflictIds
-          .slice(0, 3)
-          .map((id) => employeeMap.get(id)?.fullName || id)
-          .join(', ');
-        setErrorMessage(
-          `Không thể ghi nhận: ${names}${
-            conflictIds.length > 3 ? ` và ${conflictIds.length - 3} người khác` : ''
-          } đang có đơn nghỉ ngày ${formatIsoToDDMMYYYY(resolvedDate)}.`
-        );
-        return;
       }
 
       const normStart = normalize24hTime(
@@ -450,29 +638,107 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
         }
       }
 
-      const normalizedCustom: Record<
+      const normalizedCustomReasons: Record<
         string,
-        { startTime: string; endTime: string }
+        { reasonVi: string; reasonKr: string }
       > = {};
       for (const empId of selectedEmployeeIds) {
-        const c = customTimes[empId];
-        if (!c) continue;
-        const pStart = normalize24hTime(c.startTime, normStart);
-        const pEnd = normalize24hTime(c.endTime, normEnd);
-        if (pStart !== normStart || pEnd !== normEnd) {
-          normalizedCustom[empId] = { startTime: pStart, endTime: pEnd };
+        const r = customReasons[empId];
+        if (!r) continue;
+        const rVi = (r.reasonVi || '').trim();
+        let rKr = (r.reasonKr || '').trim();
+        if (rVi && !rKr) {
+          rKr = (await translateMultilineKorean(rVi, glossaryEntries)).trim();
+        }
+        if ((rVi || rKr) && (rVi !== cleanVi || (rKr && rKr !== finalKr))) {
+          normalizedCustomReasons[empId] = {
+            reasonVi: rVi || cleanVi,
+            reasonKr: rKr,
+          };
         }
       }
 
-      await onConfirm({
-        overtimeDate: resolvedDate,
-        startTime: normStart,
-        endTime: normEnd,
-        reasonVi: cleanVi,
-        reasonKr: finalKr,
-        selectedEmployeeIds: [...selectedEmployeeIds],
-        customTimes: normalizedCustom,
-      });
+      if (isPrevDayMode && includeTwoConsecutivePrevDays) {
+        const targetDates = [prevDayD2, prevDayD1]; // D-2 trước, D-1 sau (theo thứ tự thời gian)
+        const payloadsToSave: ConfirmableOvertimeBlockPayload[] = [];
+        for (const d of targetDates) {
+          const leaveForDay = buildOnLeaveEmployeeMapForDate(
+            d,
+            activeLeaves,
+            employees
+          );
+          const dupForDay = getAlreadyRecordedIdsForDate(d);
+          const validForDay = selectedEmployeeIds.filter(
+            (id) => !leaveForDay.has(id) && !dupForDay.has(id)
+          );
+          if (validForDay.length > 0) {
+            payloadsToSave.push(
+              await buildPayloadForDate(
+                d,
+                validForDay,
+                normStart,
+                normEnd,
+                cleanVi,
+                finalKr,
+                normalizedCustomReasons
+              )
+            );
+          }
+        }
+        if (payloadsToSave.length === 0) {
+          setErrorMessage(
+            `Tất cả nhân sự đã chọn đều đang nghỉ hoặc đã có lịch trong cả 2 ngày ${formatIsoToDDMM(
+              prevDayD2
+            )} & ${formatIsoToDDMM(prevDayD1)}.`
+          );
+          return;
+        }
+        if (onConfirmMultiple) {
+          await onConfirmMultiple(payloadsToSave);
+        } else {
+          for (const p of payloadsToSave) {
+            await onConfirm(p);
+          }
+        }
+        return;
+      }
+
+      const resolvedDate = overtimeDate || defaultDate || getLocalTodayIsoDate();
+      const freshLeaveMap = buildOnLeaveEmployeeMapForDate(
+        resolvedDate,
+        activeLeaves,
+        employees
+      );
+      const conflictIds = selectedEmployeeIds.filter((id) =>
+        freshLeaveMap.has(id)
+      );
+      if (conflictIds.length > 0) {
+        const conflictSet = new Set(conflictIds);
+        setSelectedEmployeeIds((prev) =>
+          prev.filter((id) => !conflictSet.has(id))
+        );
+        const names = conflictIds
+          .slice(0, 3)
+          .map((id) => employeeMap.get(id)?.fullName || id)
+          .join(', ');
+        setErrorMessage(
+          `Không thể ghi nhận: ${names}${
+            conflictIds.length > 3 ? ` và ${conflictIds.length - 3} người khác` : ''
+          } đang có đơn nghỉ ngày ${formatIsoToDDMMYYYY(resolvedDate)}.`
+        );
+        return;
+      }
+
+      const singlePayload = await buildPayloadForDate(
+        resolvedDate,
+        selectedEmployeeIds,
+        normStart,
+        normEnd,
+        cleanVi,
+        finalKr,
+        normalizedCustomReasons
+      );
+      await onConfirm(singlePayload);
     } catch (err) {
       setErrorMessage(
         err instanceof Error && err.message
@@ -501,7 +767,7 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
         className="max-w-2xl w-full bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden"
       >
         {/* Header */}
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3 bg-slate-50/70 shrink-0">
+        <div className="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 bg-slate-50/70 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="w-7 h-7 rounded-lg bg-blue-100 text-[#14539E] flex items-center justify-center shrink-0">
               <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -511,25 +777,83 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                 id="manual-ot-group-modal-title"
                 className="text-sm font-bold text-slate-900 truncate"
               >
-                Thêm nhóm tăng ca thủ công
+                {presetContext?.label
+                  ? `Đăng ký nhóm: ${presetContext.label}`
+                  : 'Thêm nhóm tăng ca thủ công'}
               </h3>
               <p className="text-[11px] text-slate-500 truncate">
-                Chọn nhân sự, thời gian và lý do để ghi nhận trực tiếp vào phiếu ngày{' '}
-                <strong className="font-mono text-[#14539E]">
-                  {formatIsoToDDMMYYYY(overtimeDate)}
-                </strong>
+                {isPrevDayMode && includeTwoConsecutivePrevDays ? (
+                  <>
+                    Ghi nhận phát sinh cả 2 ngày{' '}
+                    <strong className="font-mono text-[#14539E]">
+                      {formatIsoToDDMM(prevDayD2)} &amp; {formatIsoToDDMM(prevDayD1)}
+                    </strong>{' '}
+                    vào phiếu{' '}
+                    <strong className="font-mono text-slate-700">
+                      {formatIsoToDDMMYYYY(baseShellDate)}
+                    </strong>
+                  </>
+                ) : isPrevDayMode ? (
+                  <>
+                    Ghi nhận phát sinh ngày{' '}
+                    <strong className="font-mono text-[#14539E]">
+                      {formatIsoToDDMM(overtimeDate)}
+                    </strong>{' '}
+                    vào phiếu{' '}
+                    <strong className="font-mono text-slate-700">
+                      {formatIsoToDDMMYYYY(baseShellDate)}
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    Chọn nhân sự, thời gian và lý do để ghi nhận trực tiếp vào phiếu ngày{' '}
+                    <strong className="font-mono text-[#14539E]">
+                      {formatIsoToDDMMYYYY(overtimeDate)}
+                    </strong>
+                  </>
+                )}
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="Đóng cửa sổ thêm nhóm thủ công"
-            disabled={isConfirming}
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 cursor-pointer transition-colors disabled:opacity-40"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {onSwitchMode && (
+              <div
+                role="tablist"
+                aria-label="Chuyển chế độ đăng ký tăng ca"
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 gap-0.5"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={true}
+                  data-testid="modal-switch-manual-btn"
+                  className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#14539E] text-white cursor-pointer whitespace-nowrap"
+                >
+                  Nhập thủ công
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={false}
+                  data-testid="modal-switch-ai-btn"
+                  onClick={() => onSwitchMode('ai_scan')}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 hover:text-[#14539E] hover:bg-slate-50 cursor-pointer whitespace-nowrap"
+                >
+                  Quét ảnh Zalo AI
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              aria-label="Đóng cửa sổ thêm nhóm thủ công"
+              disabled={isConfirming}
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 cursor-pointer transition-colors disabled:opacity-40"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -600,13 +924,73 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                 <input
                   id="manual-group-date-input"
                   type="date"
+                  disabled={isPrevDayMode && includeTwoConsecutivePrevDays}
                   value={overtimeDate}
                   onChange={(e) => setOvertimeDate(e.target.value)}
-                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
+                  className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E] disabled:bg-slate-100 disabled:text-slate-400"
                 />
               </div>
             </div>
           </div>
+
+          {/* Thanh chọn nhanh ngày phát sinh hôm trước (D-1 / D-2 / cả 2 ngày) */}
+          {isPrevDayMode && (
+            <div
+              data-testid="manual-prev-day-bar"
+              className="rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]"
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold text-slate-700">Chọn nhanh ngày trước:</span>
+                <button
+                  type="button"
+                  data-testid="manual-prev-d1-btn"
+                  onClick={() => {
+                    setIncludeTwoConsecutivePrevDays(false);
+                    setOvertimeDate(prevDayD1);
+                  }}
+                  className={`px-2 py-0.5 rounded-md font-mono font-semibold border cursor-pointer transition-colors ${
+                    !includeTwoConsecutivePrevDays && overtimeDate === prevDayD1
+                      ? 'bg-[#14539E] text-white border-[#14539E]'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-[#14539E]'
+                  }`}
+                >
+                  Hôm qua ({formatIsoToDDMM(prevDayD1)})
+                </button>
+                <button
+                  type="button"
+                  data-testid="manual-prev-d2-btn"
+                  onClick={() => {
+                    setIncludeTwoConsecutivePrevDays(false);
+                    setOvertimeDate(prevDayD2);
+                  }}
+                  className={`px-2 py-0.5 rounded-md font-mono font-semibold border cursor-pointer transition-colors ${
+                    !includeTwoConsecutivePrevDays && overtimeDate === prevDayD2
+                      ? 'bg-[#14539E] text-white border-[#14539E]'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-[#14539E]'
+                  }`}
+                >
+                  2 ngày trước ({formatIsoToDDMM(prevDayD2)})
+                </button>
+              </div>
+
+              <label className="inline-flex items-center gap-1.5 font-semibold text-[#14539E] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  data-testid="manual-prev-two-days-checkbox"
+                  checked={includeTwoConsecutivePrevDays}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIncludeTwoConsecutivePrevDays(checked);
+                    if (checked) setOvertimeDate(prevDayD1);
+                  }}
+                  className="w-3.5 h-3.5 rounded border-blue-300 text-[#14539E] focus:ring-[#14539E] cursor-pointer"
+                />
+                <span>
+                  Ghi nhận cả 2 ngày liên tiếp ({formatIsoToDDMM(prevDayD2)} &amp; {formatIsoToDDMM(prevDayD1)})
+                </span>
+              </label>
+            </div>
+          )}
 
           {/* Chọn nhân sự */}
           <div className="space-y-2" ref={pickerRef}>
@@ -629,6 +1013,8 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
                     setSelectedEmployeeIds([]);
                     setCustomTimes({});
                     setEditingTimeEmpId(null);
+                    setCustomReasons({});
+                    setEditingReasonEmpId(null);
                   }}
                   className="text-[11px] font-medium text-slate-500 hover:text-red-600 cursor-pointer"
                 >
@@ -766,105 +1152,226 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
             </div>
 
             {selectedEmployeeIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pt-0.5">
-                {selectedEmployeeIds.map((empId) => {
-                  const emp = employeeMap.get(empId);
-                  if (!emp) return null;
-                  const empStart = customTimes[empId]?.startTime || startTime;
-                  const empEnd = customTimes[empId]?.endTime || endTime;
-                  const isCustom = Boolean(customTimes[empId]);
-                  const isEditing = editingTimeEmpId === empId;
+              <div className="space-y-2 pt-0.5">
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                  {selectedEmployeeIds.map((empId) => {
+                    const emp = employeeMap.get(empId);
+                    if (!emp) return null;
+                    const empStart = customTimes[empId]?.startTime || startTime;
+                    const empEnd = customTimes[empId]?.endTime || endTime;
+                    const isCustom = Boolean(customTimes[empId]);
+                    const isEditing = editingTimeEmpId === empId;
+                    const customReasonEntry = customReasons[empId];
+                    const hasCustomReason = Boolean(
+                      customReasonEntry &&
+                        ((customReasonEntry.reasonVi || '').trim() ||
+                          (customReasonEntry.reasonKr || '').trim())
+                    );
+                    const isEditingReason = editingReasonEmpId === empId;
 
-                  return (
-                    <div
-                      key={empId}
-                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] ${
-                        isCustom
-                          ? 'bg-amber-50 border-amber-300 text-slate-800'
-                          : 'bg-blue-50/75 border-blue-200 text-slate-800'
-                      }`}
-                    >
-                      <span className="font-medium truncate max-w-[140px]">
-                        {emp.fullName}
-                      </span>
-                      {isEditing ? (
-                        <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
-                          <input
-                            type="text"
-                            maxLength={5}
-                            value={empStart}
-                            onChange={(e) =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [empId]: {
-                                  startTime: sanitize24hTimeInput(e.target.value),
-                                  endTime: prev[empId]?.endTime || endTime,
-                                },
-                              }))
-                            }
-                            onBlur={() =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [empId]: {
-                                  startTime: normalize24hTime(empStart, startTime),
-                                  endTime: prev[empId]?.endTime || endTime,
-                                },
-                              }))
-                            }
-                            className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded"
-                          />
-                          <span className="text-[10px] text-slate-400">-</span>
-                          <input
-                            type="text"
-                            maxLength={5}
-                            value={empEnd}
-                            onChange={(e) =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [empId]: {
-                                  startTime: prev[empId]?.startTime || startTime,
-                                  endTime: sanitize24hTimeInput(e.target.value),
-                                },
-                              }))
-                            }
-                            onBlur={() =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [empId]: {
-                                  startTime: prev[empId]?.startTime || startTime,
-                                  endTime: normalize24hTime(empEnd, endTime),
-                                },
-                              }))
-                            }
-                            className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded"
-                          />
+                    return (
+                      <div
+                        key={empId}
+                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] ${
+                          isCustom || hasCustomReason
+                            ? 'bg-amber-50 border-amber-300 text-slate-800'
+                            : 'bg-blue-50/75 border-blue-200 text-slate-800'
+                        }`}
+                      >
+                        <span className="font-medium truncate max-w-[140px]">
+                          {emp.fullName}
+                        </span>
+                        {isEditing ? (
+                          <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
+                            <input
+                              type="text"
+                              maxLength={5}
+                              value={empStart}
+                              onChange={(e) =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [empId]: {
+                                    startTime: sanitize24hTimeInput(e.target.value),
+                                    endTime: prev[empId]?.endTime || endTime,
+                                  },
+                                }))
+                              }
+                              onBlur={() =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [empId]: {
+                                    startTime: normalize24hTime(empStart, startTime),
+                                    endTime: prev[empId]?.endTime || endTime,
+                                  },
+                                }))
+                              }
+                              className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded"
+                            />
+                            <span className="text-[10px] text-slate-400">-</span>
+                            <input
+                              type="text"
+                              maxLength={5}
+                              value={empEnd}
+                              onChange={(e) =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [empId]: {
+                                    startTime: prev[empId]?.startTime || startTime,
+                                    endTime: sanitize24hTimeInput(e.target.value),
+                                  },
+                                }))
+                              }
+                              onBlur={() =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [empId]: {
+                                    startTime: prev[empId]?.startTime || startTime,
+                                    endTime: normalize24hTime(empEnd, endTime),
+                                  },
+                                }))
+                              }
+                              className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setEditingTimeEmpId(null)}
+                              className="p-0.5 text-emerald-600 cursor-pointer"
+                            >
+                              <Check className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => setEditingTimeEmpId(null)}
-                            className="p-0.5 text-emerald-600 cursor-pointer"
+                            onClick={() => setEditingTimeEmpId(empId)}
+                            className="text-[10px] font-mono px-1 py-0.5 rounded border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] cursor-pointer"
                           >
-                            <Check className="w-2.5 h-2.5" />
+                            {empStart}-{empEnd}
                           </button>
-                        </div>
-                      ) : (
+                        )}
                         <button
                           type="button"
-                          onClick={() => setEditingTimeEmpId(empId)}
-                          className="text-[10px] font-mono px-1 py-0.5 rounded border border-slate-200 bg-white text-slate-600 hover:border-[#14539E] cursor-pointer"
+                          title="Thêm lý do tăng ca riêng cho người này"
+                          aria-label={`Thêm lý do tăng ca riêng cho ${emp.fullName}`}
+                          data-testid={`manual-custom-reason-btn-${emp.employeeCode || emp.id}`}
+                          onClick={() =>
+                            setEditingReasonEmpId((prev) =>
+                              prev === empId ? null : empId
+                            )
+                          }
+                          className={`p-0.5 rounded border cursor-pointer transition-colors ${
+                            hasCustomReason || isEditingReason
+                              ? 'border-amber-400 bg-amber-100 text-amber-800'
+                              : 'border-transparent text-slate-400 hover:text-[#14539E] hover:bg-white'
+                          }`}
                         >
-                          {empStart}-{empEnd}
+                          <FileEdit className="w-3 h-3" />
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleEmployee(empId)}
-                        className="p-0.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                        <button
+                          type="button"
+                          aria-label={`Bỏ chọn ${emp.fullName}`}
+                          onClick={() => handleToggleEmployee(empId)}
+                          className="p-0.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {editingReasonEmpId &&
+                  employeeMap.get(editingReasonEmpId) &&
+                  selectedEmployeeIds.includes(editingReasonEmpId) && (() => {
+                    const targetEmp = employeeMap.get(editingReasonEmpId)!;
+                    const entry = customReasons[editingReasonEmpId] || {
+                      reasonVi: '',
+                      reasonKr: '',
+                    };
+                    const hasEntry = Boolean(
+                      entry.reasonVi.trim() || entry.reasonKr.trim()
+                    );
+                    return (
+                      <div
+                        data-testid="manual-custom-reason-editor"
+                        className="rounded-xl border border-amber-300 bg-amber-50/70 p-2.5 space-y-1.5"
                       >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  );
-                })}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold text-amber-900">
+                            Lý do tăng ca riêng — {targetEmp.fullName}{' '}
+                            <span className="font-normal text-amber-700">
+                              (tự động đẩy xuống cuối nhóm &amp; tách ô riêng)
+                            </span>
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={translatingCustomEmpId === editingReasonEmpId}
+                              onClick={() =>
+                                void handleTranslateCustomReason(editingReasonEmpId)
+                              }
+                              className="text-[10px] font-semibold text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer disabled:opacity-50"
+                            >
+                              {translatingCustomEmpId === editingReasonEmpId ? (
+                                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="w-2.5 h-2.5" />
+                              )}
+                              <span>Dịch gợi ý</span>
+                            </button>
+                            {hasEntry && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleClearCustomReason(editingReasonEmpId)
+                                }
+                                className="text-[10px] font-semibold text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Xóa lý do riêng
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditingReasonEmpId(null)}
+                              className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+                            >
+                              Thu gọn
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            data-testid="manual-custom-reason-vi-input"
+                            value={entry.reasonVi}
+                            onChange={(e) =>
+                              handleUpdateCustomReason(
+                                editingReasonEmpId,
+                                'reasonVi',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Lý do riêng (Tiếng Việt)..."
+                            className="w-full h-7 px-2 text-xs rounded-lg border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
+                          />
+                          <input
+                            type="text"
+                            data-testid="manual-custom-reason-kr-input"
+                            value={entry.reasonKr}
+                            onChange={(e) =>
+                              handleUpdateCustomReason(
+                                editingReasonEmpId,
+                                'reasonKr',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Lý do riêng (Tiếng Hàn)..."
+                            className="w-full h-7 px-2 text-xs rounded-lg border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
               </div>
             )}
           </div>
@@ -1087,7 +1594,11 @@ export const ManualOvertimeGroupModal: React.FC<ManualOvertimeGroupModalProps> =
               ) : (
                 <Check className="w-3.5 h-3.5 stroke-[2.5]" />
               )}
-              <span>Xác nhận &amp; Ghi nhận nhóm</span>
+              <span>
+                {isPrevDayMode && includeTwoConsecutivePrevDays
+                  ? 'Ghi nhận 2 ngày liên tiếp'
+                  : 'Xác nhận & Ghi nhận nhóm'}
+              </span>
             </button>
           </div>
         </div>

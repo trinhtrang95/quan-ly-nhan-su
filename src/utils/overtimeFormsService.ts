@@ -45,6 +45,8 @@ export interface OvertimeParticipantInput {
   startTime: string;
   endTime: string;
   totalHours?: number;
+  reasonVi?: string;
+  reasonKr?: string;
 }
 
 export interface OvertimeBlockInput {
@@ -364,9 +366,326 @@ export function formatOvertimeFormCodeDisplay(formCode: string): string {
   return clean.replace(/-DEL-\d+$/i, '').toUpperCase();
 }
 
+export type OvertimeStandardGroupId =
+  | 'prev_day'
+  | 'production_duty'
+  | 'bao_tri'
+  | 'jig_auto_2'
+  | 'auto_1'
+  | 'pe'
+  | 'st'
+  | 'iot'
+  | 'van_phong';
+
+export interface OvertimeStandardGroupDef {
+  order: number;
+  id: OvertimeStandardGroupId;
+  label: string;
+  presetType: 'prev_day' | 'production_duty' | 'group';
+  targetGroupName?: string;
+}
+
+export const OVERTIME_STANDARD_GROUPS: readonly OvertimeStandardGroupDef[] = [
+  { order: 1, id: 'prev_day', label: 'Phát sinh hôm trước', presetType: 'prev_day' },
+  { order: 2, id: 'production_duty', label: 'Trực sản xuất', presetType: 'production_duty' },
+  { order: 3, id: 'bao_tri', label: 'Bảo trì', presetType: 'group', targetGroupName: 'Bảo trì' },
+  { order: 4, id: 'jig_auto_2', label: 'JIG/AUTO 2', presetType: 'group', targetGroupName: 'JIG/AUTO 2' },
+  { order: 5, id: 'auto_1', label: 'AUTO 1', presetType: 'group', targetGroupName: 'AUTO 1' },
+  { order: 6, id: 'pe', label: 'PE', presetType: 'group', targetGroupName: 'PE' },
+  { order: 7, id: 'st', label: 'ST', presetType: 'group', targetGroupName: 'ST' },
+  { order: 8, id: 'iot', label: 'IOT', presetType: 'group', targetGroupName: 'IOT' },
+  { order: 9, id: 'van_phong', label: 'Văn phòng', presetType: 'group', targetGroupName: 'Văn phòng' },
+] as const;
+
+export interface OvertimeStandardGroupStatus {
+  id: OvertimeStandardGroupId;
+  order: number;
+  label: string;
+  isRegistered: boolean;
+  count: number;
+  badgeText: string;
+  matchingBlockIndices: number[];
+}
+
+export function shiftIsoDateDays(isoDate: string, deltaDays: number): string {
+  const m = (isoDate || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return isoDate;
+  const dt = new Date(
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  );
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  const y = dt.getUTCFullYear();
+  const mo = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
+  return `${y}-${mo}-${d}`;
+}
+
+export function normalizeOvertimeGroupKey(name?: string | null): string {
+  return normalizeSearchText(name || '')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ');
+}
+
+export function isProductionDutyReason(reasonVi?: string | null): boolean {
+  const clean = (reasonVi || '').trim();
+  if (!clean) return false;
+  if (/trực\s*sản\s*xuất/i.test(clean)) return true;
+  return normalizeSearchText(clean).includes('truc san xuat');
+}
+
+export function hasParticipantCustomReason(
+  participant: Pick<OvertimeParticipantInput, 'reasonVi' | 'reasonKr'>,
+  blockReasonVi: string,
+  blockReasonKr: string
+): boolean {
+  const pVi = (participant.reasonVi || '').trim();
+  const pKr = (participant.reasonKr || '').trim();
+  if (!pVi && !pKr) return false;
+  const bVi = (blockReasonVi || '').trim();
+  const bKr = (blockReasonKr || '').trim();
+  return pVi !== bVi || (Boolean(pKr) && pKr !== bKr);
+}
+
+/**
+ * Pure helper: stably partitions participants in a block so all shared-reason
+ * participants come first (merged cell) and participants with individual custom
+ * reasons are pushed to the bottom (separate unmerged cells).
+ */
+export function sortParticipantsByReasonScope<
+  T extends Pick<OvertimeParticipantInput, 'employeeId' | 'reasonVi' | 'reasonKr'>
+>(
+  participants: T[],
+  blockReasonVi: string,
+  blockReasonKr: string
+): T[] {
+  if (!Array.isArray(participants) || participants.length <= 1) {
+    return Array.isArray(participants) ? [...participants] : [];
+  }
+  const shared: T[] = [];
+  const custom: T[] = [];
+  for (const p of participants) {
+    if (hasParticipantCustomReason(p, blockReasonVi, blockReasonKr)) {
+      custom.push(p);
+    } else {
+      shared.push(p);
+    }
+  }
+  return [...shared, ...custom];
+}
+
+const STANDARD_GROUP_ORDER_MAP = new Map<string, number>(
+  OVERTIME_STANDARD_GROUPS.filter((g) => g.targetGroupName).map((g) => [
+    normalizeOvertimeGroupKey(g.targetGroupName),
+    g.order,
+  ])
+);
+
+function resolveBlockStandardOrderTier(
+  block: {
+    overtimeDate?: string;
+    reasonVi: string;
+    selectedEmployeeIds: string[];
+    participants?: Array<{ employeeId: string }>;
+  },
+  shellDate: string,
+  employeeMap: Map<string, Employee>
+): { tier: number; dateKey: string } {
+  const blockDate = (block.overtimeDate || '').trim().slice(0, 10);
+  if (blockDate && shellDate && blockDate < shellDate) {
+    return { tier: 1, dateKey: blockDate };
+  }
+  if (isProductionDutyReason(block.reasonVi)) {
+    return { tier: 2, dateKey: blockDate || shellDate };
+  }
+
+  const empIds =
+    Array.isArray(block.participants) && block.participants.length > 0
+      ? block.participants.map((p) => p.employeeId)
+      : block.selectedEmployeeIds || [];
+
+  let bestOrder = 99;
+  for (const empId of empIds) {
+    const dept = employeeMap.get(empId)?.department;
+    const matchedOrder = STANDARD_GROUP_ORDER_MAP.get(
+      normalizeOvertimeGroupKey(dept)
+    );
+    if (matchedOrder !== undefined && matchedOrder < bestOrder) {
+      bestOrder = matchedOrder;
+    }
+  }
+
+  return { tier: bestOrder, dateKey: blockDate || shellDate };
+}
+
+/**
+ * Pure helper: auto-sorts overtime blocks according to standard 1 -> 9 priority:
+ * #1 Phát sinh hôm trước (chronological D-2 -> D-1), #2 Trực sản xuất,
+ * #3 Bảo trì, #4 JIG/AUTO 2, #5 AUTO 1, #6 PE, #7 ST, #8 IOT, #9 Văn phòng, #10 Others.
+ */
+export function sortOvertimeBlocksByStandardOrder<
+  T extends {
+    overtimeDate?: string;
+    reasonVi: string;
+    selectedEmployeeIds: string[];
+    participants?: Array<{ employeeId: string }>;
+  }
+>(
+  blocks: T[],
+  shellOvertimeDate: string,
+  employeeMap: Map<string, Employee>
+): T[] {
+  if (!Array.isArray(blocks) || blocks.length <= 1) {
+    return Array.isArray(blocks) ? [...blocks] : [];
+  }
+  const cleanShellDate = (shellOvertimeDate || '').trim().slice(0, 10);
+  return blocks
+    .map((block, index) => ({
+      block,
+      index,
+      ...resolveBlockStandardOrderTier(block, cleanShellDate, employeeMap),
+    }))
+    .sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.tier === 1 && a.dateKey !== b.dateKey) {
+        return a.dateKey.localeCompare(b.dateKey);
+      }
+      return a.index - b.index;
+    })
+    .map((entry) => entry.block);
+}
+
+/**
+ * Pure helper: evaluates registration status & count badges for all 9 standard overtime groups
+ * against the active form's blocks and target shell date.
+ */
+export function analyzeOvertimeFormGroupStatus(
+  blocks: OvertimeBlockInput[],
+  shellOvertimeDate: string,
+  employeeMap: Map<string, Employee>
+): Record<OvertimeStandardGroupId, OvertimeStandardGroupStatus> {
+  const cleanShellDate = (shellOvertimeDate || '').trim().slice(0, 10);
+  const safeBlocks = Array.isArray(blocks) ? blocks : [];
+
+  const prevDayDates = new Set<string>();
+  const prevDayBlockIndices: number[] = [];
+
+  const prodDutyEmpIds = new Set<string>();
+  const prodDutyBlockIndices: number[] = [];
+
+  const groupEmpSets = new Map<OvertimeStandardGroupId, Set<string>>();
+  const groupBlockIndices = new Map<OvertimeStandardGroupId, number[]>();
+
+  for (const def of OVERTIME_STANDARD_GROUPS) {
+    if (def.presetType === 'group') {
+      groupEmpSets.set(def.id, new Set<string>());
+      groupBlockIndices.set(def.id, []);
+    }
+  }
+
+  safeBlocks.forEach((block, idx) => {
+    const blockDate = (block.overtimeDate || '').trim().slice(0, 10);
+    const isPrevDay = Boolean(
+      blockDate && cleanShellDate && blockDate < cleanShellDate
+    );
+    const isProdDuty = isProductionDutyReason(block.reasonVi);
+    const empIds = Array.from(
+      new Set(
+        (Array.isArray(block.participants) && block.participants.length > 0
+          ? block.participants.map((p) => p.employeeId)
+          : block.selectedEmployeeIds || []
+        ).filter(Boolean)
+      )
+    );
+
+    if (isPrevDay) {
+      prevDayDates.add(blockDate);
+      prevDayBlockIndices.push(idx);
+    }
+
+    if (isProdDuty) {
+      prodDutyBlockIndices.push(idx);
+      for (const empId of empIds) {
+        prodDutyEmpIds.add(empId);
+      }
+    }
+
+    // Standard groups #3 -> #9 reflect current-date non-production-duty groups
+    const isCurrentDay = !cleanShellDate || !blockDate || blockDate === cleanShellDate;
+    if (isCurrentDay && !isProdDuty) {
+      const matchedGroupsInBlock = new Set<OvertimeStandardGroupId>();
+      for (const empId of empIds) {
+        const deptKey = normalizeOvertimeGroupKey(
+          employeeMap.get(empId)?.department
+        );
+        if (!deptKey) continue;
+        for (const def of OVERTIME_STANDARD_GROUPS) {
+          if (
+            def.presetType === 'group' &&
+            def.targetGroupName &&
+            normalizeOvertimeGroupKey(def.targetGroupName) === deptKey
+          ) {
+            groupEmpSets.get(def.id)!.add(empId);
+            matchedGroupsInBlock.add(def.id);
+          }
+        }
+      }
+      for (const gid of matchedGroupsInBlock) {
+        groupBlockIndices.get(gid)!.push(idx);
+      }
+    }
+  });
+
+  const result = {} as Record<OvertimeStandardGroupId, OvertimeStandardGroupStatus>;
+
+  for (const def of OVERTIME_STANDARD_GROUPS) {
+    if (def.id === 'prev_day') {
+      const count = prevDayDates.size;
+      const isRegistered = prevDayBlockIndices.length > 0;
+      result.prev_day = {
+        id: 'prev_day',
+        order: def.order,
+        label: def.label,
+        isRegistered,
+        count,
+        badgeText: isRegistered ? `${count} ngày` : '',
+        matchingBlockIndices: prevDayBlockIndices,
+      };
+    } else if (def.id === 'production_duty') {
+      const count = prodDutyEmpIds.size;
+      const isRegistered = prodDutyBlockIndices.length > 0;
+      result.production_duty = {
+        id: 'production_duty',
+        order: def.order,
+        label: def.label,
+        isRegistered,
+        count,
+        badgeText: isRegistered && count > 0 ? `${count} người` : '',
+        matchingBlockIndices: prodDutyBlockIndices,
+      };
+    } else {
+      const empSet = groupEmpSets.get(def.id)!;
+      const blockIndices = groupBlockIndices.get(def.id)!;
+      const count = empSet.size;
+      const isRegistered = count > 0;
+      result[def.id] = {
+        id: def.id,
+        order: def.order,
+        label: def.label,
+        isRegistered,
+        count,
+        badgeText: isRegistered ? `${count} người` : '',
+        matchingBlockIndices: blockIndices,
+      };
+    }
+  }
+
+  return result;
+}
+
 /**
  * Pure helper: converts UI task blocks into relational `overtime_form_items` rows,
- * preserving block_order, item_order, per-employee start/end times, and bilingual reasons.
+ * preserving block_order, item_order, per-employee start/end times, and per-employee reasons
+ * (sorting shared-reason participants first and custom-reason participants to the bottom).
  */
 export function buildOvertimeFormItemsFromBlocks(
   formId: string,
@@ -379,7 +698,7 @@ export function buildOvertimeFormItemsFromBlocks(
 
   blocks.forEach((block, blockIndex) => {
     const blockDate = block.overtimeDate || fallbackDate;
-    const participants: OvertimeParticipantInput[] =
+    const rawParticipants: OvertimeParticipantInput[] =
       Array.isArray(block.participants) && block.participants.length > 0
         ? block.participants
         : block.selectedEmployeeIds.map((id) => ({
@@ -387,6 +706,12 @@ export function buildOvertimeFormItemsFromBlocks(
             startTime: block.startTime || '16:10',
             endTime: block.endTime || '20:10',
           }));
+
+    const participants = sortParticipantsByReasonScope(
+      rawParticipants,
+      block.reasonVi || '',
+      block.reasonKr || ''
+    );
 
     participants.forEach((participant, itemIndex) => {
       const emp = empMap.get(participant.employeeId);
@@ -398,6 +723,13 @@ export function buildOvertimeFormItemsFromBlocks(
           ? Number(Math.max(0, participant.totalHours).toFixed(2))
           : calculateHoursBetween(startTime, endTime);
 
+      const resolvedReasonVi =
+        (participant.reasonVi || '').trim() || (block.reasonVi || '').trim();
+      const resolvedReasonKr =
+        (participant.reasonVi || '').trim() || (participant.reasonKr || '').trim()
+          ? (participant.reasonKr || '').trim()
+          : (block.reasonKr || '').trim();
+
       items.push({
         id: `${formId}-b${blockIndex}-i${itemIndex}`,
         form_id: formId,
@@ -408,8 +740,8 @@ export function buildOvertimeFormItemsFromBlocks(
         employee_id: participant.employeeId,
         employee_code: emp?.employeeCode || '',
         employee_name: emp?.fullName || 'Nhân sự',
-        reason_vi: (block.reasonVi || '').trim(),
-        reason_kr: (block.reasonKr || '').trim(),
+        reason_vi: resolvedReasonVi,
+        reason_kr: resolvedReasonKr,
         start_time: startTime,
         end_time: endTime,
         total_hours: totalHours,
@@ -423,7 +755,7 @@ export function buildOvertimeFormItemsFromBlocks(
 
 /**
  * Pure helper: reconstructs `OvertimeBlockInput[]` from flat `overtime_form_items`
- * so the saved form can be re-exported directly to Excel via `overtimeExportService`.
+ * preserving custom participant times and individual custom reasons.
  */
 export function reconstructBlocksFromItems(
   items: OvertimeFormItemRecord[]
@@ -457,12 +789,19 @@ export function reconstructBlocksFromItems(
       orderedKeys.push(key);
     }
 
+    const isCustomReason =
+      (item.reason_vi || '').trim() !== (block.reasonVi || '').trim() ||
+      (item.reason_kr || '').trim() !== (block.reasonKr || '').trim();
+
     block.selectedEmployeeIds.push(item.employee_id);
     block.participants.push({
       employeeId: item.employee_id,
       startTime: item.start_time,
       endTime: item.end_time,
       totalHours: item.total_hours,
+      ...(isCustomReason
+        ? { reasonVi: item.reason_vi, reasonKr: item.reason_kr }
+        : {}),
     });
   }
 
@@ -634,12 +973,23 @@ export function buildMergedEmployeesForExport(
   return [...employees, ...extra];
 }
 
+export interface BuildPrintableGroupsOptions {
+  employees?: Employee[];
+  shellOvertimeDate?: string;
+  autoSortStandardOrder?: boolean;
+}
+
 /**
  * Pure helper: transforms saved `overtime_form_items` into multi-date printable A4 groups
- * matching the TV-PSGC2022 form structure (No resets to 1 per date, merged reason per block).
+ * matching the TV-PSGC2022 form structure:
+ * - Chronological date order (D-2 -> D-1 -> D)
+ * - Optional standard 1..9 block ordering within each date
+ * - Merged reason cell for shared-reason rows at top, split individual cells (rowSpan=1)
+ *   for custom-reason rows at the bottom of a block.
  */
 export function buildPrintableDateGroupsFromItems(
-  items: OvertimeFormItemRecord[]
+  items: OvertimeFormItemRecord[],
+  options?: BuildPrintableGroupsOptions
 ): PrintableOvertimeDateGroup[] {
   const activeItems = items
     .filter((item) => !item.deleted_at)
@@ -666,41 +1016,93 @@ export function buildPrintableDateGroupsFromItems(
     dateBlocks.get(item.block_order)!.push(item);
   }
 
+  const empMap =
+    options?.employees && options.employees.length > 0
+      ? new Map(options.employees.map((e) => [e.id, e]))
+      : null;
+
+  const sortedDateKeys = Array.from(blocksByDate.keys()).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
   const result: PrintableOvertimeDateGroup[] = [];
 
-  blocksByDate.forEach((blockMap, dateKey) => {
+  for (const dateKey of sortedDateKeys) {
+    const blockMap = blocksByDate.get(dateKey)!;
+    let blockEntries = Array.from(blockMap.entries()).map(
+      ([blockOrder, blockItems]) => ({
+        blockOrder,
+        blockItems,
+        overtimeDate: dateKey,
+        reasonVi: blockItems[0]?.reason_vi || '',
+        selectedEmployeeIds: blockItems.map((i) => i.employee_id),
+      })
+    );
+
+    if (options?.autoSortStandardOrder && empMap && blockEntries.length > 1) {
+      blockEntries = sortOvertimeBlocksByStandardOrder(
+        blockEntries,
+        options.shellOvertimeDate || dateKey,
+        empMap
+      );
+    }
+
     let runningNo = 1;
     const groupedBlocks: PrintableOvertimeDateGroup['blocks'] = [];
 
-    blockMap.forEach((blockItems, blockOrder) => {
+    for (const entry of blockEntries) {
+      const { blockOrder, blockItems } = entry;
       const first = blockItems[0];
-      const combinedReason = buildCombinedReasonTextLocal(
-        first?.reason_vi || '',
-        first?.reason_kr || ''
-      );
-      const rows: PrintableOvertimeRow[] = blockItems.map((item, idx) => ({
-        no: runningNo++,
-        fullName: item.employee_name || 'Nhân sự',
-        employeeCode: item.employee_code || '',
-        isFirstInBlock: idx === 0,
-        rowSpan: blockItems.length,
-        combinedReason,
-        startTimeFormatted: formatTimeToFormStyleLocal(item.start_time),
-        endTimeFormatted: formatTimeToFormStyleLocal(item.end_time),
-      }));
+      const baseVi = (first?.reason_vi || '').trim();
+      const baseKr = (first?.reason_kr || '').trim();
+
+      // Re-partition just in case legacy items weren't pre-sorted
+      const sharedItems: OvertimeFormItemRecord[] = [];
+      const customItems: OvertimeFormItemRecord[] = [];
+      for (const item of blockItems) {
+        const iVi = (item.reason_vi || '').trim();
+        const iKr = (item.reason_kr || '').trim();
+        if (iVi === baseVi && iKr === baseKr) {
+          sharedItems.push(item);
+        } else {
+          customItems.push(item);
+        }
+      }
+      const orderedBlockItems = [...sharedItems, ...customItems];
+      const sharedCount = sharedItems.length;
+      const sharedCombinedReason = buildCombinedReasonTextLocal(baseVi, baseKr);
+
+      const rows: PrintableOvertimeRow[] = orderedBlockItems.map((item, idx) => {
+        const isSharedPart = idx < sharedCount;
+        return {
+          no: runningNo++,
+          fullName: item.employee_name || 'Nhân sự',
+          employeeCode: item.employee_code || '',
+          isFirstInBlock: isSharedPart ? idx === 0 : true,
+          rowSpan: isSharedPart ? sharedCount : 1,
+          combinedReason: isSharedPart
+            ? sharedCombinedReason
+            : buildCombinedReasonTextLocal(
+                item.reason_vi || '',
+                item.reason_kr || ''
+              ),
+          startTimeFormatted: formatTimeToFormStyleLocal(item.start_time),
+          endTimeFormatted: formatTimeToFormStyleLocal(item.end_time),
+        };
+      });
 
       groupedBlocks.push({
         blockId: `${dateKey}-block-${blockOrder}`,
         rows,
       });
-    });
+    }
 
     result.push({
       date: dateKey,
       formattedDate: formatDateToFormStyleLocal(dateKey),
       blocks: groupedBlocks,
     });
-  });
+  }
 
   return result;
 }

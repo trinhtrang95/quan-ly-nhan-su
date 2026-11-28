@@ -5,6 +5,7 @@ import {
   Camera,
   Check,
   Clock,
+  FileEdit,
   Loader2,
   Plus,
   Search,
@@ -22,6 +23,7 @@ import {
   getLocalTodayIsoDate,
   OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
+  shiftIsoDateDays,
 } from '../../../services/hrService';
 import {
   parseOvertimeScheduleImage,
@@ -37,6 +39,12 @@ import {
 } from '../../../utils/workScheduleLogic';
 import { OvertimeTaskBlock } from './CreateOvertimeForm';
 
+export interface OvertimeModalPresetContext {
+  presetType: 'prev_day' | 'production_duty' | 'group' | 'custom';
+  targetGroupName?: string;
+  label?: string;
+}
+
 export interface ModalOvertimeBlockDraft {
   id: string;
   overtimeDate: string;
@@ -47,6 +55,7 @@ export interface ModalOvertimeBlockDraft {
   isKrManuallyEdited: boolean;
   selectedEmployeeIds: string[];
   customTimes: Record<string, { startTime: string; endTime: string }>;
+  customReasons: Record<string, { reasonVi: string; reasonKr: string }>;
   unmatchedNames: string[];
   excludedOnLeaveNames: string[];
   excludedAlreadyRecordedNames: string[];
@@ -60,6 +69,7 @@ export interface ConfirmableOvertimeBlockPayload {
   reasonKr: string;
   selectedEmployeeIds: string[];
   customTimes: Record<string, { startTime: string; endTime: string }>;
+  customReasons?: Record<string, { reasonVi: string; reasonKr: string }>;
 }
 
 export interface ZaloScheduleScanModalProps {
@@ -70,6 +80,8 @@ export interface ZaloScheduleScanModalProps {
   leaveRecords: OvertimeLeaveCheckEntry[];
   existingPreviewBlocks: OvertimeTaskBlock[];
   defaultDate: string;
+  presetContext?: OvertimeModalPresetContext | null;
+  onSwitchMode?: (mode: 'manual' | 'ai_scan') => void;
   translateMultilineKorean: (
     reasonVi: string,
     glossaryEntries: OvertimeGlossaryEntry[]
@@ -80,17 +92,28 @@ export interface ZaloScheduleScanModalProps {
   onConfirmAllBlocks?: (payloads: ConfirmableOvertimeBlockPayload[]) => Promise<void>;
 }
 
-function createEmptyModalDraft(defaultDate: string): ModalOvertimeBlockDraft {
+function createEmptyModalDraft(
+  defaultDate: string,
+  presetContext?: OvertimeModalPresetContext | null
+): ModalOvertimeBlockDraft {
+  const baseDate = defaultDate || getLocalTodayIsoDate();
+  const initialDate =
+    presetContext?.presetType === 'prev_day'
+      ? shiftIsoDateDays(baseDate, -1)
+      : baseDate;
+  const isProdDuty = presetContext?.presetType === 'production_duty';
+
   return {
     id: `modal-block-${Date.now()}`,
-    overtimeDate: defaultDate || getLocalTodayIsoDate(),
+    overtimeDate: initialDate,
     startTime: '16:10',
     endTime: '18:10',
-    reasonVi: '',
-    reasonKr: '',
+    reasonVi: isProdDuty ? 'Trực sản xuất' : '',
+    reasonKr: isProdDuty ? '생산 당직' : '',
     isKrManuallyEdited: false,
     selectedEmployeeIds: [],
     customTimes: {},
+    customReasons: {},
     unmatchedNames: [],
     excludedOnLeaveNames: [],
     excludedAlreadyRecordedNames: [],
@@ -111,6 +134,7 @@ function mapPreparedToModalDraft(
     isKrManuallyEdited: !block.usedGlossary && Boolean(block.reasonKr.trim()),
     selectedEmployeeIds: [...block.selectedEmployeeIds],
     customTimes: { ...block.customTimes },
+    customReasons: {},
     unmatchedNames: [...block.unmatchedNames],
     excludedOnLeaveNames: [...block.excludedOnLeaveNames],
     excludedAlreadyRecordedNames: [...block.excludedAlreadyRecordedNames],
@@ -125,6 +149,8 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
   leaveRecords,
   existingPreviewBlocks,
   defaultDate,
+  presetContext = null,
+  onSwitchMode,
   translateMultilineKorean,
   onLeaveRecordsRefreshed,
   onParseScheduleImage,
@@ -143,13 +169,15 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [blocks, setBlocks] = useState<ModalOvertimeBlockDraft[]>(() => [
-    createEmptyModalDraft(defaultDate),
+    createEmptyModalDraft(defaultDate, presetContext),
   ]);
   const [activeBlockIdx, setActiveBlockIdx] = useState(0);
   const [hasScannedResult, setHasScannedResult] = useState(false);
 
   const [empAddQuery, setEmpAddQuery] = useState('');
   const [isAddDropdownOpen, setIsAddDropdownOpen] = useState(false);
+  const [editingReasonEmpId, setEditingReasonEmpId] = useState<string | null>(null);
+  const [translatingCustomEmpId, setTranslatingCustomEmpId] = useState<string | null>(null);
 
   const employeeMap = useMemo(
     () => new Map(employees.map((e) => [e.id, e])),
@@ -166,12 +194,14 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
     setPreviewImageUrl(null);
     setIsImageZoomed(false);
     setErrorMessage(null);
-    setBlocks([createEmptyModalDraft(defaultDate)]);
+    setBlocks([createEmptyModalDraft(defaultDate, presetContext)]);
     setActiveBlockIdx(0);
     setHasScannedResult(false);
     setEmpAddQuery('');
     setIsAddDropdownOpen(false);
-  }, [isOpen, defaultDate]);
+    setEditingReasonEmpId(null);
+    setTranslatingCustomEmpId(null);
+  }, [isOpen, defaultDate, presetContext]);
 
   useEffect(() => {
     if (!isAddDropdownOpen) return;
@@ -436,14 +466,19 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
         }
       }
       const nextCustom = { ...prev.customTimes };
+      const nextCustomReasons = { ...prev.customReasons };
       for (const id of prev.selectedEmployeeIds) {
-        if (!validIds.includes(id)) delete nextCustom[id];
+        if (!validIds.includes(id)) {
+          delete nextCustom[id];
+          delete nextCustomReasons[id];
+        }
       }
       return {
         ...prev,
         overtimeDate: nextDate,
         selectedEmployeeIds: validIds,
         customTimes: nextCustom,
+        customReasons: nextCustomReasons,
         excludedOnLeaveNames: newExcludedLeave.length > 0 ? newExcludedLeave : prev.excludedOnLeaveNames,
         excludedAlreadyRecordedNames: newExcludedDup.length > 0 ? newExcludedDup : prev.excludedAlreadyRecordedNames,
       };
@@ -459,10 +494,16 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
       if (exists) {
         const nextCustom = { ...prev.customTimes };
         delete nextCustom[empId];
+        const nextCustomReasons = { ...prev.customReasons };
+        delete nextCustomReasons[empId];
+        if (editingReasonEmpId === empId) {
+          setEditingReasonEmpId(null);
+        }
         return {
           ...prev,
           selectedEmployeeIds: prev.selectedEmployeeIds.filter((id) => id !== empId),
           customTimes: nextCustom,
+          customReasons: nextCustomReasons,
         };
       }
       return {
@@ -470,6 +511,58 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
         selectedEmployeeIds: [...prev.selectedEmployeeIds, empId],
       };
     });
+  };
+
+  const handleUpdateParticipantCustomReason = (
+    empId: string,
+    field: 'reasonVi' | 'reasonKr',
+    value: string
+  ) => {
+    updateActiveBlock((prev) => {
+      const existing = prev.customReasons[empId] || {
+        reasonVi: '',
+        reasonKr: '',
+      };
+      const nextEntry = {
+        ...existing,
+        [field]: value,
+      };
+      const nextMap = { ...prev.customReasons };
+      nextMap[empId] = nextEntry;
+      return { ...prev, customReasons: nextMap };
+    });
+  };
+
+  const handleClearParticipantCustomReason = (empId: string) => {
+    updateActiveBlock((prev) => {
+      const nextMap = { ...prev.customReasons };
+      delete nextMap[empId];
+      return { ...prev, customReasons: nextMap };
+    });
+    if (editingReasonEmpId === empId) {
+      setEditingReasonEmpId(null);
+    }
+  };
+
+  const handleTranslateParticipantCustomReason = async (empId: string) => {
+    const customVi = (activeBlock?.customReasons[empId]?.reasonVi || '').trim();
+    if (!customVi) return;
+    setTranslatingCustomEmpId(empId);
+    try {
+      const translated = await translateMultilineKorean(customVi, glossaryEntries);
+      updateActiveBlock((prev) => ({
+        ...prev,
+        customReasons: {
+          ...prev.customReasons,
+          [empId]: {
+            reasonVi: prev.customReasons[empId]?.reasonVi || customVi,
+            reasonKr: translated,
+          },
+        },
+      }));
+    } finally {
+      setTranslatingCustomEmpId((prev) => (prev === empId ? null : prev));
+    }
   };
 
   const handleUpdateParticipantTime = (
@@ -541,13 +634,30 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
       : await translateMultilineKorean(cleanReasonVi, glossaryEntries);
 
     const normalizedCustomTimes: Record<string, { startTime: string; endTime: string }> = {};
+    const normalizedCustomReasons: Record<string, { reasonVi: string; reasonKr: string }> = {};
     for (const empId of draft.selectedEmployeeIds) {
       const c = draft.customTimes[empId];
-      if (!c) continue;
-      const pStart = normalize24hTime(c.startTime, normStart);
-      const pEnd = normalize24hTime(c.endTime, normEnd);
-      if (pStart !== normStart || pEnd !== normEnd) {
-        normalizedCustomTimes[empId] = { startTime: pStart, endTime: pEnd };
+      if (c) {
+        const pStart = normalize24hTime(c.startTime, normStart);
+        const pEnd = normalize24hTime(c.endTime, normEnd);
+        if (pStart !== normStart || pEnd !== normEnd) {
+          normalizedCustomTimes[empId] = { startTime: pStart, endTime: pEnd };
+        }
+      }
+
+      const r = draft.customReasons[empId];
+      if (r) {
+        const rVi = (r.reasonVi || '').trim();
+        let rKr = (r.reasonKr || '').trim();
+        if (rVi && !rKr) {
+          rKr = (await translateMultilineKorean(rVi, glossaryEntries)).trim();
+        }
+        if ((rVi || rKr) && (rVi !== cleanReasonVi || (rKr && rKr !== finalKr))) {
+          normalizedCustomReasons[empId] = {
+            reasonVi: rVi || cleanReasonVi,
+            reasonKr: rKr,
+          };
+        }
       }
     }
 
@@ -559,6 +669,7 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
       reasonKr: finalKr,
       selectedEmployeeIds: [...draft.selectedEmployeeIds],
       customTimes: normalizedCustomTimes,
+      customReasons: normalizedCustomReasons,
     };
   };
 
@@ -617,7 +728,7 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
         className="max-w-3xl w-full bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
       >
         {/* HEADER */}
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3 bg-slate-50/70 shrink-0">
+        <div className="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 bg-slate-50/70 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="w-7 h-7 rounded-lg bg-blue-100 text-[#14539E] flex items-center justify-center shrink-0">
               <Camera className="w-4 h-4" />
@@ -627,22 +738,54 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
                 id="zalo-scan-modal-title"
                 className="text-sm font-bold text-slate-900 truncate"
               >
-                Quét ảnh lịch tăng ca từ Zalo (AI)
+                {presetContext?.label
+                  ? `Đăng ký nhóm: ${presetContext.label}`
+                  : 'Quét ảnh lịch tăng ca từ Zalo (AI)'}
               </h3>
               <p className="text-[11px] text-slate-500 truncate">
                 Nhấn <kbd className="px-1 py-0.5 rounded bg-white border border-slate-300 font-mono text-[10px]">Ctrl + V</kbd> để dán ảnh trực tiếp, kiểm tra và xác nhận ghi nhận vào phiếu
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="Đóng cửa sổ quét ảnh"
-            disabled={isConfirming}
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 cursor-pointer transition-colors disabled:opacity-40"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {onSwitchMode && (
+              <div
+                role="tablist"
+                aria-label="Chuyển chế độ đăng ký tăng ca"
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 gap-0.5"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={false}
+                  data-testid="modal-switch-manual-btn"
+                  onClick={() => onSwitchMode('manual')}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 hover:text-[#14539E] hover:bg-slate-50 cursor-pointer whitespace-nowrap"
+                >
+                  Nhập thủ công
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={true}
+                  data-testid="modal-switch-ai-btn"
+                  className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#14539E] text-white cursor-pointer whitespace-nowrap"
+                >
+                  Quét ảnh Zalo AI
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              aria-label="Đóng cửa sổ quét ảnh"
+              disabled={isConfirming}
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 cursor-pointer transition-colors disabled:opacity-40"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* BODY */}
@@ -846,6 +989,27 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
                       className="w-full h-8 pl-8 pr-2 text-xs font-mono font-medium text-slate-800 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-[#14539E]"
                     />
                   </div>
+                  {presetContext?.presetType === 'prev_day' && (
+                    <div className="flex items-center gap-1 mt-1">
+                      {[
+                        { label: 'D-1', date: shiftIsoDateDays(defaultDate || getLocalTodayIsoDate(), -1) },
+                        { label: 'D-2', date: shiftIsoDateDays(defaultDate || getLocalTodayIsoDate(), -2) },
+                      ].map((opt) => (
+                        <button
+                          key={opt.label}
+                          type="button"
+                          onClick={() => handleDateChange(opt.date)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border cursor-pointer ${
+                            activeBlock.overtimeDate === opt.date
+                              ? 'bg-[#14539E] text-white border-[#14539E]'
+                              : 'bg-white text-slate-600 border-slate-200 hover:border-[#14539E]'
+                          }`}
+                        >
+                          {opt.label} ({opt.date.slice(8, 10)}/{opt.date.slice(5, 7)})
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1109,91 +1273,190 @@ export const ZaloScheduleScanModal: React.FC<ZaloScheduleScanModalProps> = ({
                         activeBlock.customTimes[empId]?.startTime ?? activeBlock.startTime;
                       const empEnd =
                         activeBlock.customTimes[empId]?.endTime ?? activeBlock.endTime;
+                      const customReasonEntry = activeBlock.customReasons[empId];
+                      const hasCustomReason = Boolean(
+                        customReasonEntry &&
+                          ((customReasonEntry.reasonVi || '').trim() ||
+                            (customReasonEntry.reasonKr || '').trim())
+                      );
+                      const isEditingReason = editingReasonEmpId === empId;
 
                       return (
                         <div
                           key={empId}
-                          className={`px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs ${
-                            isCustom ? 'bg-amber-50/70' : 'bg-white'
+                          className={`px-2.5 py-1.5 text-xs ${
+                            hasCustomReason || isCustom ? 'bg-amber-50/70' : 'bg-white'
                           }`}
                         >
-                          <div className="min-w-0 flex-1 flex items-center gap-2">
-                            <span className="text-[10px] font-mono text-slate-400 w-4 shrink-0">
-                              {idx + 1}.
-                            </span>
-                            <div className="min-w-0">
-                              <div className="font-semibold text-slate-800 truncate">
-                                {emp.fullName}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1 flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-slate-400 w-4 shrink-0">
+                                {idx + 1}.
+                              </span>
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                                  <span className="truncate">{emp.fullName}</span>
+                                  {hasCustomReason && (
+                                    <span className="text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300 font-semibold shrink-0">
+                                      Lý do riêng
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  {emp.employeeCode} • {emp.department}
+                                </div>
                               </div>
-                              <div className="text-[10px] text-slate-400 truncate">
-                                {emp.employeeCode} • {emp.department}
-                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <input
+                                type="text"
+                                maxLength={5}
+                                aria-label={`Giờ bắt đầu của ${emp.fullName}`}
+                                value={empStart}
+                                onChange={(e) =>
+                                  handleUpdateParticipantTime(
+                                    empId,
+                                    'startTime',
+                                    e.target.value
+                                  )
+                                }
+                                onBlur={(e) =>
+                                  handleUpdateParticipantTime(
+                                    empId,
+                                    'startTime',
+                                    e.target.value,
+                                    true
+                                  )
+                                }
+                                className={`w-12 h-6 text-[11px] font-mono text-center rounded border focus:outline-none focus:border-[#14539E] ${
+                                  isCustom
+                                    ? 'border-amber-400 bg-amber-50 font-bold text-amber-900'
+                                    : 'border-slate-200 bg-white text-slate-700'
+                                }`}
+                              />
+                              <span className="text-slate-400 text-[10px]">-</span>
+                              <input
+                                type="text"
+                                maxLength={5}
+                                aria-label={`Giờ kết thúc của ${emp.fullName}`}
+                                value={empEnd}
+                                onChange={(e) =>
+                                  handleUpdateParticipantTime(
+                                    empId,
+                                    'endTime',
+                                    e.target.value
+                                  )
+                                }
+                                onBlur={(e) =>
+                                  handleUpdateParticipantTime(
+                                    empId,
+                                    'endTime',
+                                    e.target.value,
+                                    true
+                                  )
+                                }
+                                className={`w-12 h-6 text-[11px] font-mono text-center rounded border focus:outline-none focus:border-[#14539E] ${
+                                  isCustom
+                                    ? 'border-amber-400 bg-amber-50 font-bold text-amber-900'
+                                    : 'border-slate-200 bg-white text-slate-700'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                title="Thêm lý do tăng ca riêng cho người này"
+                                aria-label={`Thêm lý do tăng ca riêng cho ${emp.fullName}`}
+                                data-testid={`zalo-custom-reason-btn-${emp.employeeCode || emp.id}`}
+                                onClick={() =>
+                                  setEditingReasonEmpId((prev) =>
+                                    prev === empId ? null : empId
+                                  )
+                                }
+                                className={`p-1 rounded border cursor-pointer transition-colors ${
+                                  hasCustomReason || isEditingReason
+                                    ? 'border-amber-400 bg-amber-100 text-amber-800'
+                                    : 'border-transparent text-slate-400 hover:text-[#14539E] hover:bg-blue-50'
+                                }`}
+                              >
+                                <FileEdit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Xóa ${emp.fullName} khỏi nhóm`}
+                                onClick={() => handleToggleParticipant(empId)}
+                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1 shrink-0">
-                            <input
-                              type="text"
-                              maxLength={5}
-                              aria-label={`Giờ bắt đầu của ${emp.fullName}`}
-                              value={empStart}
-                              onChange={(e) =>
-                                handleUpdateParticipantTime(
-                                  empId,
-                                  'startTime',
-                                  e.target.value
-                                )
-                              }
-                              onBlur={(e) =>
-                                handleUpdateParticipantTime(
-                                  empId,
-                                  'startTime',
-                                  e.target.value,
-                                  true
-                                )
-                              }
-                              className={`w-12 h-6 text-[11px] font-mono text-center rounded border focus:outline-none focus:border-[#14539E] ${
-                                isCustom
-                                  ? 'border-amber-400 bg-amber-50 font-bold text-amber-900'
-                                  : 'border-slate-200 bg-white text-slate-700'
-                              }`}
-                            />
-                            <span className="text-slate-400 text-[10px]">-</span>
-                            <input
-                              type="text"
-                              maxLength={5}
-                              aria-label={`Giờ kết thúc của ${emp.fullName}`}
-                              value={empEnd}
-                              onChange={(e) =>
-                                handleUpdateParticipantTime(
-                                  empId,
-                                  'endTime',
-                                  e.target.value
-                                )
-                              }
-                              onBlur={(e) =>
-                                handleUpdateParticipantTime(
-                                  empId,
-                                  'endTime',
-                                  e.target.value,
-                                  true
-                                )
-                              }
-                              className={`w-12 h-6 text-[11px] font-mono text-center rounded border focus:outline-none focus:border-[#14539E] ${
-                                isCustom
-                                  ? 'border-amber-400 bg-amber-50 font-bold text-amber-900'
-                                  : 'border-slate-200 bg-white text-slate-700'
-                              }`}
-                            />
-                            <button
-                              type="button"
-                              aria-label={`Xóa ${emp.fullName} khỏi nhóm`}
-                              onClick={() => handleToggleParticipant(empId)}
-                              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer ml-0.5"
+                          {isEditingReason && (
+                            <div
+                              data-testid={`zalo-custom-reason-editor-${emp.employeeCode || emp.id}`}
+                              className="mt-2 p-2 rounded-lg border border-amber-300 bg-white space-y-1.5"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] font-bold text-amber-800">
+                                  Lý do tăng ca riêng — {emp.fullName} (sẽ tách ô xuống cuối nhóm)
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={translatingCustomEmpId === empId}
+                                    onClick={() => void handleTranslateParticipantCustomReason(empId)}
+                                    className="text-[10px] font-semibold text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer disabled:opacity-50"
+                                  >
+                                    {translatingCustomEmpId === empId ? (
+                                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                    ) : (
+                                      <Sparkles className="w-2.5 h-2.5" />
+                                    )}
+                                    <span>Dịch gợi ý</span>
+                                  </button>
+                                  {hasCustomReason && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleClearParticipantCustomReason(empId)}
+                                      className="text-[10px] font-semibold text-rose-600 hover:underline cursor-pointer"
+                                    >
+                                      Xóa lý do riêng
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                <input
+                                  type="text"
+                                  data-testid={`zalo-custom-reason-vi-${emp.employeeCode || emp.id}`}
+                                  value={customReasonEntry?.reasonVi ?? ''}
+                                  onChange={(e) =>
+                                    handleUpdateParticipantCustomReason(
+                                      empId,
+                                      'reasonVi',
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Lý do riêng (Tiếng Việt)..."
+                                  className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:border-[#14539E]"
+                                />
+                                <input
+                                  type="text"
+                                  data-testid={`zalo-custom-reason-kr-${emp.employeeCode || emp.id}`}
+                                  value={customReasonEntry?.reasonKr ?? ''}
+                                  onChange={(e) =>
+                                    handleUpdateParticipantCustomReason(
+                                      empId,
+                                      'reasonKr',
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Lý do riêng (Tiếng Hàn)..."
+                                  className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:border-[#14539E]"
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })

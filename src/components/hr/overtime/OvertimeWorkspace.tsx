@@ -37,6 +37,8 @@ import {
   reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
   softDeleteOvertimeForms,
+  sortOvertimeBlocksByStandardOrder,
+  sortParticipantsByReasonScope,
   subscribeToOvertimeGlossaryRealtime,
   unlockOvertimeForm,
   updateOvertimeFormInHistory,
@@ -344,7 +346,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     }
 
     const targetDate =
-      (payloads[0]?.overtimeDate || fallbackDate || '').trim() ||
+      (fallbackDate || payloads[0]?.overtimeDate || '').trim() ||
       getLocalTodayIsoDate();
 
     // Tìm vỏ phiếu đang hoạt động của ngày đó hoặc tự động tạo/khôi phục vỏ phiếu TC-YYYYMMDD
@@ -376,7 +378,10 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         (payload.overtimeDate || targetDate).trim() || targetDate;
       const normStart = normalize24hTime(payload.startTime, '16:10');
       const normEnd = normalize24hTime(payload.endTime, '18:10');
-      const participants: OvertimeParticipantInput[] =
+      const cleanReasonVi = payload.reasonVi.trim();
+      const cleanReasonKr = payload.reasonKr.trim();
+
+      const rawParticipants: OvertimeParticipantInput[] =
         payload.selectedEmployeeIds.map((empId) => {
           const custom = payload.customTimes[empId];
           const pStart = custom?.startTime
@@ -385,6 +390,13 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
           const pEnd = custom?.endTime
             ? normalize24hTime(custom.endTime, normEnd)
             : normEnd;
+          const customReason = payload.customReasons?.[empId];
+          const customVi = (customReason?.reasonVi || '').trim();
+          const customKr = (customReason?.reasonKr || '').trim();
+          const hasCustom = Boolean(
+            (customVi && customVi !== cleanReasonVi) ||
+              (customKr && customKr !== cleanReasonKr)
+          );
           return {
             employeeId: empId,
             startTime: pStart,
@@ -395,24 +407,40 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
               pStart,
               pEnd
             ),
+            ...(hasCustom
+              ? {
+                  reasonVi: customVi || cleanReasonVi,
+                  reasonKr: customKr,
+                }
+              : {}),
           };
         });
+
+      const participants = sortParticipantsByReasonScope(
+        rawParticipants,
+        cleanReasonVi,
+        cleanReasonKr
+      );
 
       return {
         id: `ot-block-${Date.now()}-${idx}-${Math.random()
           .toString(36)
           .slice(2, 6)}`,
         overtimeDate: resolvedBlockDate,
-        reasonVi: payload.reasonVi.trim(),
-        reasonKr: payload.reasonKr.trim(),
+        reasonVi: cleanReasonVi,
+        reasonKr: cleanReasonKr,
         startTime: normStart,
         endTime: normEnd,
-        selectedEmployeeIds: [...payload.selectedEmployeeIds],
+        selectedEmployeeIds: participants.map((p) => p.employeeId),
         participants,
       };
     });
 
-    const combinedBlocks = [...existingBlocks, ...newBlocks];
+    const combinedBlocks = sortOvertimeBlocksByStandardOrder(
+      [...existingBlocks, ...newBlocks],
+      targetForm.overtime_date,
+      employeeMap
+    );
     const mainDepartment = resolveOvertimeMainDepartment(
       targetForm.department,
       knownSubGroups

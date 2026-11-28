@@ -5,8 +5,10 @@ import {
   ArrowUp,
   Camera,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Circle,
   Copy,
   Database,
   Eye,
@@ -36,17 +38,19 @@ import {
   overtimeExportService,
 } from '../../../utils/overtimeExportService';
 import {
+  analyzeOvertimeFormGroupStatus,
   buildMergedEmployeesForExport,
   fetchOvertimeFormById,
   filterOvertimeForms,
   formatOvertimeFormCodeDisplay,
-  formatOvertimeGroupCompactLabel,
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
+  OVERTIME_STANDARD_GROUPS,
   OvertimeBlockInput,
   OvertimeFormWithItems,
   OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
+  OvertimeStandardGroupDef,
   OvertimeSupabaseActionError,
   reconstructBlocksFromItems,
   reorderOvertimeBlocks,
@@ -72,6 +76,7 @@ import { OvertimeA4PreviewSheet } from './OvertimeA4PreviewSheet';
 import { ManualOvertimeGroupModal } from './ManualOvertimeGroupModal';
 import {
   ConfirmableOvertimeBlockPayload,
+  OvertimeModalPresetContext,
   ZaloScheduleScanModal,
 } from './ZaloScheduleScanModal';
 import { parseOvertimeScheduleImage } from '../../../services/overtimeImageService';
@@ -152,8 +157,14 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       .month
   );
 
-  const [isManualGroupOpen, setIsManualGroupOpen] = useState<boolean>(false);
-  const [isZaloScanOpen, setIsZaloScanOpen] = useState<boolean>(false);
+  const [activeRegModalMode, setActiveRegModalMode] = useState<
+    'manual' | 'ai_scan' | null
+  >(null);
+  const [activeModalPreset, setActiveModalPreset] =
+    useState<OvertimeModalPresetContext | null>(null);
+  const [manualOrderFormIds, setManualOrderFormIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [isReordering, setIsReordering] = useState<boolean>(false);
 
   const [viewingForm, setViewingForm] = useState<OvertimeFormWithItems | null>(
@@ -273,17 +284,20 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     [activePreviewForm]
   );
 
-  const fallbackNamesById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const item of activePreviewForm?.items || []) {
-      const id = item.employee_id?.trim();
-      const name = item.employee_name?.trim();
-      if (id && name && !map.has(id)) {
-        map.set(id, name);
-      }
-    }
-    return map;
-  }, [activePreviewForm]);
+  const groupStatusMap = useMemo(
+    () =>
+      analyzeOvertimeFormGroupStatus(
+        activeBlocks,
+        activePreviewForm?.overtime_date || activeTargetDate,
+        employeeMap
+      ),
+    [
+      activeBlocks,
+      activePreviewForm?.overtime_date,
+      activeTargetDate,
+      employeeMap,
+    ]
+  );
 
   const isActiveFormLocked = Boolean(
     activePreviewForm && isOvertimeFormLocked(activePreviewForm)
@@ -376,6 +390,31 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   };
 
+  const openRegistrationModal = (
+    mode: 'manual' | 'ai_scan',
+    preset?: OvertimeModalPresetContext | null
+  ) => {
+    if (isActiveFormLocked || !onAppendBlocksToDate) return;
+    setActiveModalPreset(preset ?? null);
+    setActiveRegModalMode(mode);
+  };
+
+  const buildPresetFromStandardGroup = (
+    def: OvertimeStandardGroupDef
+  ): OvertimeModalPresetContext => {
+    if (def.presetType === 'prev_day') {
+      return { presetType: 'prev_day', label: def.label };
+    }
+    if (def.presetType === 'production_duty') {
+      return { presetType: 'production_duty', label: def.label };
+    }
+    return {
+      presetType: 'group',
+      targetGroupName: def.targetGroupName || def.label,
+      label: def.label,
+    };
+  };
+
   const handleReorderBlock = async (index: number, direction: 'up' | 'down') => {
     if (!activePreviewForm || !onUpdateFormBlocks || isReordering) return;
     if (isOvertimeFormLocked(activePreviewForm)) return;
@@ -385,6 +424,11 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
     setIsReordering(true);
     try {
+      setManualOrderFormIds((prev) => {
+        const next = new Set(prev);
+        next.add(activePreviewForm.id);
+        return next;
+      });
       await onUpdateFormBlocks(activePreviewForm, nextBlocks);
     } catch (error) {
       handleSupabaseError(error);
@@ -393,12 +437,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   };
 
-  const handleConfirmManualGroup = async (
-    payload: ConfirmableOvertimeBlockPayload
+  const handleConfirmManualPayloads = async (
+    payloads: ConfirmableOvertimeBlockPayload[]
   ) => {
-    if (!onAppendBlocksToDate) return;
+    if (!onAppendBlocksToDate || payloads.length === 0) return;
     try {
-      const updated = await onAppendBlocksToDate(activeTargetDate, [payload]);
+      const updated = await onAppendBlocksToDate(activeTargetDate, payloads);
+      setManualOrderFormIds((prev) => {
+        if (!prev.has(updated.id)) return prev;
+        const next = new Set(prev);
+        next.delete(updated.id);
+        return next;
+      });
       const targetDate = (updated.overtime_date || activeTargetDate).slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
         const parsed = parseYearMonthKey(targetDate.slice(0, 7), targetDate);
@@ -407,7 +457,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         setSelectedDateFilter(targetDate);
       }
       setSelectedPreviewFormId(updated.id);
-      setIsManualGroupOpen(false);
+      setActiveRegModalMode(null);
     } catch (error) {
       handleSupabaseError(error);
       throw error;
@@ -419,34 +469,22 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   ) => {
     if (!onAppendBlocksToDate || payloads.length === 0) return;
     try {
-      // Nhóm các payloads theo ngày tăng ca (thường cùng ngày) để cập nhật sạch sẽ từng vỏ phiếu
-      const byDate = new Map<string, ConfirmableOvertimeBlockPayload[]>();
-      for (const p of payloads) {
-        const d = (p.overtimeDate || activeTargetDate).trim() || activeTargetDate;
-        const arr = byDate.get(d) || [];
-        arr.push(p);
-        byDate.set(d, arr);
+      const updated = await onAppendBlocksToDate(activeTargetDate, payloads);
+      setManualOrderFormIds((prev) => {
+        if (!prev.has(updated.id)) return prev;
+        const next = new Set(prev);
+        next.delete(updated.id);
+        return next;
+      });
+      const targetDate = (updated.overtime_date || activeTargetDate).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+        const parsed = parseYearMonthKey(targetDate.slice(0, 7), targetDate);
+        setCalendarYear(parsed.year);
+        setCalendarMonth(parsed.month);
+        setSelectedDateFilter(targetDate);
       }
-
-      let lastUpdated: OvertimeFormWithItems | null = null;
-      for (const [dateKey, groupPayloads] of byDate.entries()) {
-        lastUpdated = await onAppendBlocksToDate(dateKey, groupPayloads);
-      }
-
-      if (lastUpdated) {
-        const targetDate = (lastUpdated.overtime_date || activeTargetDate).slice(
-          0,
-          10
-        );
-        if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-          const parsed = parseYearMonthKey(targetDate.slice(0, 7), targetDate);
-          setCalendarYear(parsed.year);
-          setCalendarMonth(parsed.month);
-          setSelectedDateFilter(targetDate);
-        }
-        setSelectedPreviewFormId(lastUpdated.id);
-      }
-      setIsZaloScanOpen(false);
+      setSelectedPreviewFormId(updated.id);
+      setActiveRegModalMode(null);
     } catch (error) {
       handleSupabaseError(error);
       throw error;
@@ -504,6 +542,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         blocks,
         employees: mergedEmployees,
         knownSubGroups,
+        preserveBlockOrder: manualOrderFormIds.has(freshForm.id),
       });
       onShowToast?.(
         `Đã xuất file Excel cho phiếu ${formatOvertimeFormCodeDisplay(
@@ -885,21 +924,28 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             </div>
           </div>
 
-          {/* Nửa dưới: Card "Nhóm tăng ca" siêu gọn (chỉ 1 dòng / nhóm) */}
+          {/* Nửa dưới: Card "Nhóm tăng ca" cố định 9 mục theo thứ tự chuẩn */}
           <div
             data-testid="overtime-day-groups-card"
-            className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs gap-2"
+            className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs gap-1.5"
           >
-            <div className="shrink-0 flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
-              <h3 className="text-xs font-bold text-slate-900">
-                Nhóm tăng ca
-              </h3>
+            <div className="shrink-0 flex items-center justify-between gap-2 pb-1 border-b border-slate-100">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <h3 className="text-xs font-bold text-slate-900 truncate">
+                  Nhóm tăng ca
+                </h3>
+                <span className="text-[10px] font-mono font-semibold text-[#14539E] bg-blue-50 px-1.5 py-0.5 rounded shrink-0">
+                  {formatDateToFormStyle(activeTargetDate)}
+                </span>
+              </div>
 
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
                   disabled={isActiveFormLocked || !onAppendBlocksToDate}
-                  onClick={() => setIsManualGroupOpen(true)}
+                  onClick={() =>
+                    openRegistrationModal('manual', { presetType: 'custom' })
+                  }
                   data-testid="open-manual-group-modal-btn"
                   title={
                     isActiveFormLocked
@@ -915,7 +961,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 <button
                   type="button"
                   disabled={isActiveFormLocked || !onAppendBlocksToDate}
-                  onClick={() => setIsZaloScanOpen(true)}
+                  onClick={() =>
+                    openRegistrationModal('ai_scan', { presetType: 'custom' })
+                  }
                   data-testid="open-zalo-scan-modal-btn"
                   title={
                     isActiveFormLocked
@@ -930,50 +978,95 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </div>
             </div>
 
-            {activeBlocks.length === 0 ? (
-              <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-4 px-3 text-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60">
-                <p className="text-xs font-medium text-slate-500">
-                  Chưa có nhóm tăng ca ({formatDateToFormStyle(activeTargetDate)})
-                </p>
-              </div>
-            ) : (
-              <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-0.5">
-                {activeBlocks.map((block, idx) => {
-                  const compactLabel = formatOvertimeGroupCompactLabel({
-                    block,
-                    index: idx,
-                    formOvertimeDate:
-                      activePreviewForm?.overtime_date || activeTargetDate,
-                    allBlocks: activeBlocks,
-                    employeeMap,
-                    fallbackNamesById,
-                  });
-                  const canMoveUp =
-                    !isActiveFormLocked && !isReordering && idx > 0;
-                  const canMoveDown =
-                    !isActiveFormLocked &&
-                    !isReordering &&
-                    idx < activeBlocks.length - 1;
+            <div
+              data-testid="overtime-standard-groups-list"
+              className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-0.5"
+            >
+              {OVERTIME_STANDARD_GROUPS.map((def) => {
+                const status = groupStatusMap[def.id];
+                const isRegistered = Boolean(status?.isRegistered);
+                const matchingIdx =
+                  status && status.matchingBlockIndices.length === 1
+                    ? status.matchingBlockIndices[0]
+                    : -1;
+                const canShowReorder =
+                  !isActiveFormLocked &&
+                  !isReordering &&
+                  matchingIdx >= 0 &&
+                  activeBlocks.length > 1;
+                const canMoveUp = canShowReorder && matchingIdx > 0;
+                const canMoveDown =
+                  canShowReorder && matchingIdx < activeBlocks.length - 1;
 
-                  return (
-                    <div
-                      key={block.id || `grp-${idx}`}
-                      data-testid={`overtime-group-card-${idx}`}
-                      title={compactLabel}
-                      className="rounded-lg border border-slate-200 bg-slate-50/70 hover:bg-white py-1 px-2 text-xs flex items-center justify-between gap-2 transition-colors"
+                return (
+                  <div
+                    key={def.id}
+                    data-testid={`overtime-standard-group-${def.id}`}
+                    data-registered={isRegistered ? 'true' : 'false'}
+                    className={`rounded-lg border transition-colors flex items-center justify-between gap-1.5 ${
+                      isRegistered
+                        ? 'border-emerald-200/80 bg-emerald-50/40 hover:bg-emerald-50/80'
+                        : 'border-slate-200/80 bg-slate-50/60 hover:bg-white'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      disabled={isActiveFormLocked || !onAppendBlocksToDate}
+                      onClick={() =>
+                        openRegistrationModal(
+                          'manual',
+                          buildPresetFromStandardGroup(def)
+                        )
+                      }
+                      title={
+                        isActiveFormLocked
+                          ? 'Phiếu đã chốt — không thể thêm mới'
+                          : isRegistered
+                            ? `${def.label} • Đã đăng ký (${status.badgeText}) — bấm để thêm tiếp`
+                            : `Đăng ký nhanh nhóm ${def.label}`
+                      }
+                      className="flex-1 min-w-0 py-1 px-2 text-xs flex items-center justify-between gap-2 text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-75"
                     >
-                      <span className="min-w-0 truncate font-medium text-slate-800">
-                        {compactLabel}
+                      <span className="min-w-0 flex items-center gap-1.5">
+                        {isRegistered ? (
+                          <span
+                            title="Đã đăng ký tăng ca"
+                            className="inline-flex shrink-0"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          </span>
+                        ) : (
+                          <Circle className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                        )}
+                        <span
+                          className={`truncate ${
+                            isRegistered
+                              ? 'font-semibold text-slate-900'
+                              : 'font-medium text-slate-600'
+                          }`}
+                        >
+                          {def.order}. {def.label}
+                        </span>
                       </span>
 
-                      <div className="flex items-center gap-0.5 shrink-0">
+                      {status?.badgeText && (
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-100/90 text-emerald-800 text-[10px] font-semibold tabular-nums whitespace-nowrap shrink-0">
+                          {status.badgeText}
+                        </span>
+                      )}
+                    </button>
+
+                    {canShowReorder && (
+                      <div className="flex items-center gap-0.5 pr-1 shrink-0">
                         <button
                           type="button"
                           disabled={!canMoveUp}
-                          onClick={() => void handleReorderBlock(idx, 'up')}
-                          data-testid={`move-group-up-${idx}`}
+                          onClick={() =>
+                            void handleReorderBlock(matchingIdx, 'up')
+                          }
+                          data-testid={`move-group-up-${def.id}`}
                           title="Di chuyển nhóm lên trên"
-                          aria-label={`Di chuyển nhóm #${idx + 1} lên`}
+                          aria-label={`Di chuyển ${def.label} lên`}
                           className="h-5 w-5 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <ArrowUp className="w-2.5 h-2.5" />
@@ -981,20 +1074,22 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                         <button
                           type="button"
                           disabled={!canMoveDown}
-                          onClick={() => void handleReorderBlock(idx, 'down')}
-                          data-testid={`move-group-down-${idx}`}
+                          onClick={() =>
+                            void handleReorderBlock(matchingIdx, 'down')
+                          }
+                          data-testid={`move-group-down-${def.id}`}
                           title="Di chuyển nhóm xuống dưới"
-                          aria-label={`Di chuyển nhóm #${idx + 1} xuống`}
+                          aria-label={`Di chuyển ${def.label} xuống`}
                           className="h-5 w-5 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <ArrowDown className="w-2.5 h-2.5" />
                         </button>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </aside>
 
@@ -1281,7 +1376,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             >
               <OvertimeA4PreviewSheet
                 form={activePreviewForm}
+                employees={employees}
                 knownSubGroups={knownSubGroups}
+                preserveBlockOrder={manualOrderFormIds.has(activePreviewForm.id)}
                 variant="inline"
                 isPrintableTarget={!viewingForm}
               />
@@ -1292,8 +1389,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
       {/* Modal Thêm nhóm tăng ca thủ công */}
       <ManualOvertimeGroupModal
-        isOpen={isManualGroupOpen}
-        onClose={() => setIsManualGroupOpen(false)}
+        isOpen={activeRegModalMode === 'manual'}
+        onClose={() => setActiveRegModalMode(null)}
         defaultDate={activeTargetDate}
         employees={employees}
         groups={groups}
@@ -1302,21 +1399,26 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         glossaryEntries={glossaryEntries}
         workShifts={effectiveWorkShifts}
         companyHolidays={companyHolidays}
+        presetContext={activeModalPreset}
+        onSwitchMode={(mode) => setActiveRegModalMode(mode)}
         translateMultilineKorean={translateMultilineKorean}
         onGlossaryEntriesUpdated={onGlossaryEntriesUpdated}
         onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
-        onConfirm={handleConfirmManualGroup}
+        onConfirm={(payload) => handleConfirmManualPayloads([payload])}
+        onConfirmMultiple={handleConfirmManualPayloads}
       />
 
       {/* Modal Quét ảnh lịch tăng ca từ Zalo (AI) */}
       <ZaloScheduleScanModal
-        isOpen={isZaloScanOpen}
-        onClose={() => setIsZaloScanOpen(false)}
+        isOpen={activeRegModalMode === 'ai_scan'}
+        onClose={() => setActiveRegModalMode(null)}
         employees={employees}
         glossaryEntries={glossaryEntries}
         leaveRecords={leaveRecords}
         existingPreviewBlocks={activeBlocks}
         defaultDate={activeTargetDate}
+        presetContext={activeModalPreset}
+        onSwitchMode={(mode) => setActiveRegModalMode(mode)}
         translateMultilineKorean={translateMultilineKorean}
         onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
         onParseScheduleImage={parseOvertimeScheduleImage}
@@ -1418,7 +1520,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             <div className="bg-slate-100/80 p-4 flex-1 min-h-0 overflow-y-auto overflow-x-auto flex justify-center items-start overtime-print-scroll print:overflow-visible print:bg-white print:p-0 print:block">
               <OvertimeA4PreviewSheet
                 form={viewingForm}
+                employees={employees}
                 knownSubGroups={knownSubGroups}
+                preserveBlockOrder={manualOrderFormIds.has(viewingForm.id)}
                 variant="modal"
                 isPrintableTarget={true}
               />

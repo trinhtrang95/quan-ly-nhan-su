@@ -9,6 +9,7 @@ import {
   ChevronUp,
   ChevronDown,
   Clock,
+  FileEdit,
   FileSpreadsheet,
   Info,
   Save,
@@ -46,6 +47,7 @@ import {
   OvertimeLeaveCheckEntry,
   reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
+  sortParticipantsByReasonScope,
   suggestFactoryKoreanTranslation,
   upsertOvertimeGlossaryEntry,
 } from '../../../services/hrService';
@@ -85,6 +87,8 @@ export interface OvertimeParticipant {
   startTime: string;
   endTime: string;
   totalHours?: number;
+  reasonVi?: string;
+  reasonKr?: string;
 }
 
 export interface OvertimeTaskBlock {
@@ -244,6 +248,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
+  const [customReasons, setCustomReasons] = useState<Record<string, { reasonVi: string; reasonKr: string }>>({});
+  const [editingReasonEmpId, setEditingReasonEmpId] = useState<string | null>(null);
+  const [translatingCustomEmpId, setTranslatingCustomEmpId] = useState<string | null>(null);
   const [isAiScanModalOpen, setIsAiScanModalOpen] = useState<boolean>(false);
   
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState<string>('');
@@ -412,6 +419,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       setCurrentSelectedEmployeeIds([]);
       setCustomTimes({});
       setEditingTimeEmpId(null);
+      setCustomReasons({});
+      setEditingReasonEmpId(null);
+      setTranslatingCustomEmpId(null);
       setEmployeeSearchQuery('');
       setIsEmployeeDropdownOpen(false);
       isInitialReasonMountRef.current = true;
@@ -534,7 +544,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         }
       }
 
-      const participants: OvertimeParticipant[] = validEmployeeIds.map((empId) => {
+      const rawParticipants: OvertimeParticipant[] = validEmployeeIds.map((empId) => {
         const custom = payload.customTimes[empId];
         const pStart = custom?.startTime
           ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart)
@@ -543,13 +553,32 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd)
           : normalizedEnd;
         const netRes = getNetHoursForParticipant(resolvedDate, empId, pStart, pEnd);
+        const customReason = payload.customReasons?.[empId];
+        const customVi = (customReason?.reasonVi || '').trim();
+        const customKr = (customReason?.reasonKr || '').trim();
+        const hasCustom = Boolean(
+          (customVi && customVi !== cleanReasonVi) ||
+            (customKr && customKr !== finalReasonKr)
+        );
         return {
           employeeId: empId,
           startTime: pStart,
           endTime: pEnd,
           totalHours: netRes.netHours,
+          ...(hasCustom
+            ? {
+                reasonVi: customVi || cleanReasonVi,
+                reasonKr: customKr,
+              }
+            : {}),
         };
       });
+
+      const participants = sortParticipantsByReasonScope(
+        rawParticipants,
+        cleanReasonVi,
+        finalReasonKr
+      );
 
       newBlocks.push({
         id: `ot-block-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
@@ -558,7 +587,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         reasonKr: finalReasonKr,
         startTime: normalizedStart,
         endTime: normalizedEnd,
-        selectedEmployeeIds: validEmployeeIds,
+        selectedEmployeeIds: participants.map((p) => p.employeeId),
         participants,
         isTranslating: false,
       });
@@ -697,7 +726,19 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       }
       return changed ? next : prev;
     });
+    setCustomReasons((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of conflictingSelectedIds) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
     setEditingTimeEmpId((prev) => (prev && conflictSet.has(prev) ? null : prev));
+    setEditingReasonEmpId((prev) => (prev && conflictSet.has(prev) ? null : prev));
     showToast(
       `Đã tự động bỏ chọn ${conflictingSelectedIds.length} nhân sự do có đơn nghỉ ngày ${formatDateToFormStyle(
         blockOvertimeDate
@@ -890,7 +931,67 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     if (onLeaveMapForCurrentDate.has(empId)) {
       return;
     }
-    setCurrentSelectedEmployeeIds((prev) => prev.includes(empId) ? prev.filter((id) => id !== empId) : [...prev, empId]);
+    setCurrentSelectedEmployeeIds((prev) => {
+      const exists = prev.includes(empId);
+      if (exists) {
+        setCustomReasons((cr) => {
+          if (!cr[empId]) return cr;
+          const next = { ...cr };
+          delete next[empId];
+          return next;
+        });
+        if (editingReasonEmpId === empId) setEditingReasonEmpId(null);
+        return prev.filter((id) => id !== empId);
+      }
+      return [...prev, empId];
+    });
+  };
+
+  const handleUpdateCustomReason = (
+    empId: string,
+    field: 'reasonVi' | 'reasonKr',
+    value: string
+  ) => {
+    setCustomReasons((prev) => {
+      const curr = prev[empId] || { reasonVi: '', reasonKr: '' };
+      return {
+        ...prev,
+        [empId]: { ...curr, [field]: value },
+      };
+    });
+  };
+
+  const handleClearCustomReason = (empId: string) => {
+    setCustomReasons((prev) => {
+      if (!prev[empId]) return prev;
+      const next = { ...prev };
+      delete next[empId];
+      return next;
+    });
+    if (editingReasonEmpId === empId) {
+      setEditingReasonEmpId(null);
+    }
+  };
+
+  const handleTranslateCustomReason = async (empId: string) => {
+    const customVi = (customReasons[empId]?.reasonVi || '').trim();
+    if (!customVi) return;
+    setTranslatingCustomEmpId(empId);
+    try {
+      const translated = await translateMultilineKorean(
+        customVi,
+        glossaryEntries
+      );
+      setCustomReasons((prev) => ({
+        ...prev,
+        [empId]: {
+          reasonVi: prev[empId]?.reasonVi || customVi,
+          reasonKr: translated,
+        },
+      }));
+    } finally {
+      setTranslatingCustomEmpId((prev) => (prev === empId ? null : prev));
+    }
   };
 
   const handleSelectAllFiltered = () => {
@@ -931,13 +1032,24 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setCurrentEndTime(block.endTime || dayEvaluation.suggestedDefaultEndTime || '19:00');
     setCurrentSelectedEmployeeIds([...block.selectedEmployeeIds]);
     const nextCustom: Record<string, { startTime: string; endTime: string }> = {};
+    const nextCustomReasons: Record<string, { reasonVi: string; reasonKr: string }> = {};
     for (const p of block.participants || []) {
       if (p.startTime !== block.startTime || p.endTime !== block.endTime) {
         nextCustom[p.employeeId] = { startTime: p.startTime, endTime: p.endTime };
       }
+      const pVi = (p.reasonVi || '').trim();
+      const pKr = (p.reasonKr || '').trim();
+      if ((pVi && pVi !== (block.reasonVi || '').trim()) || (pKr && pKr !== (block.reasonKr || '').trim())) {
+        nextCustomReasons[p.employeeId] = {
+          reasonVi: pVi || block.reasonVi || '',
+          reasonKr: pKr,
+        };
+      }
     }
     setCustomTimes(nextCustom);
     setEditingTimeEmpId(null);
+    setCustomReasons(nextCustomReasons);
+    setEditingReasonEmpId(null);
     isInitialReasonMountRef.current = true;
     setCurrentReasonVi(block.reasonVi || '');
     setCurrentReasonKr(block.reasonKr || '');
@@ -953,6 +1065,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setCurrentSelectedEmployeeIds([]);
     setCustomTimes({});
     setEditingTimeEmpId(null);
+    setCustomReasons({});
+    setEditingReasonEmpId(null);
     setCurrentReasonVi('');
     setCurrentReasonKr('');
     setIsReasonKrManuallyEdited(false);
@@ -1061,7 +1175,9 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
         }
       }
 
-      const participants: OvertimeParticipant[] = currentSelectedEmployeeIds.map((empId) => {
+      const cleanFinalKr = finalReasonKr.trim();
+      const rawParticipants: OvertimeParticipant[] = [];
+      for (const empId of currentSelectedEmployeeIds) {
         const custom = customTimes[empId];
         const pStart = custom?.startTime
           ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart)
@@ -1075,22 +1191,44 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           pStart,
           pEnd
         );
-        return {
+        const rEntry = customReasons[empId];
+        const rVi = (rEntry?.reasonVi || '').trim();
+        let rKr = (rEntry?.reasonKr || '').trim();
+        if (rVi && !rKr) {
+          rKr = (await translateMultilineKorean(rVi, glossaryEntries)).trim();
+        }
+        const hasCustom = Boolean(
+          (rVi && rVi !== cleanReasonVi) || (rKr && rKr !== cleanFinalKr)
+        );
+
+        rawParticipants.push({
           employeeId: empId,
           startTime: pStart,
           endTime: pEnd,
           totalHours: netResult.netHours,
-        };
-      });
+          ...(hasCustom
+            ? {
+                reasonVi: rVi || cleanReasonVi,
+                reasonKr: rKr,
+              }
+            : {}),
+        });
+      }
+
+      const participants = sortParticipantsByReasonScope(
+        rawParticipants,
+        cleanReasonVi,
+        cleanFinalKr
+      );
 
       const newBlock: OvertimeTaskBlock = {
         id: editingBlockId || `ot-block-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         overtimeDate: resolvedBlockDate,
         reasonVi: cleanReasonVi,
-        reasonKr: finalReasonKr.trim(),
+        reasonKr: cleanFinalKr,
         startTime: normalizedStart,
         endTime: normalizedEnd,
-        selectedEmployeeIds: [...currentSelectedEmployeeIds],
+        selectedEmployeeIds: participants.map((p) => p.employeeId),
         participants,
         isTranslating: false,
       };
@@ -1131,6 +1269,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       setCurrentSelectedEmployeeIds([]);
       setCustomTimes({});
       setEditingTimeEmpId(null);
+      setCustomReasons({});
+      setEditingReasonEmpId(null);
       setEmployeeSearchQuery('');
       setIsEmployeeDropdownOpen(false);
     } finally {
@@ -1246,28 +1386,49 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const printableDateGroups = useMemo((): PrintableA4DateGroup[] => {
     const activeDraftDate = blockOvertimeDate || shellOvertimeDate || getLocalTodayIsoDate();
     if (previewData.length === 0) {
-      const draftParticipants: OvertimeParticipant[] = currentSelectedEmployeeIds.length > 0
-          ? currentSelectedEmployeeIds.map((id) => ({
-              employeeId: id,
-              startTime: customTimes[id]?.startTime ? OvertimeFormService.normalize24hTime(customTimes[id].startTime, currentStartTime) : currentStartTime,
-              endTime: customTimes[id]?.endTime ? OvertimeFormService.normalize24hTime(customTimes[id].endTime, currentEndTime) : currentEndTime,
-            }))
+      const baseVi = currentReasonVi || 'Trực sản xuất';
+      const baseKr = currentReasonKr || '생산 당직';
+      const rawDraftParticipants: OvertimeParticipant[] = currentSelectedEmployeeIds.length > 0
+          ? currentSelectedEmployeeIds.map((id) => {
+              const rEntry = customReasons[id];
+              const rVi = (rEntry?.reasonVi || '').trim();
+              const rKr = (rEntry?.reasonKr || '').trim();
+              const hasCustom = Boolean(
+                (rVi && rVi !== baseVi.trim()) || (rKr && rKr !== baseKr.trim())
+              );
+              return {
+                employeeId: id,
+                startTime: customTimes[id]?.startTime ? OvertimeFormService.normalize24hTime(customTimes[id].startTime, currentStartTime) : currentStartTime,
+                endTime: customTimes[id]?.endTime ? OvertimeFormService.normalize24hTime(customTimes[id].endTime, currentEndTime) : currentEndTime,
+                ...(hasCustom ? { reasonVi: rVi || baseVi, reasonKr: rKr } : {}),
+              };
+            })
           : [{ employeeId: '__EMPTY_PARTICIPANT__', startTime: currentStartTime || '16:10', endTime: currentEndTime || '18:10' }];
 
-      const combinedReason = buildCombinedReasonText(currentReasonVi || 'Trực sản xuất', currentReasonKr || '생산 당직');
+      const orderedDraft = sortParticipantsByReasonScope(rawDraftParticipants, baseVi, baseKr);
+      const sharedDraftCount = orderedDraft.filter((p) => {
+        const pVi = (p.reasonVi || '').trim();
+        const pKr = (p.reasonKr || '').trim();
+        return !((pVi && pVi !== baseVi.trim()) || (pKr && pKr !== baseKr.trim()));
+      }).length;
+      const sharedCombinedReason = buildCombinedReasonText(baseVi, baseKr);
+
       return [{
           date: activeDraftDate,
           formattedDate: formatDateToFormStyle(activeDraftDate),
           blocks: [{
               blockId: 'draft-block',
-              rows: draftParticipants.map((p, idx) => {
+              rows: orderedDraft.map((p, idx) => {
                 const emp = employeeMap.get(p.employeeId);
+                const isSharedPart = idx < sharedDraftCount;
                 return {
                   no: idx + 1,
                   fullName: emp ? emp.fullName : '(Chưa chọn nhân sự)',
-                  isFirstInBlock: idx === 0,
-                  rowSpan: draftParticipants.length,
-                  combinedReason,
+                  isFirstInBlock: isSharedPart ? idx === 0 : true,
+                  rowSpan: isSharedPart ? sharedDraftCount : 1,
+                  combinedReason: isSharedPart
+                    ? sharedCombinedReason
+                    : buildCombinedReasonText(p.reasonVi || baseVi, p.reasonKr || ''),
                   startTimeFormatted: formatTimeToFormStyle(p.startTime),
                   endTimeFormatted: formatTimeToFormStyle(p.endTime),
                 };
@@ -1288,22 +1449,39 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       const blocksForDate = mapByDate.get(date)!;
       let runningNo = 1;
       const processedBlocks = blocksForDate.map((block) => {
-        const participants: OvertimeParticipant[] = Array.isArray(block.participants) && block.participants.length > 0
+        const rawParticipants: OvertimeParticipant[] = Array.isArray(block.participants) && block.participants.length > 0
             ? block.participants
             : block.selectedEmployeeIds.length > 0
             ? block.selectedEmployeeIds.map((id) => ({ employeeId: id, startTime: block.startTime, endTime: block.endTime }))
             : [{ employeeId: '__EMPTY_PARTICIPANT__', startTime: block.startTime, endTime: block.endTime }];
-        const combinedReason = buildCombinedReasonText(block.reasonVi, block.reasonKr);
-        const rows: PrintableA4Row[] = participants.map((p, idxInBlock) => {
+
+        const orderedParticipants = sortParticipantsByReasonScope(
+          rawParticipants,
+          block.reasonVi || '',
+          block.reasonKr || ''
+        );
+        const baseVi = (block.reasonVi || '').trim();
+        const baseKr = (block.reasonKr || '').trim();
+        const sharedCount = orderedParticipants.filter((p) => {
+          const pVi = (p.reasonVi || '').trim();
+          const pKr = (p.reasonKr || '').trim();
+          return !((pVi && pVi !== baseVi) || (pKr && pKr !== baseKr));
+        }).length;
+        const sharedCombinedReason = buildCombinedReasonText(block.reasonVi, block.reasonKr);
+
+        const rows: PrintableA4Row[] = orderedParticipants.map((p, idxInBlock) => {
           const emp = employeeMap.get(p.employeeId);
           const no = runningNo;
           runningNo += 1;
+          const isSharedPart = idxInBlock < sharedCount;
           return {
             no,
             fullName: emp ? emp.fullName : '(Chưa chọn nhân sự)',
-            isFirstInBlock: idxInBlock === 0,
-            rowSpan: participants.length,
-            combinedReason,
+            isFirstInBlock: isSharedPart ? idxInBlock === 0 : true,
+            rowSpan: isSharedPart ? sharedCount : 1,
+            combinedReason: isSharedPart
+              ? sharedCombinedReason
+              : buildCombinedReasonText(p.reasonVi || block.reasonVi, p.reasonKr || ''),
             startTimeFormatted: formatTimeToFormStyle(p.startTime || block.startTime),
             endTimeFormatted: formatTimeToFormStyle(p.endTime || block.endTime),
           };
@@ -1312,7 +1490,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
       });
       return { date, formattedDate: formatDateToFormStyle(date), blocks: processedBlocks };
     });
-  }, [previewData, employeeMap, blockOvertimeDate, shellOvertimeDate, currentSelectedEmployeeIds, customTimes, currentReasonVi, currentReasonKr, currentStartTime, currentEndTime]);
+  }, [previewData, employeeMap, blockOvertimeDate, shellOvertimeDate, currentSelectedEmployeeIds, customTimes, customReasons, currentReasonVi, currentReasonKr, currentStartTime, currentEndTime]);
 
   return (
     <div className="flex flex-col lg:flex-row w-full lg:h-full flex-1 min-h-0 lg:overflow-hidden p-3 sm:p-4 gap-4 bg-slate-50 text-slate-800">
@@ -1490,6 +1668,8 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
                     setCurrentSelectedEmployeeIds([]);
                     setCustomTimes({});
                     setEditingTimeEmpId(null);
+                    setCustomReasons({});
+                    setEditingReasonEmpId(null);
                   }}
                   className="text-[11px] font-medium text-slate-500 hover:text-red-600 cursor-pointer transition-colors"
                 >
@@ -1657,123 +1837,245 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
             </div>
 
             {currentSelectedEmployeeIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pt-0.5">
-                {currentSelectedEmployeeIds.map((empId) => {
-                  const emp = employeeMap.get(empId);
-                  if (!emp) return null;
-                  const empStartTime = customTimes[emp.id]?.startTime || currentStartTime;
-                  const empEndTime = customTimes[emp.id]?.endTime || currentEndTime;
-                  const isCustomized = !!customTimes[emp.id];
-                  const isEditingThis = editingTimeEmpId === emp.id;
+              <div className="space-y-2 pt-0.5">
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                  {currentSelectedEmployeeIds.map((empId) => {
+                    const emp = employeeMap.get(empId);
+                    if (!emp) return null;
+                    const empStartTime = customTimes[emp.id]?.startTime || currentStartTime;
+                    const empEndTime = customTimes[emp.id]?.endTime || currentEndTime;
+                    const isCustomized = !!customTimes[emp.id];
+                    const isEditingThis = editingTimeEmpId === emp.id;
+                    const customReasonEntry = customReasons[emp.id];
+                    const hasCustomReason = Boolean(
+                      customReasonEntry &&
+                        ((customReasonEntry.reasonVi || '').trim() ||
+                          (customReasonEntry.reasonKr || '').trim())
+                    );
+                    const isEditingReason = editingReasonEmpId === emp.id;
 
-                  return (
-                    <div
-                      key={emp.id}
-                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] max-w-full transition-colors ${
-                        isCustomized
-                          ? 'bg-amber-50/90 border-amber-300 text-slate-800'
-                          : 'bg-blue-50/75 border-blue-200 text-slate-800'
-                      }`}
-                    >
-                      <span className="font-medium truncate max-w-[135px]" title={`${emp.fullName} (${emp.employeeCode})`}>
-                        {emp.fullName}
-                      </span>
+                    return (
+                      <div
+                        key={emp.id}
+                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] max-w-full transition-colors ${
+                          isCustomized || hasCustomReason
+                            ? 'bg-amber-50/90 border-amber-300 text-slate-800'
+                            : 'bg-blue-50/75 border-blue-200 text-slate-800'
+                        }`}
+                      >
+                        <span className="font-medium truncate max-w-[135px]" title={`${emp.fullName} (${emp.employeeCode})`}>
+                          {emp.fullName}
+                        </span>
 
-                      {isEditingThis ? (
-                        <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
-                          <input
-                            type="text"
-                            maxLength={5}
-                            value={empStartTime}
-                            onChange={(e) =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [emp.id]: {
-                                  startTime: OvertimeFormService.sanitize24hTimeInput(e.target.value),
-                                  endTime: prev[emp.id]?.endTime || currentEndTime,
-                                },
-                              }))
-                            }
-                            onBlur={() =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [emp.id]: {
-                                  startTime: OvertimeFormService.normalize24hTime(empStartTime, currentStartTime),
-                                  endTime: prev[emp.id]?.endTime || currentEndTime,
-                                },
-                              }))
-                            }
-                            className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
-                            placeholder="16:10"
-                          />
-                          <span className="text-[10px] text-slate-400">-</span>
-                          <input
-                            type="text"
-                            maxLength={5}
-                            value={empEndTime}
-                            onChange={(e) =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [emp.id]: {
-                                  startTime: prev[emp.id]?.startTime || currentStartTime,
-                                  endTime: OvertimeFormService.sanitize24hTimeInput(e.target.value),
-                                },
-                              }))
-                            }
-                            onBlur={() =>
-                              setCustomTimes((prev) => ({
-                                ...prev,
-                                [emp.id]: {
-                                  startTime: prev[emp.id]?.startTime || currentStartTime,
-                                  endTime: OvertimeFormService.normalize24hTime(empEndTime, currentEndTime),
-                                },
-                              }))
-                            }
-                            className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
-                            placeholder="20:10"
-                          />
+                        {isEditingThis ? (
+                          <div className="flex items-center gap-0.5 bg-white px-1 py-0.5 rounded border border-[#14539E]">
+                            <input
+                              type="text"
+                              maxLength={5}
+                              value={empStartTime}
+                              onChange={(e) =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [emp.id]: {
+                                    startTime: OvertimeFormService.sanitize24hTimeInput(e.target.value),
+                                    endTime: prev[emp.id]?.endTime || currentEndTime,
+                                  },
+                                }))
+                              }
+                              onBlur={() =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [emp.id]: {
+                                    startTime: OvertimeFormService.normalize24hTime(empStartTime, currentStartTime),
+                                    endTime: prev[emp.id]?.endTime || currentEndTime,
+                                  },
+                                }))
+                              }
+                              className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
+                              placeholder="16:10"
+                            />
+                            <span className="text-[10px] text-slate-400">-</span>
+                            <input
+                              type="text"
+                              maxLength={5}
+                              value={empEndTime}
+                              onChange={(e) =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [emp.id]: {
+                                    startTime: prev[emp.id]?.startTime || currentStartTime,
+                                    endTime: OvertimeFormService.sanitize24hTimeInput(e.target.value),
+                                  },
+                                }))
+                              }
+                              onBlur={() =>
+                                setCustomTimes((prev) => ({
+                                  ...prev,
+                                  [emp.id]: {
+                                    startTime: prev[emp.id]?.startTime || currentStartTime,
+                                    endTime: OvertimeFormService.normalize24hTime(empEndTime, currentEndTime),
+                                  },
+                                }))
+                              }
+                              className="w-10 h-4 text-[10px] font-mono text-center border border-slate-200 rounded px-0.5 focus:outline-none focus:border-[#14539E]"
+                              placeholder="20:10"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setEditingTimeEmpId(null)}
+                              className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                            >
+                              <Check className="w-2.5 h-2.5 stroke-[2.5]" />
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => setEditingTimeEmpId(null)}
-                            className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                            onClick={() => setEditingTimeEmpId(emp.id)}
+                            className={`inline-flex items-center gap-0.5 text-[10px] font-mono px-1 py-0.5 rounded border transition-colors cursor-pointer shrink-0 ${
+                              isCustomized
+                                ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+                                : 'bg-white/80 text-slate-500 border-slate-200 hover:border-[#14539E] hover:text-[#14539E]'
+                            }`}
                           >
-                            <Check className="w-2.5 h-2.5 stroke-[2.5]" />
+                            <Clock className="w-2.5 h-2.5" />
+                            <span>{empStartTime}-{empEndTime}</span>
                           </button>
-                        </div>
-                      ) : (
+                        )}
+
                         <button
                           type="button"
-                          onClick={() => setEditingTimeEmpId(emp.id)}
-                          className={`inline-flex items-center gap-0.5 text-[10px] font-mono px-1 py-0.5 rounded border transition-colors cursor-pointer shrink-0 ${
-                            isCustomized
-                              ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
-                              : 'bg-white/80 text-slate-500 border-slate-200 hover:border-[#14539E] hover:text-[#14539E]'
+                          title="Thêm lý do tăng ca riêng cho người này"
+                          aria-label={`Thêm lý do tăng ca riêng cho ${emp.fullName}`}
+                          data-testid={`create-custom-reason-btn-${emp.employeeCode || emp.id}`}
+                          onClick={() =>
+                            setEditingReasonEmpId((prev) =>
+                              prev === emp.id ? null : emp.id
+                            )
+                          }
+                          className={`p-0.5 rounded border cursor-pointer shrink-0 transition-colors ${
+                            hasCustomReason || isEditingReason
+                              ? 'border-amber-400 bg-amber-100 text-amber-800'
+                              : 'border-transparent text-slate-400 hover:text-[#14539E] hover:bg-white'
                           }`}
                         >
-                          <Clock className="w-2.5 h-2.5" />
-                          <span>{empStartTime}-{empEndTime}</span>
+                          <FileEdit className="w-3 h-3" />
                         </button>
-                      )}
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleToggleEmployee(emp.id);
-                          setCustomTimes((prev) => {
-                            if (!prev[emp.id]) return prev;
-                            const next = { ...prev };
-                            delete next[emp.id];
-                            return next;
-                          });
-                          if (editingTimeEmpId === emp.id) setEditingTimeEmpId(null);
-                        }}
-                        className="p-0.5 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer shrink-0 transition-colors"
+                        <button
+                          type="button"
+                          aria-label={`Bỏ chọn ${emp.fullName}`}
+                          onClick={() => {
+                            handleToggleEmployee(emp.id);
+                            setCustomTimes((prev) => {
+                              if (!prev[emp.id]) return prev;
+                              const next = { ...prev };
+                              delete next[emp.id];
+                              return next;
+                            });
+                            if (editingTimeEmpId === emp.id) setEditingTimeEmpId(null);
+                          }}
+                          className="p-0.5 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer shrink-0 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {editingReasonEmpId &&
+                  employeeMap.get(editingReasonEmpId) &&
+                  currentSelectedEmployeeIds.includes(editingReasonEmpId) && (() => {
+                    const targetEmp = employeeMap.get(editingReasonEmpId)!;
+                    const entry = customReasons[editingReasonEmpId] || {
+                      reasonVi: '',
+                      reasonKr: '',
+                    };
+                    const hasEntry = Boolean(
+                      entry.reasonVi.trim() || entry.reasonKr.trim()
+                    );
+                    return (
+                      <div
+                        data-testid="create-custom-reason-editor"
+                        className="rounded-xl border border-amber-300 bg-amber-50/70 p-2.5 space-y-1.5"
                       >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  );
-                })}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold text-amber-900">
+                            Lý do riêng — {targetEmp.fullName}{' '}
+                            <span className="font-normal text-amber-700">
+                              (xuống cuối nhóm)
+                            </span>
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={translatingCustomEmpId === editingReasonEmpId}
+                              onClick={() =>
+                                void handleTranslateCustomReason(editingReasonEmpId)
+                              }
+                              className="text-[10px] font-semibold text-[#14539E] hover:underline inline-flex items-center gap-0.5 cursor-pointer disabled:opacity-50"
+                            >
+                              {translatingCustomEmpId === editingReasonEmpId ? (
+                                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="w-2.5 h-2.5" />
+                              )}
+                              <span>Dịch gợi ý</span>
+                            </button>
+                            {hasEntry && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleClearCustomReason(editingReasonEmpId)
+                                }
+                                className="text-[10px] font-semibold text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Xóa lý do riêng
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditingReasonEmpId(null)}
+                              className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+                            >
+                              Thu gọn
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-1.5">
+                          <input
+                            type="text"
+                            data-testid="create-custom-reason-vi-input"
+                            value={entry.reasonVi}
+                            onChange={(e) =>
+                              handleUpdateCustomReason(
+                                editingReasonEmpId,
+                                'reasonVi',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Lý do riêng (Tiếng Việt)..."
+                            className="w-full h-7 px-2 text-xs rounded-lg border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
+                          />
+                          <input
+                            type="text"
+                            data-testid="create-custom-reason-kr-input"
+                            value={entry.reasonKr}
+                            onChange={(e) =>
+                              handleUpdateCustomReason(
+                                editingReasonEmpId,
+                                'reasonKr',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Lý do riêng (Tiếng Hàn)..."
+                            className="w-full h-7 px-2 text-xs rounded-lg border border-amber-300 bg-white focus:outline-none focus:border-[#14539E]"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
               </div>
             )}
           </div>

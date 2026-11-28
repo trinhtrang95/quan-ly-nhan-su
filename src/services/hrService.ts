@@ -43,6 +43,7 @@ export type {
 // TĂNG CA (OVERTIME FORMS & REALTIME)
 // ==========================================
 export {
+  analyzeOvertimeFormGroupStatus,
   buildMergedEmployeesForExport,
   buildOvertimeFormItemsFromBlocks,
   buildOnLeaveEmployeeMapForDate,
@@ -67,11 +68,15 @@ export {
   generateOvertimeFormCode,
   getLeaveTypeShortLabel,
   getLocalTodayIsoDate,
+  hasParticipantCustomReason,
   isLeaveRecordCoveringDate,
   isOvertimeFormLocked,
   isOvertimeTimeBold,
+  isProductionDutyReason,
   lockOvertimeForm,
   normalizeDepartmentKey,
+  normalizeOvertimeGroupKey,
+  OVERTIME_STANDARD_GROUPS,
   OvertimeSupabaseActionError,
   reconstructBlocksFromItems,
   reorderOvertimeBlocks,
@@ -81,8 +86,11 @@ export {
   resolveOvertimeMainDepartment,
   resolveRepresentativeOvertimeDate,
   saveOvertimeFormToHistory,
+  shiftIsoDateDays,
   softDeleteOvertimeForm,
   softDeleteOvertimeForms,
+  sortOvertimeBlocksByStandardOrder,
+  sortParticipantsByReasonScope,
   subscribeToLeaveLogsRealtime,
   subscribeToOvertimeRealtime,
   SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL,
@@ -90,6 +98,7 @@ export {
   updateOvertimeFormInHistory,
 } from '../utils/overtimeFormsService';
 export type {
+  BuildPrintableGroupsOptions,
   CreateOrOpenOvertimeShellResult,
   CreateOrOpenShellAction,
   EvaluateOvertimeDateConflictParams,
@@ -105,6 +114,9 @@ export type {
   OvertimeLeaveCheckEntry,
   OvertimeParticipantInput,
   OvertimeRealtimeChangeEvent,
+  OvertimeStandardGroupDef,
+  OvertimeStandardGroupId,
+  OvertimeStandardGroupStatus,
   PrintableOvertimeDateGroup,
   PrintableOvertimeRow,
   SaveOvertimeFormInput,

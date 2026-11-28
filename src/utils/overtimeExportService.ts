@@ -2,12 +2,17 @@ import ExcelJS from 'exceljs';
 import { Employee } from '../types/hr';
 import {
   formatOvertimeDepartmentHeaderLabel,
+  hasParticipantCustomReason,
+  sortOvertimeBlocksByStandardOrder,
+  sortParticipantsByReasonScope,
 } from './overtimeFormsService';
 
 export interface OvertimeExportParticipant {
   employeeId: string;
   startTime: string;
   endTime: string;
+  reasonVi?: string;
+  reasonKr?: string;
 }
 
 export interface OvertimeExportTaskBlock {
@@ -27,6 +32,7 @@ export interface OvertimeExportPayload {
   blocks: OvertimeExportTaskBlock[];
   employees: Employee[];
   knownSubGroups?: string[];
+  preserveBlockOrder?: boolean;
 }
 
 export interface ExcelDensityConfig {
@@ -229,6 +235,7 @@ export class OvertimeExportService {
       blocks,
       employees,
       knownSubGroups = [],
+      preserveBlockOrder = false,
     } = payload;
     const empById = new Map<string, Employee>(employees.map((e) => [e.id, e]));
     const allKnownSubGroups = Array.from(
@@ -239,7 +246,7 @@ export class OvertimeExportService {
     );
 
     const mapByDate = new Map<string, OvertimeExportTaskBlock[]>();
-    const effectiveBlocks =
+    const rawEffectiveBlocks =
       blocks.length > 0
         ? blocks
         : [
@@ -253,6 +260,14 @@ export class OvertimeExportService {
               selectedEmployeeIds: [],
             },
           ];
+
+    const effectiveBlocks = preserveBlockOrder
+      ? rawEffectiveBlocks
+      : sortOvertimeBlocksByStandardOrder(
+          rawEffectiveBlocks,
+          overtimeDate || '',
+          empById
+        );
 
     let totalRows = 0;
     for (const b of effectiveBlocks) {
@@ -457,24 +472,45 @@ export class OvertimeExportService {
       let sequentialNo = 1;
 
       for (const block of dateBlocks) {
-        const participants = resolveBlockParticipants(block);
-        const startRow = currentRowIndex;
-        const endRow = currentRowIndex + participants.length - 1;
-        const combinedReason = buildCombinedReasonText(
+        const sortedParticipants = sortParticipantsByReasonScope(
+          resolveBlockParticipants(block),
           block.reasonVi,
           block.reasonKr
         );
-        const rowHeight = computeExcelBlockRowHeight(
-          combinedReason,
-          participants.length,
-          totalRows
-        );
+        const sharedCount = sortedParticipants.filter(
+          (p) => !hasParticipantCustomReason(p, block.reasonVi, block.reasonKr)
+        ).length;
 
-        for (let i = 0; i < participants.length; i += 1) {
-          const p = participants[i];
+        const startRow = currentRowIndex;
+        const sharedEndRow = startRow + sharedCount - 1;
+        const sharedCombinedReason = buildCombinedReasonText(
+          block.reasonVi,
+          block.reasonKr
+        );
+        const sharedRowHeight =
+          sharedCount > 0
+            ? computeExcelBlockRowHeight(
+                sharedCombinedReason,
+                sharedCount,
+                totalRows
+              )
+            : density.baseRowHeight;
+
+        for (let i = 0; i < sortedParticipants.length; i += 1) {
+          const p = sortedParticipants[i];
+          const isSharedRow = i < sharedCount;
+          const rowCombinedReason = isSharedRow
+            ? sharedCombinedReason
+            : buildCombinedReasonText(
+                p.reasonVi || block.reasonVi,
+                p.reasonKr || block.reasonKr
+              );
           const emp = empById.get(p.employeeId);
-          const row = worksheet.getRow(currentRowIndex + i);
-          row.height = rowHeight;
+          const rowIndex = currentRowIndex + i;
+          const row = worksheet.getRow(rowIndex);
+          row.height = isSharedRow
+            ? sharedRowHeight
+            : computeExcelBlockRowHeight(rowCombinedReason, 1, totalRows);
 
           for (let colIdx = 1; colIdx <= 9; colIdx += 1) {
             row.getCell(colIdx).border = THIN_BLACK_BORDER;
@@ -499,7 +535,7 @@ export class OvertimeExportService {
 
           setCell('A', sequentialNo);
           setCell('B', emp ? emp.fullName : '', false, 'left', false);
-          setCell('C', combinedReason, false, 'left', true);
+          setCell('C', rowCombinedReason, false, 'left', true);
           setCell(
             'F',
             formatTimeToFormStyle(p.startTime || block.startTime),
@@ -513,13 +549,17 @@ export class OvertimeExportService {
           setCell('H', '');
           setCell('I', '');
 
+          if (!isSharedRow) {
+            worksheet.mergeCells(`C${rowIndex}:E${rowIndex}`);
+          }
+
           sequentialNo += 1;
         }
 
-        if (endRow >= startRow) {
-          worksheet.mergeCells(`C${startRow}:E${endRow}`);
+        if (sharedCount > 0 && sharedEndRow >= startRow) {
+          worksheet.mergeCells(`C${startRow}:E${sharedEndRow}`);
         }
-        currentRowIndex = endRow + 1;
+        currentRowIndex = startRow + sortedParticipants.length;
       }
     }
 

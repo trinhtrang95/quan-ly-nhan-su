@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  analyzeOvertimeFormGroupStatus,
   buildOnLeaveEmployeeMapForDate,
   buildOvertimeFormItemsFromBlocks,
   buildPrintableDateGroupsFromItems,
@@ -17,6 +18,7 @@ import {
   isLeaveRecordCoveringDate,
   isOvertimeFormLocked,
   isOvertimeTimeBold,
+  OVERTIME_STANDARD_GROUPS,
   reconstructBlocksFromItems,
   reorderOvertimeBlocks,
   formatOvertimeGroupCompactLabel,
@@ -24,6 +26,9 @@ import {
   resolveDepartmentLabel,
   resolveOvertimeMainDepartment,
   resolveRepresentativeOvertimeDate,
+  shiftIsoDateDays,
+  sortOvertimeBlocksByStandardOrder,
+  sortParticipantsByReasonScope,
   type OvertimeBlockInput,
   type OvertimeFormWithItems,
   type OvertimeLeaveCheckEntry,
@@ -988,6 +993,7 @@ describe('overtimeFormsService pure logic', () => {
       department: 'Bộ phận Kỹ thuật',
       overtimeDate: '2026-11-28',
       employees: manyEmployees,
+      preserveBlockOrder: true,
       blocks: [
         {
           id: 'blk-1',
@@ -1047,6 +1053,252 @@ describe('overtimeFormsService pure logic', () => {
     assert.ok(
       computeExcelBlockRowHeight('Dòng 1\nDòng 2\nDòng 3\nDòng 4', 1, 10) >= 60
     );
+  });
+
+  it('analyzes fixed 9-item overtime group status with distinct prior dates, production duty, and normalized dept names', () => {
+    assert.equal(OVERTIME_STANDARD_GROUPS.length, 9);
+    assert.equal(shiftIsoDateDays('2026-11-30', -1), '2026-11-29');
+    assert.equal(shiftIsoDateDays('2026-11-30', -2), '2026-11-28');
+
+    const deptEmployees: Employee[] = [
+      { ...sampleEmployees[0], id: 'e-bt', employeeCode: 'NV101', fullName: 'NV Bảo trì', department: 'Bảo trì' },
+      { ...sampleEmployees[0], id: 'e-vp', employeeCode: 'NV102', fullName: 'NV Văn phòng', department: 'Văn Phòng' },
+      { ...sampleEmployees[0], id: 'e-pe', employeeCode: 'NV103', fullName: 'NV PE', department: 'PE' },
+      { ...sampleEmployees[0], id: 'e-truc', employeeCode: 'NV104', fullName: 'NV Trực', department: 'AUTO 1' },
+    ];
+    const empMap = new Map(deptEmployees.map((e) => [e.id, e]));
+
+    const blocks: OvertimeBlockInput[] = [
+      {
+        id: 'b-d2',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Phát sinh xử lý line',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-pe'],
+        participants: [{ employeeId: 'e-pe', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'b-d1',
+        overtimeDate: '2026-11-29',
+        reasonVi: 'Phát sinh hôm qua',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '19:10',
+        selectedEmployeeIds: ['e-pe'],
+        participants: [{ employeeId: 'e-pe', startTime: '16:10', endTime: '19:10' }],
+      },
+      {
+        id: 'b-prod',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Trực sản xuất',
+        reasonKr: '생산 당직',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-truc'],
+        participants: [{ employeeId: 'e-truc', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'b-vp',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Kiểm kê cuối tháng',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-vp'],
+        participants: [{ employeeId: 'e-vp', startTime: '16:10', endTime: '18:10' }],
+      },
+    ];
+
+    const status = analyzeOvertimeFormGroupStatus(blocks, '2026-11-30', empMap);
+    assert.equal(status.prev_day.isRegistered, true);
+    assert.equal(status.prev_day.count, 2);
+    assert.equal(status.prev_day.badgeText, '2 ngày');
+
+    assert.equal(status.production_duty.isRegistered, true);
+    assert.equal(status.production_duty.count, 1);
+    assert.equal(status.production_duty.badgeText, '1 người');
+
+    // Normalized 'Văn Phòng' -> matches #9 'Văn phòng'
+    assert.equal(status.van_phong.isRegistered, true);
+    assert.equal(status.van_phong.count, 1);
+    assert.equal(status.van_phong.badgeText, '1 người');
+
+    // PE only worked on prior days -> current-day PE group stays unregistered
+    assert.equal(status.pe.isRegistered, false);
+    assert.equal(status.bao_tri.isRegistered, false);
+  });
+
+  it('auto-sorts overtime blocks according to standard 1 -> 9 priority with D-2 before D-1', () => {
+    const deptEmployees: Employee[] = [
+      { ...sampleEmployees[0], id: 'e-bt', employeeCode: 'NV101', fullName: 'NV Bảo trì', department: 'Bảo trì' },
+      { ...sampleEmployees[0], id: 'e-vp', employeeCode: 'NV102', fullName: 'NV Văn phòng', department: 'Văn Phòng' },
+      { ...sampleEmployees[0], id: 'e-pe', employeeCode: 'NV103', fullName: 'NV PE', department: 'PE' },
+      { ...sampleEmployees[0], id: 'e-truc', employeeCode: 'NV104', fullName: 'NV Trực', department: 'AUTO 1' },
+    ];
+    const empMap = new Map(deptEmployees.map((e) => [e.id, e]));
+
+    const unsorted: OvertimeBlockInput[] = [
+      {
+        id: 'vp',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Hỗ trợ văn phòng',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-vp'],
+        participants: [{ employeeId: 'e-vp', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'd1',
+        overtimeDate: '2026-11-29',
+        reasonVi: 'Phát sinh D-1',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-pe'],
+        participants: [{ employeeId: 'e-pe', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'bt',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Bảo dưỡng máy',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-bt'],
+        participants: [{ employeeId: 'e-bt', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'prod',
+        overtimeDate: '2026-11-30',
+        reasonVi: 'Trực sản xuất',
+        reasonKr: '생산 당직',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-truc'],
+        participants: [{ employeeId: 'e-truc', startTime: '16:10', endTime: '18:10' }],
+      },
+      {
+        id: 'd2',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Phát sinh D-2',
+        reasonKr: '',
+        startTime: '16:10',
+        endTime: '18:10',
+        selectedEmployeeIds: ['e-pe'],
+        participants: [{ employeeId: 'e-pe', startTime: '16:10', endTime: '18:10' }],
+      },
+    ];
+
+    const sorted = sortOvertimeBlocksByStandardOrder(unsorted, '2026-11-30', empMap);
+    assert.deepEqual(
+      sorted.map((b) => b.id),
+      ['d2', 'd1', 'prod', 'bt', 'vp']
+    );
+  });
+
+  it('pushes employees with individual custom reasons to block bottom with unmerged preview rows and Excel cells', async () => {
+    const threeEmps: Employee[] = [
+      { ...sampleEmployees[0], id: 'emp-a', employeeCode: 'NV001', fullName: 'Nguyễn Văn A' },
+      { ...sampleEmployees[0], id: 'emp-b', employeeCode: 'NV002', fullName: 'Trần Thị B' },
+      { ...sampleEmployees[0], id: 'emp-c', employeeCode: 'NV003', fullName: 'Lê Văn C' },
+    ];
+
+    // emp-a has a custom reason while emp-b and emp-c share the block reason
+    const rawParticipants = [
+      {
+        employeeId: 'emp-a',
+        startTime: '16:10',
+        endTime: '20:10',
+        reasonVi: 'Sửa jig riêng cho line 2',
+        reasonKr: '라인 2 전용 지그 수리',
+      },
+      { employeeId: 'emp-b', startTime: '16:10', endTime: '18:10' },
+      { employeeId: 'emp-c', startTime: '16:10', endTime: '18:10' },
+    ];
+
+    const sortedParticipants = sortParticipantsByReasonScope(
+      rawParticipants,
+      'Trực sản xuất',
+      '생산 당직'
+    );
+    assert.deepEqual(
+      sortedParticipants.map((p) => p.employeeId),
+      ['emp-b', 'emp-c', 'emp-a']
+    );
+
+    const block: OvertimeBlockInput = {
+      id: 'blk-mixed',
+      overtimeDate: '2026-11-30',
+      reasonVi: 'Trực sản xuất',
+      reasonKr: '생산 당직',
+      startTime: '16:10',
+      endTime: '18:10',
+      selectedEmployeeIds: sortedParticipants.map((p) => p.employeeId),
+      participants: sortedParticipants,
+    };
+
+    const items = buildOvertimeFormItemsFromBlocks(
+      'form-1',
+      [block],
+      threeEmps,
+      '2026-11-30'
+    );
+    assert.equal(items.length, 3);
+    assert.equal(items[0].employee_name, 'Trần Thị B');
+    assert.equal(items[0].reason_vi, 'Trực sản xuất');
+    assert.equal(items[1].employee_name, 'Lê Văn C');
+    assert.equal(items[1].reason_vi, 'Trực sản xuất');
+    assert.equal(items[2].employee_name, 'Nguyễn Văn A');
+    assert.equal(items[2].reason_vi, 'Sửa jig riêng cho line 2');
+
+    const reconstructed = reconstructBlocksFromItems(items);
+    assert.equal(reconstructed.length, 1);
+    assert.equal(reconstructed[0].reasonVi, 'Trực sản xuất');
+    assert.equal(reconstructed[0].participants[2].reasonVi, 'Sửa jig riêng cho line 2');
+
+    const printable = buildPrintableDateGroupsFromItems(items, {
+      employees: threeEmps,
+      shellOvertimeDate: '2026-11-30',
+    });
+    assert.equal(printable.length, 1);
+    const rows = printable[0].blocks[0].rows;
+    assert.equal(rows.length, 3);
+    // Shared top rows merge rowSpan = 2
+    assert.equal(rows[0].fullName, 'Trần Thị B');
+    assert.equal(rows[0].isFirstInBlock, true);
+    assert.equal(rows[0].rowSpan, 2);
+    assert.equal(rows[1].fullName, 'Lê Văn C');
+    assert.equal(rows[1].isFirstInBlock, false);
+    assert.equal(rows[1].rowSpan, 2);
+    // Custom bottom row gets unmerged rowSpan = 1
+    assert.equal(rows[2].fullName, 'Nguyễn Văn A');
+    assert.equal(rows[2].isFirstInBlock, true);
+    assert.equal(rows[2].rowSpan, 1);
+    assert.match(rows[2].combinedReason, /Sửa jig riêng cho line 2/);
+
+    // Verify Excel workbook merges shared C10:E11 and keeps C12:E12 separate
+    const { workbook } = await overtimeExportService.buildWorkbook({
+      department: 'Bộ phận Kỹ thuật',
+      overtimeDate: '2026-11-30',
+      employees: threeEmps,
+      blocks: [block],
+    });
+    const sheet = workbook.getWorksheet('TV-PSGC2022');
+    assert.ok(sheet);
+    assert.equal(sheet.getRow(10).getCell('B').value, 'Trần Thị B');
+    assert.equal(sheet.getRow(11).getCell('B').value, 'Lê Văn C');
+    assert.equal(sheet.getRow(12).getCell('B').value, 'Nguyễn Văn A');
+    assert.equal(sheet.getRow(10).getCell('C').value, 'Trực sản xuất\n생산 당직');
+    assert.equal(
+      sheet.getRow(12).getCell('C').value,
+      'Sửa jig riêng cho line 2\n라인 2 전용 지그 수리'
+    );
+    assert.equal(sheet.getRow(10).getCell('C').isMerged, true);
+    assert.equal(sheet.getRow(11).getCell('C').master, sheet.getRow(10).getCell('C'));
+    assert.notEqual(sheet.getRow(12).getCell('C').master, sheet.getRow(10).getCell('C'));
   });
 });
 

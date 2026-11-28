@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Employee } from '../../../types/hr';
 import {
   buildPrintableDateGroupsFromItems,
   computeOvertimeA4Density,
@@ -32,10 +33,12 @@ export interface PrintableA4DateGroup {
 
 export interface OvertimeA4PreviewSheetProps {
   form?: OvertimeFormWithItems;
+  employees?: Employee[];
   printableGroups?: PrintableA4DateGroup[];
   departmentHeaderLabel?: string;
   fallbackFormattedDate?: string;
   knownSubGroups?: string[];
+  preserveBlockOrder?: boolean;
   variant?: 'inline' | 'modal';
   isPrintableTarget?: boolean;
 }
@@ -49,17 +52,23 @@ function formatDateToFormStyle(isoDate?: string): string {
 
 export const OvertimeA4PreviewSheet: React.FC<OvertimeA4PreviewSheetProps> = ({
   form,
+  employees = [],
   printableGroups: explicitPrintableGroups,
   departmentHeaderLabel: explicitDepartmentHeaderLabel,
   fallbackFormattedDate: explicitFallbackDate,
   knownSubGroups = [],
+  preserveBlockOrder = false,
   variant = 'inline',
   isPrintableTarget = true,
 }) => {
   const resolvedGroups = useMemo<PrintableA4DateGroup[]>(() => {
     if (explicitPrintableGroups) return explicitPrintableGroups;
-    return buildPrintableDateGroupsFromItems(form?.items || []);
-  }, [explicitPrintableGroups, form?.items]);
+    return buildPrintableDateGroupsFromItems(form?.items || [], {
+      employees,
+      shellOvertimeDate: form?.overtime_date,
+      autoSortStandardOrder: !preserveBlockOrder,
+    });
+  }, [explicitPrintableGroups, form?.items, form?.overtime_date, employees, preserveBlockOrder]);
 
   const totalRows = useMemo(
     () =>
