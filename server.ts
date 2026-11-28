@@ -3,12 +3,14 @@ import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 
 const PORT = Number(process.env.PORT || 3000);
-const PRIMARY_GEMINI_MODEL = 'gemini-4-hydrogen';
-const FALLBACK_GEMINI_MODEL = 'gemini-3.1-flash-lite';
-let preferredGeminiModel = PRIMARY_GEMINI_MODEL;
+const GEMINI_VISION_MODELS = [
+  'gemini-4-hydrogen',
+  'gemini-3.1-flash-lite',
+] as const;
+let preferredGeminiModel: (typeof GEMINI_VISION_MODELS)[number] =
+  GEMINI_VISION_MODELS[0];
 
 interface EmployeeContextItem {
   id: string;
@@ -179,7 +181,11 @@ async function startServer() {
 
   app.post('/api/overtime/parse-schedule-image', async (req: Request, res: Response) => {
     try {
-      const apiKey = process.env.GEMINI_API_KEY?.trim();
+      const apiKey = (
+        process.env.GEMINI_API_KEY ||
+        process.env.VITE_GEMINI_API_KEY ||
+        ''
+      ).trim();
       if (!apiKey) {
         res.status(500).json({
           error: 'Máy chủ chưa cấu hình GEMINI_API_KEY nên chưa thể phân tích ảnh.',
@@ -228,34 +234,39 @@ async function startServer() {
         },
       });
 
-      let modelUsed = preferredGeminiModel;
+      const orderedModels = [
+        preferredGeminiModel,
+        ...GEMINI_VISION_MODELS.filter((m) => m !== preferredGeminiModel),
+      ];
+
+      let modelUsed: (typeof GEMINI_VISION_MODELS)[number] = orderedModels[0];
       let aiResponse;
-      try {
-        aiResponse = await generateScheduleExtraction(
-          ai,
-          preferredGeminiModel,
-          cleanBase64,
-          mimeType,
-          prompt
-        );
-      } catch (primaryErr) {
-        const alternateModel =
-          preferredGeminiModel === PRIMARY_GEMINI_MODEL
-            ? FALLBACK_GEMINI_MODEL
-            : PRIMARY_GEMINI_MODEL;
-        if (isModelNotFoundError(primaryErr) || isQuotaExceededError(primaryErr)) {
-          preferredGeminiModel = alternateModel;
-          modelUsed = alternateModel;
+      let lastErr: unknown = null;
+
+      for (const candidateModel of orderedModels) {
+        try {
           aiResponse = await generateScheduleExtraction(
             ai,
-            alternateModel,
+            candidateModel,
             cleanBase64,
             mimeType,
             prompt
           );
-        } else {
-          throw primaryErr;
+          preferredGeminiModel = candidateModel;
+          modelUsed = candidateModel;
+          lastErr = null;
+          break;
+        } catch (modelErr) {
+          lastErr = modelErr;
+          if (isModelNotFoundError(modelErr) || isQuotaExceededError(modelErr)) {
+            continue;
+          }
+          throw modelErr;
         }
+      }
+
+      if (!aiResponse) {
+        throw lastErr || new Error('Không thể kết nối tới model Gemini Vision khả dụng.');
       }
 
       const rawText = stripJsonCodeFences(aiResponse.text || '');
@@ -287,6 +298,7 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
