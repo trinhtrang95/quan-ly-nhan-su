@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Calendar,
+  ArrowDown,
+  ArrowUp,
+  Camera,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -14,55 +16,88 @@ import {
   Loader2,
   Lock,
   Pencil,
+  Plus,
   Printer,
   ShieldAlert,
   Trash2,
   Unlock,
   X,
 } from 'lucide-react';
-import { DepartmentGroup, Employee } from '../../../types/hr';
+import {
+  DepartmentGroup,
+  Employee,
+} from '../../../types/hr';
 import {
   formatNumberVN,
   getFriendlyErrorMessage,
 } from '../../../utils/errorAndSecurityService';
 import {
   formatDateToFormStyle,
-  formatDepartmentHeaderLabel,
   overtimeExportService,
 } from '../../../utils/overtimeExportService';
 import {
   buildMergedEmployeesForExport,
-  buildPrintableDateGroupsFromItems,
+  DEFAULT_OVERTIME_DEPARTMENT,
   fetchOvertimeFormById,
   filterOvertimeForms,
   formatOvertimeFormCodeDisplay,
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
-  isOvertimeTimeBold,
+  OvertimeBlockInput,
   OvertimeFormWithItems,
+  OvertimeGlossaryEntry,
+  OvertimeLeaveCheckEntry,
   OvertimeSupabaseActionError,
   reconstructBlocksFromItems,
+  reorderOvertimeBlocks,
   resolveOvertimeMainDepartment,
   SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL,
+  translateMultilineKorean,
 } from '../../../services/hrService';
+import {
+  type CompanyHoliday,
+  createDefaultAdminShift,
+  type WorkShift,
+} from '../../../utils/workScheduleLogic';
 import {
   buildCalendarYearOptions,
   buildOvertimeMonthCalendarGrid,
   CALENDAR_WEEKDAY_HEADERS,
-  collectOvertimeFormDatesSet,
+  collectOvertimeFormStatusByDate,
   formatYearMonthKey,
   parseYearMonthKey,
   shiftYearMonth,
 } from '../../../utils/overtimeCalendarLogic';
+import { OvertimeA4PreviewSheet } from './OvertimeA4PreviewSheet';
+import { ManualOvertimeGroupModal } from './ManualOvertimeGroupModal';
+import {
+  ConfirmableOvertimeBlockPayload,
+  ZaloScheduleScanModal,
+} from './ZaloScheduleScanModal';
+import { parseOvertimeScheduleImage } from '../../../services/overtimeImageService';
 
 export interface OvertimeLogProps {
   forms: OvertimeFormWithItems[];
   employees: Employee[];
   groups?: DepartmentGroup[];
+  leaveRecords?: OvertimeLeaveCheckEntry[];
+  glossaryEntries?: OvertimeGlossaryEntry[];
+  workShifts?: WorkShift[];
+  companyHolidays?: CompanyHoliday[];
   isLoading: boolean;
   schemaNeedsMigration?: boolean;
   onRefresh: () => Promise<void> | void;
   onCreateOrOpenShell?: (overtimeDate: string) => Promise<void> | void;
+  onAppendBlocksToDate?: (
+    fallbackDate: string,
+    payloads: ConfirmableOvertimeBlockPayload[]
+  ) => Promise<OvertimeFormWithItems>;
+  onUpdateFormBlocks?: (
+    form: OvertimeFormWithItems,
+    nextBlocks: OvertimeBlockInput[]
+  ) => Promise<OvertimeFormWithItems>;
+  onGlossaryEntriesUpdated?: (entries: OvertimeGlossaryEntry[]) => void;
+  onLeaveRecordsRefreshed?: (records: OvertimeLeaveCheckEntry[]) => void;
   onEdit: (form: OvertimeFormWithItems) => void;
   onLockForm?: (form: OvertimeFormWithItems) => Promise<void>;
   onUnlockForm?: (form: OvertimeFormWithItems) => Promise<void>;
@@ -75,10 +110,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   forms,
   employees,
   groups = [],
+  leaveRecords = [],
+  glossaryEntries = [],
+  workShifts,
+  companyHolidays = [],
   isLoading,
   schemaNeedsMigration = false,
   onRefresh,
   onCreateOrOpenShell,
+  onAppendBlocksToDate,
+  onUpdateFormBlocks,
+  onGlossaryEntriesUpdated,
+  onLeaveRecordsRefreshed,
   onEdit,
   onLockForm,
   onUnlockForm,
@@ -87,24 +130,32 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   onShowToast,
 }) => {
   const todayIsoDate = useMemo(() => getLocalTodayIsoDate(), []);
-  const currentMonthKey = useMemo(
-    () => todayIsoDate.slice(0, 7),
-    [todayIsoDate]
-  );
+  const currentMonthKey = useMemo(() => todayIsoDate.slice(0, 7), [todayIsoDate]);
   const currentYear = useMemo(
     () => Number(todayIsoDate.slice(0, 4)),
     [todayIsoDate]
   );
+
   const [isCreatingShell, setIsCreatingShell] = useState<boolean>(false);
   const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(
-    null
+    () => getLocalTodayIsoDate()
   );
+  const [selectedPreviewFormId, setSelectedPreviewFormId] = useState<
+    string | null
+  >(null);
   const [calendarYear, setCalendarYear] = useState<number>(() =>
-    parseYearMonthKey(getLocalTodayIsoDate().slice(0, 7), getLocalTodayIsoDate()).year
+    parseYearMonthKey(getLocalTodayIsoDate().slice(0, 7), getLocalTodayIsoDate())
+      .year
   );
   const [calendarMonth, setCalendarMonth] = useState<number>(() =>
-    parseYearMonthKey(getLocalTodayIsoDate().slice(0, 7), getLocalTodayIsoDate()).month
+    parseYearMonthKey(getLocalTodayIsoDate().slice(0, 7), getLocalTodayIsoDate())
+      .month
   );
+
+  const [isManualGroupOpen, setIsManualGroupOpen] = useState<boolean>(false);
+  const [isZaloScanOpen, setIsZaloScanOpen] = useState<boolean>(false);
+  const [isReordering, setIsReordering] = useState<boolean>(false);
+
   const [viewingForm, setViewingForm] = useState<OvertimeFormWithItems | null>(
     null
   );
@@ -129,6 +180,19 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   const [sqlErrorContext, setSqlErrorContext] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState<boolean>(false);
 
+  const effectiveWorkShifts = useMemo(
+    () =>
+      workShifts && workShifts.length > 0
+        ? workShifts
+        : [createDefaultAdminShift()],
+    [workShifts]
+  );
+
+  const employeeMap = useMemo(
+    () => new Map(employees.map((e) => [e.id, e])),
+    [employees]
+  );
+
   const knownSubGroups = useMemo(() => {
     const names = new Set<string>();
     groups.forEach((g) => {
@@ -148,8 +212,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     [calendarYear, calendarMonth]
   );
 
-  const activeFormDatesSet = useMemo(
-    () => collectOvertimeFormDatesSet(forms),
+  const formStatusByDate = useMemo(
+    () => collectOvertimeFormStatusByDate(forms),
     [forms]
   );
 
@@ -163,9 +227,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       buildOvertimeMonthCalendarGrid(
         calendarYear,
         calendarMonth,
-        activeFormDatesSet
+        formStatusByDate
       ),
-    [calendarYear, calendarMonth, activeFormDatesSet]
+    [calendarYear, calendarMonth, formStatusByDate]
   );
 
   const filteredForms = useMemo(
@@ -178,6 +242,54 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       ),
     [forms, selectedDateFilter, activeMonthKey, knownSubGroups]
   );
+
+  // Phiếu đang hiển thị ở khung "Các nhóm tăng ca" & A4 Preview bên phải
+  const activePreviewForm = useMemo<OvertimeFormWithItems | null>(() => {
+    if (selectedDateFilter) {
+      return (
+        forms.find(
+          (f) => !f.deleted_at && (f.overtime_date || '') === selectedDateFilter
+        ) || null
+      );
+    }
+    if (selectedPreviewFormId) {
+      const matched = filteredForms.find((f) => f.id === selectedPreviewFormId);
+      if (matched) return matched;
+    }
+    return filteredForms[0] || null;
+  }, [forms, filteredForms, selectedDateFilter, selectedPreviewFormId]);
+
+  const activeTargetDate = useMemo(() => {
+    if (selectedDateFilter) return selectedDateFilter;
+    if (activePreviewForm?.overtime_date) return activePreviewForm.overtime_date;
+    return todayIsoDate;
+  }, [selectedDateFilter, activePreviewForm, todayIsoDate]);
+
+  const activeBlocks = useMemo(
+    () =>
+      activePreviewForm
+        ? reconstructBlocksFromItems(activePreviewForm.items || [])
+        : [],
+    [activePreviewForm]
+  );
+
+  const isActiveFormLocked = Boolean(
+    activePreviewForm && isOvertimeFormLocked(activePreviewForm)
+  );
+
+  // Giữ selectedPreviewFormId đồng bộ khi danh sách lọc thay đổi
+  useEffect(() => {
+    if (selectedDateFilter) {
+      setSelectedPreviewFormId(activePreviewForm?.id || null);
+      return;
+    }
+    if (
+      selectedPreviewFormId &&
+      !filteredForms.some((f) => f.id === selectedPreviewFormId)
+    ) {
+      setSelectedPreviewFormId(filteredForms[0]?.id || null);
+    }
+  }, [selectedDateFilter, filteredForms, activePreviewForm, selectedPreviewFormId]);
 
   const handleCalendarMonthSelect = (nextMonth: number) => {
     setCalendarMonth(nextMonth);
@@ -204,10 +316,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   };
 
   const handleCalendarDayClick = (isoDate: string) => {
-    if (selectedDateFilter === isoDate) {
-      setSelectedDateFilter(null);
-      return;
-    }
     setSelectedDateFilter(isoDate);
   };
 
@@ -226,6 +334,18 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   }, [forms, viewingForm, onShowToast]);
 
+  const handleSupabaseError = (error: unknown) => {
+    if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
+      setSqlErrorContext(error.message);
+      setIsSqlModalOpen(true);
+      onShowToast?.(error.message);
+    } else if (error instanceof OvertimeSupabaseActionError) {
+      onShowToast?.(error.message);
+    } else {
+      onShowToast?.(getFriendlyErrorMessage(error));
+    }
+  };
+
   const handleCreateShellClick = async () => {
     if (isCreatingShell) return;
     if (!onCreateOrOpenShell) {
@@ -236,18 +356,88 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     try {
       const targetOvertimeDate = selectedDateFilter || getLocalTodayIsoDate();
       await onCreateOrOpenShell(targetOvertimeDate);
+      setSelectedDateFilter(targetOvertimeDate);
     } catch (error) {
-      if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
-        setSqlErrorContext(error.message);
-        setIsSqlModalOpen(true);
-        onShowToast?.(error.message);
-      } else if (error instanceof OvertimeSupabaseActionError) {
-        onShowToast?.(error.message);
-      } else {
-        onShowToast?.(getFriendlyErrorMessage(error));
-      }
+      handleSupabaseError(error);
     } finally {
       setIsCreatingShell(false);
+    }
+  };
+
+  const handleReorderBlock = async (index: number, direction: 'up' | 'down') => {
+    if (!activePreviewForm || !onUpdateFormBlocks || isReordering) return;
+    if (isOvertimeFormLocked(activePreviewForm)) return;
+
+    const nextBlocks = reorderOvertimeBlocks(activeBlocks, index, direction);
+    if (nextBlocks === activeBlocks) return;
+
+    setIsReordering(true);
+    try {
+      await onUpdateFormBlocks(activePreviewForm, nextBlocks);
+    } catch (error) {
+      handleSupabaseError(error);
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  const handleConfirmManualGroup = async (
+    payload: ConfirmableOvertimeBlockPayload
+  ) => {
+    if (!onAppendBlocksToDate) return;
+    try {
+      const updated = await onAppendBlocksToDate(activeTargetDate, [payload]);
+      const targetDate = (updated.overtime_date || activeTargetDate).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+        const parsed = parseYearMonthKey(targetDate.slice(0, 7), targetDate);
+        setCalendarYear(parsed.year);
+        setCalendarMonth(parsed.month);
+        setSelectedDateFilter(targetDate);
+      }
+      setSelectedPreviewFormId(updated.id);
+      setIsManualGroupOpen(false);
+    } catch (error) {
+      handleSupabaseError(error);
+      throw error;
+    }
+  };
+
+  const handleConfirmZaloBlocks = async (
+    payloads: ConfirmableOvertimeBlockPayload[]
+  ) => {
+    if (!onAppendBlocksToDate || payloads.length === 0) return;
+    try {
+      // Nhóm các payloads theo ngày tăng ca (thường cùng ngày) để cập nhật sạch sẽ từng vỏ phiếu
+      const byDate = new Map<string, ConfirmableOvertimeBlockPayload[]>();
+      for (const p of payloads) {
+        const d = (p.overtimeDate || activeTargetDate).trim() || activeTargetDate;
+        const arr = byDate.get(d) || [];
+        arr.push(p);
+        byDate.set(d, arr);
+      }
+
+      let lastUpdated: OvertimeFormWithItems | null = null;
+      for (const [dateKey, groupPayloads] of byDate.entries()) {
+        lastUpdated = await onAppendBlocksToDate(dateKey, groupPayloads);
+      }
+
+      if (lastUpdated) {
+        const targetDate = (lastUpdated.overtime_date || activeTargetDate).slice(
+          0,
+          10
+        );
+        if (/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+          const parsed = parseYearMonthKey(targetDate.slice(0, 7), targetDate);
+          setCalendarYear(parsed.year);
+          setCalendarMonth(parsed.month);
+          setSelectedDateFilter(targetDate);
+        }
+        setSelectedPreviewFormId(lastUpdated.id);
+      }
+      setIsZaloScanOpen(false);
+    } catch (error) {
+      handleSupabaseError(error);
+      throw error;
     }
   };
 
@@ -350,14 +540,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     } catch (error) {
       if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
         setLockingForm(null);
-        setSqlErrorContext(error.message);
-        setIsSqlModalOpen(true);
-        onShowToast?.(error.message);
-      } else if (error instanceof OvertimeSupabaseActionError) {
-        onShowToast?.(error.message);
-      } else {
-        onShowToast?.(getFriendlyErrorMessage(error));
       }
+      handleSupabaseError(error);
     } finally {
       setIsLocking(false);
     }
@@ -387,14 +571,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
         setUnlockingForm(null);
         setUnlockKeywordInput('');
-        setSqlErrorContext(error.message);
-        setIsSqlModalOpen(true);
-        onShowToast?.(error.message);
-      } else if (error instanceof OvertimeSupabaseActionError) {
-        onShowToast?.(error.message);
-      } else {
-        onShowToast?.(getFriendlyErrorMessage(error));
       }
+      handleSupabaseError(error);
     } finally {
       setIsUnlocking(false);
     }
@@ -433,14 +611,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
       if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
         setDeletingForms([]);
         setIsDeleteConfirmed(false);
-        setSqlErrorContext(error.message);
-        setIsSqlModalOpen(true);
-        onShowToast?.(error.message);
-      } else if (error instanceof OvertimeSupabaseActionError) {
-        onShowToast?.(error.message);
-      } else {
-        onShowToast?.(getFriendlyErrorMessage(error));
       }
+      handleSupabaseError(error);
     } finally {
       setIsDeleting(false);
     }
@@ -465,17 +637,24 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   };
 
-  const handlePrintModal = () => {
+  const handlePrint = () => {
     window.print();
   };
 
-  const modalPrintableGroups = useMemo(() => {
-    if (!viewingForm) return [];
-    return buildPrintableDateGroupsFromItems(viewingForm.items);
-  }, [viewingForm]);
+  const resolveBlockDepartmentSummary = (block: OvertimeBlockInput): string => {
+    const depts = new Set<string>();
+    for (const p of block.participants || []) {
+      const d = employeeMap.get(p.employeeId)?.department?.trim();
+      if (d) depts.add(d);
+    }
+    if (depts.size === 0) return DEFAULT_OVERTIME_DEPARTMENT;
+    const arr = Array.from(depts);
+    if (arr.length <= 2) return arr.join(', ');
+    return `${arr.slice(0, 2).join(', ')} (+${arr.length - 2})`;
+  };
 
   return (
-    <div className="flex flex-col gap-4 min-h-0">
+    <div className="flex flex-col gap-3 min-h-0">
       {/* Cảnh báo nhẹ khi DB Supabase chưa có cột deleted_at trên overtime_form_items */}
       {schemaNeedsMigration && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 no-print">
@@ -483,8 +662,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
             <Database className="w-4 h-4 text-amber-600 shrink-0" />
             <span>
               Bảng <code className="font-mono font-semibold">overtime_form_items</code>{' '}
-              trên Supabase chưa có cột <code className="font-mono font-semibold">deleted_at</code>{' '}
-              hoặc chưa bật Realtime đồng bộ giữa các user.
+              trên Supabase chưa có cột <code className="font-mono font-semibold">deleted_at</code>.
             </span>
           </div>
           <button
@@ -493,7 +671,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               setSqlErrorContext(null);
               setIsSqlModalOpen(true);
             }}
-            className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            className="h-8 px-3 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
           >
             <Database className="w-3.5 h-3.5" />
             <span>Xem mã SQL chuẩn hóa</span>
@@ -501,309 +679,449 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* Bố cục 2 khối ngang: Khối 1 Lịch tháng bên trái | Khối 2 Thanh công cụ + Bảng nhật ký bên phải */}
+      {/* Bố cục 2 cột: Cột trái (~4/10): Lịch thu gọn + Danh sách nhóm | Cột phải (~6/10): Bảng tóm tắt + Xem trước A4 */}
       <div className="flex flex-col lg:flex-row gap-4 items-start">
-        {/* KHỐI 1: Lịch tháng trực quan */}
-        <aside
-          data-testid="overtime-log-calendar-card"
-          aria-label="Lịch chọn ngày tăng ca"
-          className="w-full lg:w-[340px] xl:w-[380px] shrink-0 bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs no-print space-y-3"
-        >
-          {/* Tiêu đề lịch: < Tháng > + Năm + Hôm nay */}
-          <div className="flex flex-wrap items-center justify-between gap-1.5">
-            <div className="flex items-center gap-1 min-w-0">
-              <button
-                type="button"
-                onClick={() => handleShiftCalendarMonth(-1)}
-                data-testid="calendar-prev-month-btn"
-                aria-label="Tháng trước"
-                title="Tháng trước"
-                className="h-8 w-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
+        {/* CỘT TRÁI */}
+        <aside className="w-full lg:w-[370px] xl:w-[400px] shrink-0 space-y-3 no-print">
+          {/* Nửa trên: Lịch tháng thu gọn */}
+          <div
+            data-testid="overtime-log-calendar-card"
+            aria-label="Lịch chọn ngày tăng ca"
+            className="bg-white border border-slate-200 rounded-2xl p-3 shadow-2xs space-y-2"
+          >
+            {/* Thanh điều hướng tháng + năm + Hôm nay + Tạo/Mở vỏ phiếu */}
+            <div className="flex items-center justify-between gap-1">
+              <div className="flex items-center gap-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => handleShiftCalendarMonth(-1)}
+                  data-testid="calendar-prev-month-btn"
+                  aria-label="Tháng trước"
+                  title="Tháng trước"
+                  className="h-7 w-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
 
-              <select
-                value={calendarMonth}
-                onChange={(e) =>
-                  handleCalendarMonthSelect(Number(e.target.value))
-                }
-                aria-label="Chọn tháng trên lịch"
-                data-testid="calendar-month-select"
-                className="h-8 px-2 text-xs font-bold text-slate-800 rounded-lg border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer tabular-nums"
-              >
-                {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
-                  <option key={m} value={m}>
-                    Tháng {m}
-                  </option>
-                ))}
-              </select>
+                <select
+                  value={calendarMonth}
+                  onChange={(e) =>
+                    handleCalendarMonthSelect(Number(e.target.value))
+                  }
+                  aria-label="Chọn tháng trên lịch"
+                  data-testid="calendar-month-select"
+                  className="h-7 px-1.5 text-[11px] font-bold text-slate-800 rounded-lg border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer tabular-nums"
+                >
+                  {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
+                    <option key={m} value={m}>
+                      Tháng {m}
+                    </option>
+                  ))}
+                </select>
 
-              <button
-                type="button"
-                onClick={() => handleShiftCalendarMonth(1)}
-                data-testid="calendar-next-month-btn"
-                aria-label="Tháng sau"
-                title="Tháng sau"
-                className="h-8 w-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handleShiftCalendarMonth(1)}
+                  data-testid="calendar-next-month-btn"
+                  aria-label="Tháng sau"
+                  title="Tháng sau"
+                  className="h-7 w-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
 
-              <select
-                value={calendarYear}
-                onChange={(e) =>
-                  handleCalendarYearSelect(Number(e.target.value))
-                }
-                aria-label="Chọn năm trên lịch"
-                data-testid="calendar-year-select"
-                className="h-8 px-2 text-xs font-bold text-slate-800 rounded-lg border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer tabular-nums"
-              >
-                {calendarYearOptions.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
+                <select
+                  value={calendarYear}
+                  onChange={(e) =>
+                    handleCalendarYearSelect(Number(e.target.value))
+                  }
+                  aria-label="Chọn năm trên lịch"
+                  data-testid="calendar-year-select"
+                  className="h-7 px-1.5 text-[11px] font-bold text-slate-800 rounded-lg border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer tabular-nums"
+                >
+                  {calendarYearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCalendarTodayClick}
+                  data-testid="calendar-today-btn"
+                  className="h-7 px-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#14539E] text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Hôm nay
+                </button>
+                <button
+                  type="button"
+                  disabled={isCreatingShell}
+                  onClick={() => void handleCreateShellClick()}
+                  data-testid="create-overtime-shell-icon-btn"
+                  title={
+                    selectedDateFilter
+                      ? `Tạo / Mở vỏ phiếu ngày ${formatDateToFormStyle(
+                          selectedDateFilter
+                        )}`
+                      : 'Tạo / Mở vỏ phiếu hôm nay'
+                  }
+                  aria-label="Tạo hoặc mở vỏ phiếu tăng ca"
+                  className="h-7 w-7 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isCreatingShell ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <FilePlus2 className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleCalendarTodayClick}
-              data-testid="calendar-today-btn"
-              className="h-8 px-2.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#14539E] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              Hôm nay
-            </button>
-          </div>
-
-          {/* Tiêu đề 7 thứ trong tuần: T2 -> CN */}
-          <div className="grid grid-cols-7 gap-1 text-center">
-            {CALENDAR_WEEKDAY_HEADERS.map((label) => {
-              const isSundayHeader = label === 'CN';
-              return (
-                <div
-                  key={label}
-                  className={`py-1.5 text-[11px] font-bold uppercase tracking-wide ${
-                    isSundayHeader
-                      ? 'bg-slate-100/80 text-slate-500 rounded-lg'
-                      : 'text-slate-500'
-                  }`}
-                >
-                  {label}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Lưới các ngày trong tháng */}
-          <div className="grid grid-cols-7 gap-1">
-            {calendarGridCells.map((cell) => {
-              if (!cell.inCurrentMonth) {
+            {/* Tiêu đề 7 thứ trong tuần */}
+            <div className="grid grid-cols-7 gap-0.5 text-center">
+              {CALENDAR_WEEKDAY_HEADERS.map((label) => {
+                const isSundayHeader = label === 'CN';
                 return (
                   <div
-                    key={cell.isoDate}
-                    aria-hidden="true"
-                    className={`h-10 flex flex-col items-center justify-center text-xs tabular-nums select-none ${
-                      cell.isSunday
-                        ? 'bg-slate-100/50 text-slate-300 rounded-lg'
-                        : 'text-slate-300'
+                    key={label}
+                    className={`py-1 text-[10px] font-bold uppercase tracking-wide ${
+                      isSundayHeader
+                        ? 'bg-slate-100/80 text-slate-500 rounded-md'
+                        : 'text-slate-500'
                     }`}
                   >
-                    <span>{cell.day}</span>
+                    {label}
                   </div>
                 );
-              }
-
-              const isSelected = selectedDateFilter === cell.isoDate;
-              const isToday = cell.isoDate === todayIsoDate;
-
-              let cellStyle =
-                'text-slate-700 hover:bg-slate-100 rounded-lg';
-              if (isSelected) {
-                cellStyle =
-                  'bg-[#14539E] text-white font-bold shadow-xs rounded-lg';
-              } else if (cell.isSunday) {
-                cellStyle =
-                  'bg-slate-100/80 text-slate-500 hover:bg-slate-200/70 rounded-lg';
-              }
-
-              const todayRing =
-                !isSelected && isToday
-                  ? 'ring-1 ring-inset ring-[#14539E]/60 text-[#14539E] font-bold'
-                  : '';
-
-              return (
-                <button
-                  key={cell.isoDate}
-                  type="button"
-                  onClick={() => handleCalendarDayClick(cell.isoDate)}
-                  data-testid={`calendar-day-${cell.isoDate}`}
-                  aria-pressed={isSelected}
-                  aria-label={`Ngày ${formatDateToFormStyle(cell.isoDate)}${
-                    cell.hasOvertimeForm ? ', đã có phiếu tăng ca' : ''
-                  }`}
-                  title={
-                    cell.hasOvertimeForm
-                      ? `${formatDateToFormStyle(cell.isoDate)} • Đã có phiếu tăng ca`
-                      : formatDateToFormStyle(cell.isoDate)
-                  }
-                  className={`h-10 flex flex-col items-center justify-center text-xs tabular-nums transition-colors cursor-pointer ${cellStyle} ${todayRing}`}
-                >
-                  <span className="leading-none">{cell.day}</span>
-                  <span className="h-1.5 mt-1 flex items-center justify-center">
-                    {cell.hasOvertimeForm && (
-                      <span
-                        data-testid={`calendar-dot-${cell.isoDate}`}
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          isSelected ? 'bg-white' : 'bg-[#14539E]'
-                        }`}
-                      />
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Chú thích & Nút xem tất cả ngày trong tháng */}
-          <div className="pt-2 border-t border-slate-100 space-y-2">
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#14539E] inline-block" />
-                <span>Ngày đã có phiếu tăng ca</span>
-              </span>
-              <span className="tabular-nums font-medium text-slate-600">
-                Tháng {String(calendarMonth).padStart(2, '0')}/{calendarYear}
-              </span>
+              })}
             </div>
 
-            {selectedDateFilter && (
+            {/* Lưới các ngày thu gọn */}
+            <div className="grid grid-cols-7 gap-0.5">
+              {calendarGridCells.map((cell) => {
+                if (!cell.inCurrentMonth) {
+                  return (
+                    <div
+                      key={cell.isoDate}
+                      aria-hidden="true"
+                      className={`h-8 flex flex-col items-center justify-center text-[11px] tabular-nums select-none ${
+                        cell.isSunday
+                          ? 'bg-slate-100/50 text-slate-300 rounded-md'
+                          : 'text-slate-300'
+                      }`}
+                    >
+                      <span>{cell.day}</span>
+                    </div>
+                  );
+                }
+
+                const isSelected = selectedDateFilter === cell.isoDate;
+                const isToday = cell.isoDate === todayIsoDate;
+
+                let cellStyle =
+                  'text-slate-700 hover:bg-slate-100 rounded-md';
+                if (isSelected) {
+                  cellStyle =
+                    'bg-[#14539E] text-white font-bold shadow-xs rounded-md';
+                } else if (cell.isSunday) {
+                  cellStyle =
+                    'bg-slate-100/80 text-slate-500 hover:bg-slate-200/70 rounded-md';
+                }
+
+                const todayRing =
+                  !isSelected && isToday
+                    ? 'ring-1 ring-inset ring-[#14539E]/60 text-[#14539E] font-bold'
+                    : '';
+
+                return (
+                  <button
+                    key={cell.isoDate}
+                    type="button"
+                    onClick={() => handleCalendarDayClick(cell.isoDate)}
+                    data-testid={`calendar-day-${cell.isoDate}`}
+                    aria-pressed={isSelected}
+                    aria-label={`Ngày ${formatDateToFormStyle(cell.isoDate)}${
+                      cell.formStatus === 'locked'
+                        ? ', phiếu đã chốt'
+                        : cell.formStatus === 'open'
+                          ? ', đã có phiếu chưa chốt'
+                          : ''
+                    }`}
+                    title={
+                      cell.formStatus === 'locked'
+                        ? `${formatDateToFormStyle(cell.isoDate)} • Phiếu đã chốt`
+                        : cell.formStatus === 'open'
+                          ? `${formatDateToFormStyle(cell.isoDate)} • Đã có phiếu (chưa chốt)`
+                          : formatDateToFormStyle(cell.isoDate)
+                    }
+                    className={`h-8 py-0.5 flex flex-col items-center justify-center gap-0.5 text-[11px] tabular-nums transition-colors cursor-pointer ${cellStyle} ${todayRing}`}
+                  >
+                    <span className="leading-none">{cell.day}</span>
+                    <span className="h-2.5 flex items-center justify-center">
+                      {cell.formStatus === 'locked' ? (
+                        <Lock
+                          data-testid={`calendar-lock-${cell.isoDate}`}
+                          className={`w-2.5 h-2.5 ${
+                            isSelected ? 'text-white' : 'text-[#14539E]'
+                          }`}
+                        />
+                      ) : cell.formStatus === 'open' ? (
+                        <span
+                          data-testid={`calendar-dot-${cell.isoDate}`}
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            isSelected ? 'bg-white' : 'bg-[#14539E]'
+                          }`}
+                        />
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Chú thích & Xem tất cả ngày trong tháng */}
+            <div className="pt-2 border-t border-slate-100 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 gap-2">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#14539E] inline-block" />
+                    <span>Chưa chốt</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5 text-[#14539E]" />
+                    <span>Đã chốt</span>
+                  </span>
+                </div>
+                <span className="tabular-nums font-medium text-slate-600">
+                  {String(calendarMonth).padStart(2, '0')}/{calendarYear}
+                </span>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setSelectedDateFilter(null)}
                 data-testid="calendar-show-all-month-btn"
-                className="w-full h-8 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+                className={`w-full h-7 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
+                  selectedDateFilter === null
+                    ? 'bg-blue-50 border-[#14539E]/30 text-[#14539E]'
+                    : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                }`}
               >
-                Xem tất cả ngày trong tháng
+                {selectedDateFilter === null
+                  ? `Đang xem tất cả ngày Tháng ${String(calendarMonth).padStart(2, '0')}/${calendarYear}`
+                  : 'Xem tất cả ngày trong tháng'}
               </button>
+            </div>
+          </div>
+
+          {/* Nửa dưới: Card "Các nhóm tăng ca ngày DD/MM/YYYY" */}
+          <div
+            data-testid="overtime-day-groups-card"
+            className="bg-white border border-slate-200 rounded-2xl p-3 shadow-2xs space-y-2.5"
+          >
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
+              <div className="min-w-0">
+                <h3 className="text-xs font-bold text-slate-900 truncate">
+                  Các nhóm tăng ca ngày{' '}
+                  <span className="font-mono text-[#14539E]">
+                    {formatDateToFormStyle(activeTargetDate)}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 tabular-nums mt-0.5">
+                  {activePreviewForm ? (
+                    <>
+                      <span className="font-mono font-semibold text-slate-700">
+                        {formatOvertimeFormCodeDisplay(activePreviewForm.form_code)}
+                      </span>
+                      {' • '}
+                      {formatNumberVN(activeBlocks.length)} nhóm
+                    </>
+                  ) : (
+                    'Chưa có vỏ phiếu — bấm + hoặc Camera để ghi nhận'
+                  )}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  disabled={isActiveFormLocked || !onAppendBlocksToDate}
+                  onClick={() => setIsManualGroupOpen(true)}
+                  data-testid="open-manual-group-modal-btn"
+                  title={
+                    isActiveFormLocked
+                      ? 'Phiếu đã chốt — khóa thêm nhóm'
+                      : 'Thêm nhóm tăng ca thủ công'
+                  }
+                  aria-label="Thêm nhóm tăng ca thủ công"
+                  className="h-7 w-7 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isActiveFormLocked || !onAppendBlocksToDate}
+                  onClick={() => setIsZaloScanOpen(true)}
+                  data-testid="open-zalo-scan-modal-btn"
+                  title={
+                    isActiveFormLocked
+                      ? 'Phiếu đã chốt — khóa quét ảnh Zalo'
+                      : 'Quét ảnh lịch tăng ca từ Zalo (AI)'
+                  }
+                  aria-label="Quét ảnh lịch tăng ca từ Zalo (AI)"
+                  className="h-7 w-7 rounded-lg border border-[#14539E]/35 bg-blue-50/70 hover:bg-[#14539E] text-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {isActiveFormLocked && (
+              <div className="rounded-lg bg-blue-50/80 border border-blue-200 px-2.5 py-1.5 text-[11px] text-[#14539E] flex items-center gap-1.5">
+                <Lock className="w-3 h-3 shrink-0" />
+                <span>Phiếu đã chốt — khóa thêm mới và đổi thứ tự nhóm.</span>
+              </div>
+            )}
+
+            {activeBlocks.length === 0 ? (
+              <div className="py-5 px-3 text-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 space-y-1.5">
+                <p className="text-xs font-medium text-slate-600">
+                  Chưa có nhóm tăng ca nào cho ngày{' '}
+                  <span className="font-mono font-semibold">
+                    {formatDateToFormStyle(activeTargetDate)}
+                  </span>
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Bấm nút <strong>+</strong> (Thủ công) hoặc{' '}
+                  <strong>Camera</strong> (Quét ảnh Zalo AI) ở góc trên để thêm
+                  nhóm.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-0.5">
+                {activeBlocks.map((block, idx) => {
+                  const deptSummary = resolveBlockDepartmentSummary(block);
+                  const blockHours = (block.participants || []).reduce(
+                    (sum, p) => sum + (Number(p.totalHours) || 0),
+                    0
+                  );
+                  const canMoveUp =
+                    !isActiveFormLocked && !isReordering && idx > 0;
+                  const canMoveDown =
+                    !isActiveFormLocked &&
+                    !isReordering &&
+                    idx < activeBlocks.length - 1;
+
+                  return (
+                    <div
+                      key={block.id || `grp-${idx}`}
+                      data-testid={`overtime-group-card-${idx}`}
+                      className="rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-white p-2.5 space-y-1.5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="px-1.5 py-0.5 rounded bg-[#14539E] text-white font-mono text-[10px] font-bold shrink-0">
+                            #{idx + 1}
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-800 truncate">
+                            {deptSummary}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            disabled={!canMoveUp}
+                            onClick={() => void handleReorderBlock(idx, 'up')}
+                            data-testid={`move-group-up-${idx}`}
+                            title="Di chuyển nhóm lên trên"
+                            aria-label={`Di chuyển nhóm #${idx + 1} lên`}
+                            className="h-6 w-6 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canMoveDown}
+                            onClick={() => void handleReorderBlock(idx, 'down')}
+                            data-testid={`move-group-down-${idx}`}
+                            title="Di chuyển nhóm xuống dưới"
+                            aria-label={`Di chuyển nhóm #${idx + 1} xuống`}
+                            className="h-6 w-6 rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-[#14539E]/40 text-slate-600 hover:text-[#14539E] inline-flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-700 leading-snug line-clamp-2">
+                        {block.reasonVi || '(Chưa nhập lý do tăng ca)'}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 pt-0.5 tabular-nums">
+                        <span className="font-mono font-semibold text-slate-700">
+                          {block.startTime} – {block.endTime}
+                        </span>
+                        <span>
+                          {formatNumberVN(block.participants.length)} người
+                          {blockHours > 0
+                            ? ` • ${formatNumberVN(blockHours)} giờ`
+                            : ''}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </aside>
 
-        {/* KHỐI 2: Thanh trạng thái lọc + nút icon Tạo phiếu mới & Bảng nhật ký */}
+        {/* CỘT PHẢI: Bảng tóm tắt + Xem trước A4 TV-PSGC2022 */}
         <div className="flex-1 min-w-0 w-full space-y-3">
-          <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2 shadow-2xs no-print">
-            {/* Cụm bên trái: Trạng thái lọc theo ngày hoặc tổng quan tháng đang xem trên lịch */}
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-              {selectedDateFilter ? (
-                <>
-                  <div
-                    data-testid="overtime-log-date-filter-badge"
-                    className="h-8 pl-2.5 pr-1.5 rounded-lg bg-blue-50 border border-[#14539E]/30 text-[#14539E] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums"
-                  >
-                    <span>
-                      Đang lọc ngày: {formatDateToFormStyle(selectedDateFilter)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDateFilter(null)}
-                      data-testid="clear-date-filter-badge-btn"
-                      aria-label="Bỏ lọc theo ngày"
-                      title="Bỏ lọc ngày"
-                      className="p-0.5 rounded hover:bg-[#14539E]/15 text-[#14539E] cursor-pointer transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDateFilter(null)}
-                    data-testid="overtime-log-clear-filter-btn"
-                    className="h-8 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                  >
-                    Xóa lọc
-                  </button>
-                </>
-              ) : (
-                <div
-                  data-testid="overtime-log-month-summary"
-                  className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 tabular-nums"
-                >
-                  <Calendar className="w-4 h-4 text-[#14539E] shrink-0" />
-                  <span>
-                    Nhật ký Tháng {String(calendarMonth).padStart(2, '0')}/
-                    {calendarYear}
-                  </span>
-                  <span className="text-slate-400">•</span>
-                  <span className="text-[#14539E]">
-                    {formatNumberVN(filteredForms.length)} phiếu
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Cụm bên phải: Nút icon-only Tạo phiếu tăng ca mới */}
-            <button
-              type="button"
-              disabled={isCreatingShell}
-              onClick={() => void handleCreateShellClick()}
-              data-testid="create-overtime-shell-icon-btn"
-              title={
-                selectedDateFilter
-                  ? `Tạo phiếu tăng ca mới (${formatDateToFormStyle(selectedDateFilter)})`
-                  : 'Tạo phiếu tăng ca mới'
-              }
-              aria-label="Tạo phiếu tăng ca mới"
-              className="h-9 w-9 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-            >
-              {isCreatingShell ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <FilePlus2 className="w-4 h-4" />
-              )}
-            </button>
-          </div>
-
-          {/* Data Table */}
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden no-print">
+          {/* Bảng tóm tắt phiếu tăng ca */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs no-print">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                    <th className="py-3 px-3 w-14 text-center">STT</th>
-                    <th className="py-3 px-3.5 min-w-[160px]">Mã phiếu</th>
-                    <th className="py-3 px-3.5 min-w-[175px]">Ngày tăng ca</th>
-                    <th className="py-3 px-3.5 w-36 text-center">Trạng thái</th>
-                    <th className="py-3 px-3.5 w-52 text-left">Thao tác</th>
+                    <th className="py-2.5 px-3 w-12 text-center">STT</th>
+                    <th className="py-2.5 px-3 min-w-[140px]">Mã phiếu</th>
+                    <th className="py-2.5 px-3 min-w-[130px]">Ngày tăng ca</th>
+                    <th className="py-2.5 px-3 w-32 text-center">Trạng thái</th>
+                    <th className="py-2.5 px-3 w-52 text-left">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {isLoading ? (
-                    Array.from({ length: 4 }).map((_, idx) => (
-                      <tr key={`skeleton-${idx}`} className="h-14 animate-pulse">
-                        <td className="py-3 px-3 text-center">
+                    Array.from({ length: 2 }).map((_, idx) => (
+                      <tr key={`skeleton-${idx}`} className="h-12 animate-pulse">
+                        <td className="py-2.5 px-3 text-center">
                           <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
                         </td>
-                        <td className="py-3 px-3.5">
+                        <td className="py-2.5 px-3">
                           <div className="h-3.5 w-28 bg-slate-200 rounded" />
                         </td>
-                        <td className="py-3 px-3.5">
+                        <td className="py-2.5 px-3">
                           <div className="h-3.5 w-24 bg-slate-200 rounded" />
                         </td>
-                        <td className="py-3 px-3.5">
+                        <td className="py-2.5 px-3">
                           <div className="h-5 w-20 bg-slate-200 rounded-full mx-auto" />
                         </td>
-                        <td className="py-3 px-3.5">
-                          <div className="h-8 w-44 bg-slate-200 rounded ml-auto" />
+                        <td className="py-2.5 px-3">
+                          <div className="h-7 w-44 bg-slate-200 rounded" />
                         </td>
                       </tr>
                     ))
                   ) : filteredForms.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-14 px-6 text-center">
-                        <div className="max-w-sm mx-auto flex flex-col items-center">
-                          <FileText className="w-9 h-9 text-slate-300 mb-3" />
+                      <td colSpan={5} className="py-10 px-6 text-center">
+                        <div className="max-w-md mx-auto flex flex-col items-center">
+                          <FileText className="w-8 h-8 text-slate-300 mb-2.5" />
                           <p className="text-sm font-semibold text-slate-800">
                             {selectedDateFilter
                               ? `Chưa có phiếu tăng ca nào trong ngày ${formatDateToFormStyle(
@@ -814,18 +1132,17 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                                 ).padStart(2, '0')}/${calendarYear}`}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
-                            {selectedDateFilter
-                              ? 'Bấm lại vào ngày đang chọn để xem cả tháng hoặc bấm nút Tạo phiếu mới để lập phiếu cho ngày này.'
-                              : 'Chọn ngày trên lịch bên trái hoặc bấm nút Tạo phiếu mới để lập phiếu cho ngày hôm nay.'}
+                            Bấm <strong>Tạo vỏ phiếu</strong> hoặc bấm{' '}
+                            <strong>+</strong> / <strong>Camera</strong> ở cột
+                            trái để thêm nhóm tăng ca ngay.
                           </p>
                           {(onCreateOrOpenShell || onSwitchToCreate) && (
                             <button
                               type="button"
                               disabled={isCreatingShell}
                               onClick={() => void handleCreateShellClick()}
-                              title="Tạo phiếu tăng ca mới"
-                              aria-label="Tạo phiếu tăng ca mới cho ngày đang chọn"
-                              className="mt-4 h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              data-testid="empty-state-create-shell-btn"
+                              className="mt-3.5 h-8 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
                             >
                               {isCreatingShell ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -834,10 +1151,10 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                               )}
                               <span>
                                 {selectedDateFilter
-                                  ? `Tạo phiếu ngày ${formatDateToFormStyle(
+                                  ? `Tạo vỏ phiếu ngày ${formatDateToFormStyle(
                                       selectedDateFilter
                                     )}`
-                                  : 'Tạo phiếu ngày hôm nay'}
+                                  : 'Tạo vỏ phiếu ngày hôm nay'}
                               </span>
                             </button>
                           )}
@@ -845,181 +1162,286 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       </td>
                     </tr>
                   ) : (
-                filteredForms.map((form, index) => {
-                  const datesList =
-                    Array.isArray(form.overtime_dates) &&
-                    form.overtime_dates.length > 0
-                      ? form.overtime_dates
-                      : [form.overtime_date].filter(Boolean);
-                  const isExporting = exportingFormId === form.id;
-                  const isViewingLoading = loadingViewFormId === form.id;
-                  const isLocked = isOvertimeFormLocked(form);
-                  const isNewShell =
-                    !isLocked &&
-                    (form.status === 'Mới tạo' || form.total_participants === 0);
-                  const displayCode = formatOvertimeFormCodeDisplay(form.form_code);
+                    filteredForms.map((form, index) => {
+                      const isExporting = exportingFormId === form.id;
+                      const isViewingLoading = loadingViewFormId === form.id;
+                      const isLocked = isOvertimeFormLocked(form);
+                      const isNewShell =
+                        !isLocked &&
+                        (form.status === 'Mới tạo' ||
+                          form.total_participants === 0);
+                      const displayCode = formatOvertimeFormCodeDisplay(
+                        form.form_code
+                      );
+                      const isSelectedRow = activePreviewForm?.id === form.id;
 
-                  return (
-                    <tr
-                      key={form.id}
-                      className={`transition-colors ${
-                        isLocked
-                          ? 'bg-slate-50/40 hover:bg-blue-50/30'
-                          : 'hover:bg-slate-50/90'
-                      }`}
-                    >
-                      {/* 1. STT */}
-                      <td className="py-3 px-3 text-center font-mono text-slate-500 tabular-nums">
-                        {formatNumberVN(index + 1)}
-                      </td>
+                      return (
+                        <tr
+                          key={form.id}
+                          data-testid={`overtime-summary-row-${form.id}`}
+                          onClick={() => setSelectedPreviewFormId(form.id)}
+                          className={`transition-colors cursor-pointer ${
+                            isSelectedRow
+                              ? 'bg-blue-50/55'
+                              : isLocked
+                                ? 'bg-slate-50/40 hover:bg-blue-50/30'
+                                : 'hover:bg-slate-50/90'
+                          }`}
+                        >
+                          {/* 1. STT */}
+                          <td className="py-2.5 px-3 text-center font-mono text-slate-500 tabular-nums">
+                            {formatNumberVN(index + 1)}
+                          </td>
 
-                      {/* 2. Mã phiếu */}
-                      <td className="py-3 px-3.5 font-mono font-semibold text-[#14539E] tabular-nums whitespace-nowrap">
-                        {displayCode}
-                      </td>
+                          {/* 2. Mã phiếu */}
+                          <td className="py-2.5 px-3 font-mono font-semibold text-[#14539E] tabular-nums whitespace-nowrap">
+                            {displayCode}
+                          </td>
 
-                      {/* 3. Ngày tăng ca */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-mono text-slate-800 font-semibold tabular-nums">
-                          {formatDateToFormStyle(
-                            form.overtime_date || datesList[0] || ''
-                          )}
-                        </div>
-                        {datesList.length >= 2 && (
-                          <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums font-mono">
-                            Gồm:{' '}
-                            {datesList
-                              .slice(0, 2)
-                              .map((d) => formatDateToFormStyle(d))
-                              .join(', ')}
-                            {datesList.length > 2
-                              ? ` (+${formatNumberVN(datesList.length - 2)})`
-                              : ''}
-                          </div>
-                        )}
-                      </td>
+                          {/* 3. Ngày tăng ca */}
+                          <td className="py-2.5 px-3 font-mono text-slate-800 font-semibold tabular-nums whitespace-nowrap">
+                            {formatDateToFormStyle(form.overtime_date || '')}
+                          </td>
 
-                      {/* 4. Trạng thái */}
-                      <td className="py-3 px-3.5 text-center">
-                        {isLocked ? (
-                          <span
-                            data-testid={`form-status-locked-${form.id}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#14539E]/10 text-[#14539E] border border-[#14539E]/25 text-[11px] font-bold whitespace-nowrap"
-                          >
-                            <Lock className="w-3 h-3" />
-                            <span>Đã chốt</span>
-                          </span>
-                        ) : isNewShell ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#14539E] whitespace-nowrap">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#14539E]" />
-                            Mới tạo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 whitespace-nowrap">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                            {form.status || 'Đã lưu'}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* 5. Thao tác (Icon-only kèm tooltip) */}
-                      {/* 5. Thao tác: Xem -> Sửa -> Xóa -> Chốt */}
-                      <td className="py-3 px-3.5 text-left">
-                        <div className="inline-flex items-center justify-start gap-1.5">
-                          {/* 1. Xem phiếu */}
-                          <button
-                            type="button"
-                            disabled={isViewingLoading}
-                            onClick={() => void handleViewForm(form)}
-                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
-                            title="Xem phiếu"
-                            aria-label={`Xem phiếu ${displayCode}`}
-                          >
-                            {isViewingLoading ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          {/* 4. Trạng thái */}
+                          <td className="py-2.5 px-3 text-center">
+                            {isLocked ? (
+                              <span
+                                data-testid={`form-status-locked-${form.id}`}
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#14539E]/10 text-[#14539E] border border-[#14539E]/25 text-[11px] font-bold whitespace-nowrap"
+                              >
+                                <Lock className="w-3 h-3" />
+                                <span>Đã chốt</span>
+                              </span>
+                            ) : isNewShell ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#14539E] whitespace-nowrap">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#14539E]" />
+                                Mới tạo
+                              </span>
                             ) : (
-                              <Eye className="w-3.5 h-3.5" />
+                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 whitespace-nowrap">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                {form.status || 'Đã lưu'}
+                              </span>
                             )}
-                          </button>
+                          </td>
 
-                          {/* 2. Sửa phiếu */}
-                          <button
-                            type="button"
-                            disabled={isLocked}
-                            onClick={() => {
-                              if (!isLocked) onEdit(form);
-                            }}
-                            className="h-8 w-8 rounded-lg border border-[#14539E]/30 bg-blue-50/60 text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
-                            title={
-                              isLocked
-                                ? 'Phiếu đã chốt — không thể sửa'
-                                : 'Sửa / Nhập chi tiết'
-                            }
-                            aria-label={
-                              isLocked
-                                ? `Phiếu ${displayCode} đã chốt, khóa chức năng sửa`
-                                : `Sửa / Nhập chi tiết phiếu ${displayCode}`
-                            }
+                          {/* 5. Thao tác: Xem -> Sửa -> Xuất Excel -> Chốt/Mở khóa -> Xóa */}
+                          <td
+                            className="py-2.5 px-3 text-left"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
+                            <div className="inline-flex items-center justify-start gap-1">
+                              {/* Xem phiếu */}
+                              <button
+                                type="button"
+                                disabled={isViewingLoading}
+                                onClick={() => void handleViewForm(form)}
+                                className="h-7 w-7 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+                                title="Xem / In khổ A4"
+                                aria-label={`Xem phiếu ${displayCode}`}
+                              >
+                                {isViewingLoading ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Eye className="w-3.5 h-3.5" />
+                                )}
+                              </button>
 
-                          {/* 3. Xóa mềm */}
-                          <button
-                            type="button"
-                            disabled={isLocked}
-                            onClick={() => handleOpenDeleteModal([form])}
-                            className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:bg-slate-100 disabled:hover:border-slate-200 disabled:cursor-not-allowed"
-                            title={
-                              isLocked
-                                ? 'Phiếu đã chốt — không thể xóa'
-                                : 'Xóa mềm phiếu'
-                            }
-                            aria-label={
-                              isLocked
-                                ? `Phiếu ${displayCode} đã chốt, khóa chức năng xóa`
-                                : `Xóa mềm phiếu ${displayCode}`
-                            }
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                              {/* Sửa chi tiết */}
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => {
+                                  if (!isLocked) onEdit(form);
+                                }}
+                                className="h-7 w-7 rounded-lg border border-[#14539E]/30 bg-blue-50/60 text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                title={
+                                  isLocked
+                                    ? 'Phiếu đã chốt — không thể sửa'
+                                    : 'Sửa / Nhập chi tiết'
+                                }
+                                aria-label={
+                                  isLocked
+                                    ? `Phiếu ${displayCode} đã chốt, khóa chức năng sửa`
+                                    : `Sửa / Nhập chi tiết phiếu ${displayCode}`
+                                }
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
 
-                          {/* 4. Chốt / Mở khóa phiếu */}
-                          {isLocked ? (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenUnlockModal(form)}
-                              data-testid={`unlock-form-btn-${form.id}`}
-                              className="h-8 w-8 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white hover:border-amber-600 inline-flex items-center justify-center transition-colors cursor-pointer"
-                              title="Mở khóa khẩn cấp"
-                              aria-label={`Mở khóa khẩn cấp phiếu ${displayCode}`}
-                            >
-                              <Unlock className="w-3.5 h-3.5" />
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenLockModal(form)}
-                              data-testid={`lock-form-btn-${form.id}`}
-                              className="h-8 w-8 rounded-lg border border-[#14539E]/30 bg-white text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer"
-                              title="Chốt phiếu"
-                              aria-label={`Chốt phiếu ${displayCode}`}
-                            >
-                              <Lock className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
+                              {/* Xuất Excel trực tiếp */}
+                              <button
+                                type="button"
+                                disabled={
+                                  isExporting || form.items.length === 0
+                                }
+                                onClick={() => void handleExportFormExcel(form)}
+                                data-testid={`export-excel-btn-${form.id}`}
+                                className="h-7 w-7 rounded-lg border border-emerald-300 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-600 hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                title={
+                                  form.items.length === 0
+                                    ? 'Phiếu chưa có dữ liệu nhân sự để xuất Excel'
+                                    : 'Xuất file Excel TV-PSGC2022'
+                                }
+                                aria-label={`Xuất Excel phiếu ${displayCode}`}
+                              >
+                                {isExporting ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+
+                              {/* Chốt / Mở khóa */}
+                              {isLocked ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenUnlockModal(form)}
+                                  data-testid={`unlock-form-btn-${form.id}`}
+                                  className="h-7 w-7 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white hover:border-amber-600 inline-flex items-center justify-center transition-colors cursor-pointer"
+                                  title="Mở khóa khẩn cấp"
+                                  aria-label={`Mở khóa khẩn cấp phiếu ${displayCode}`}
+                                >
+                                  <Unlock className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenLockModal(form)}
+                                  data-testid={`lock-form-btn-${form.id}`}
+                                  className="h-7 w-7 rounded-lg border border-[#14539E]/30 bg-white text-[#14539E] hover:bg-[#14539E] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer"
+                                  title="Chốt phiếu"
+                                  aria-label={`Chốt phiếu ${displayCode}`}
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {/* Xóa mềm */}
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => handleOpenDeleteModal([form])}
+                                data-testid={`delete-form-btn-${form.id}`}
+                                className="h-7 w-7 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:bg-slate-100 disabled:hover:border-slate-200 disabled:cursor-not-allowed"
+                                title={
+                                  isLocked
+                                    ? 'Phiếu đã chốt — không thể xóa'
+                                    : 'Xóa mềm phiếu'
+                                }
+                                aria-label={
+                                  isLocked
+                                    ? `Phiếu ${displayCode} đã chốt, khóa chức năng xóa`
+                                    : `Xóa mềm phiếu ${displayCode}`
+                                }
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* Khung xem trước trực tiếp A4 chuẩn TV-PSGC2022 */}
+          {activePreviewForm && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+              <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2 no-print">
+                <div className="flex items-center gap-2 min-w-0 text-xs">
+                  <span className="font-mono font-bold text-[#14539E]">
+                    {formatOvertimeFormCodeDisplay(activePreviewForm.form_code)}
+                  </span>
+                  <span className="text-slate-300">•</span>
+                  <span className="font-semibold text-slate-700 truncate">
+                    Xem trước biểu mẫu TV-PSGC2022
+                  </span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-500 tabular-nums whitespace-nowrap">
+                    {formatNumberVN(activePreviewForm.total_participants)} lượt •{' '}
+                    {formatNumberVN(activePreviewForm.total_hours)} giờ
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    disabled={
+                      exportingFormId === activePreviewForm.id ||
+                      activePreviewForm.items.length === 0
+                    }
+                    onClick={() => void handleExportFormExcel(activePreviewForm)}
+                    className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-45 whitespace-nowrap"
+                  >
+                    {exportingFormId === activePreviewForm.id ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <FileSpreadsheet className="w-3 h-3" />
+                    )}
+                    <span>Xuất Excel</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="h-7 px-2.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Printer className="w-3 h-3" />
+                    <span>In</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 sm:p-4 bg-slate-100/75 overflow-x-auto">
+                <OvertimeA4PreviewSheet
+                  form={activePreviewForm}
+                  knownSubGroups={knownSubGroups}
+                  variant="inline"
+                  isPrintableTarget={!viewingForm}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Modal Thêm nhóm tăng ca thủ công */}
+      <ManualOvertimeGroupModal
+        isOpen={isManualGroupOpen}
+        onClose={() => setIsManualGroupOpen(false)}
+        defaultDate={activeTargetDate}
+        employees={employees}
+        groups={groups}
+        leaveRecords={leaveRecords}
+        existingBlocks={activeBlocks}
+        glossaryEntries={glossaryEntries}
+        workShifts={effectiveWorkShifts}
+        companyHolidays={companyHolidays}
+        translateMultilineKorean={translateMultilineKorean}
+        onGlossaryEntriesUpdated={onGlossaryEntriesUpdated}
+        onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
+        onConfirm={handleConfirmManualGroup}
+      />
+
+      {/* Modal Quét ảnh lịch tăng ca từ Zalo (AI) */}
+      <ZaloScheduleScanModal
+        isOpen={isZaloScanOpen}
+        onClose={() => setIsZaloScanOpen(false)}
+        employees={employees}
+        glossaryEntries={glossaryEntries}
+        leaveRecords={leaveRecords}
+        existingPreviewBlocks={activeBlocks}
+        defaultDate={activeTargetDate}
+        translateMultilineKorean={translateMultilineKorean}
+        onLeaveRecordsRefreshed={onLeaveRecordsRefreshed}
+        onParseScheduleImage={parseOvertimeScheduleImage}
+        onConfirmBlock={(payload) => handleConfirmZaloBlocks([payload])}
+        onConfirmAllBlocks={handleConfirmZaloBlocks}
+      />
 
       {/* Modal Xem tờ phiếu A4 chuẩn TV-PSGC2022 */}
       {viewingForm && (
@@ -1030,7 +1452,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
           className="overtime-print-modal-root fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex flex-col items-center justify-center p-3 sm:p-5"
         >
           <div className="bg-slate-100 rounded-2xl border border-slate-300 shadow-2xl w-full max-w-[900px] max-h-[92vh] flex flex-col overflow-hidden overtime-print-container">
-            {/* Modal Header */}
             <div className="bg-white border-b border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0 no-print">
               <div className="min-w-0">
                 <h2
@@ -1095,7 +1516,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
 
                 <button
                   type="button"
-                  onClick={handlePrintModal}
+                  onClick={handlePrint}
                   className="h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -1113,224 +1534,13 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </div>
             </div>
 
-            {/* A4 Sheet Body */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex justify-center overtime-print-scroll">
-              <div
-                style={{
-                  fontFamily: "'Times New Roman', 'Malgun Gothic', Arial, sans-serif",
-                }}
-                className="overtime-print-sheet bg-white shadow-xl p-5 sm:p-6 w-full max-w-[794px] min-h-[1123px] mx-auto text-black rounded-sm space-y-3 flex flex-col justify-between"
-              >
-                <div className="space-y-3">
-                  {/* Header top */}
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span>Transon Viet nam Co., Ltd</span>
-                    <span className="pr-12">Biểu mẫu số: TV-PSGC2022</span>
-                  </div>
-
-                  {/* Title + 6-column signature block */}
-                  <div className="flex items-start justify-between gap-4 mb-2">
-                    <div className="pt-2">
-                      <div className="text-lg font-bold leading-snug">
-                        PHIẾU ĐỀ NGHỊ LÀM THÊM
-                      </div>
-                      <div className="text-base font-bold leading-snug">
-                        잔업. 특근 신청서
-                      </div>
-                    </div>
-                    <table className="border-collapse border border-black text-[11px] text-center">
-                      <thead>
-                        <tr>
-                          <th className="border border-black px-2 py-0.5 font-normal">
-                            결
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            작성
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            검사
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            검사
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            검사
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            승인
-                          </th>
-                        </tr>
-                        <tr>
-                          <th className="border border-black px-2 py-0.5 font-normal">
-                            xác
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            Người lập
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            Kiểm tra
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            Kiểm tra
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            Kiểm tra
-                          </th>
-                          <th className="border border-black px-3 py-0.5 font-normal">
-                            Phê duyệt
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="h-14">
-                          <td className="border border-black px-2 align-bottom pb-1 text-[10px]">
-                            <div>nhận</div>
-                            <div className="border-t border-black mt-0.5 pt-0.5">
-                              재
-                            </div>
-                          </td>
-                          <td className="border border-black w-16" />
-                          <td className="border border-black w-16" />
-                          <td className="border border-black w-16" />
-                          <td className="border border-black w-16" />
-                          <td className="border border-black w-16" />
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Multi-date 7-column TV-PSGC2022 Table */}
-                  <table className="w-full border-collapse text-[11px]">
-                    <tbody>
-                      {modalPrintableGroups.map((dateGroup, dateIdx) => (
-                        <React.Fragment key={dateGroup.date}>
-                          <tr className={dateIdx === 0 ? 'h-7' : 'h-8'}>
-                            <td
-                              colSpan={4}
-                              className={`border-0 bg-transparent text-left align-middle text-xs font-bold text-black ${
-                                dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
-                              }`}
-                            >
-                              {formatDepartmentHeaderLabel(
-                                getDisplayDepartment(viewingForm.department),
-                                knownSubGroups
-                              )}
-                            </td>
-                            <td
-                              colSpan={3}
-                              className={`border-0 bg-transparent text-center align-middle text-xs font-bold text-black ${
-                                dateIdx === 0 ? 'pb-1' : 'pt-2 pb-1'
-                              }`}
-                            >
-                              {dateGroup.formattedDate}
-                            </td>
-                          </tr>
-                          <tr className="text-center font-normal">
-                            <th className="border border-black px-1.5 py-0.5 w-8 min-w-[32px] font-normal">
-                              No
-                            </th>
-                            <th className="border border-black px-2 py-0.5 w-40 min-w-[145px] font-normal">
-                              Danh sách làm thêm
-                            </th>
-                            <th className="border border-black px-2.5 py-0.5 min-w-[220px] font-normal">
-                              Lý do làm thêm
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
-                              Giờ bắt đầu
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
-                              Giờ kết thúc
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 w-16 min-w-[56px] font-normal">
-                              Tổng thời gian
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 w-14 min-w-[50px] font-normal">
-                              Ký nhận
-                            </th>
-                          </tr>
-                          <tr className="text-center font-normal">
-                            <th className="border border-black px-1.5 py-0.5 font-normal" />
-                            <th className="border border-black px-2 py-0.5 font-normal">
-                              명단
-                            </th>
-                            <th className="border border-black px-2.5 py-0.5 font-normal">
-                              잔업. 특근사유
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 font-normal">
-                              시작
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 font-normal">
-                              종료
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 font-normal">
-                              총 시간
-                            </th>
-                            <th className="border border-black px-1.5 py-0.5 font-normal">
-                              싸인
-                            </th>
-                          </tr>
-                          {dateGroup.blocks.map((block) =>
-                            block.rows.map((row) => (
-                              <tr
-                                key={`${block.blockId}-${row.no}`}
-                                className="h-7 min-h-[26px]"
-                              >
-                                <td className="border border-black px-1.5 py-0.5 text-center font-normal">
-                                  {row.no}
-                                </td>
-                                <td className="border border-black px-2 py-0.5 text-left font-normal">
-                                  {row.fullName}
-                                </td>
-                                {row.isFirstInBlock && (
-                                  <td
-                                    rowSpan={row.rowSpan}
-                                    className="border border-black px-2.5 py-1 text-left align-middle whitespace-pre-line font-normal leading-snug"
-                                  >
-                                    {row.combinedReason}
-                                  </td>
-                                )}
-                                <td
-                                  className={`border border-black px-1.5 py-0.5 text-center align-middle ${
-                                    isOvertimeTimeBold(row.startTimeFormatted)
-                                      ? 'font-bold'
-                                      : 'font-normal'
-                                  }`}
-                                >
-                                  {row.startTimeFormatted}
-                                </td>
-                                <td
-                                  className={`border border-black px-1.5 py-0.5 text-center align-middle ${
-                                    isOvertimeTimeBold(row.endTimeFormatted)
-                                      ? 'font-bold'
-                                      : 'font-normal'
-                                  }`}
-                                >
-                                  {row.endTimeFormatted}
-                                </td>
-                                <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
-                                <td className="border border-black px-1.5 py-0.5 text-center align-middle" />
-                              </tr>
-                            ))
-                          )}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Notes Footer */}
-                <div className="mt-2 text-[11px] space-y-0.5 leading-snug">
-                  <div>Ghi chú 비고</div>
-                  <div>
-                    1) Nếu phát sinh dài hạn ghi rõ vào đây: từ năm
-                    2022/........./............~ 2022/........./ ............
-                  </div>
-                  <div>
-                    Phát sinh giờ ghi ở biểu trên/ 긴시간 발생할 경우 는 여기서
-                    기록할것
-                  </div>
-                </div>
-              </div>
+              <OvertimeA4PreviewSheet
+                form={viewingForm}
+                knownSubGroups={knownSubGroups}
+                variant="modal"
+                isPrintableTarget={true}
+              />
             </div>
           </div>
         </div>
@@ -1445,7 +1655,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                     Mở khóa khẩn cấp phiếu tăng ca
                   </h3>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Thao tác này chỉ dành cho trường hợp cần điều chỉnh khẩn cấp dữ liệu đã chốt.
+                    Thao tác này chỉ dành cho trường hợp cần điều chỉnh khẩn cấp
+                    dữ liệu đã chốt.
                   </p>
                 </div>
               </div>
@@ -1474,7 +1685,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 <strong className="font-mono">
                   {formatDateToFormStyle(unlockingForm.overtime_date)}
                 </strong>
-                ), phiếu sẽ cho phép sửa/xóa lại và <strong>tạm thời bị loại khỏi báo cáo Giờ Tăng ca</strong> cho đến khi được chốt lại.
+                ), phiếu sẽ cho phép sửa/xóa lại và{' '}
+                <strong>tạm thời bị loại khỏi báo cáo Giờ Tăng ca</strong> cho
+                đến khi được chốt lại.
               </p>
             </div>
 
@@ -1512,7 +1725,9 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </button>
               <button
                 type="button"
-                disabled={isUnlocking || unlockKeywordInput.trim() !== 'MO KHOA'}
+                disabled={
+                  isUnlocking || unlockKeywordInput.trim() !== 'MO KHOA'
+                }
                 onClick={() => void handleConfirmUnlock()}
                 data-testid="confirm-unlock-overtime-btn"
                 className="h-9 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
@@ -1529,7 +1744,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* In-app Soft Delete Confirmation Modal */}
+      {/* Modal Xác nhận xóa mềm */}
       {deletingForms.length > 0 && (
         <div
           role="dialog"
@@ -1553,9 +1768,10 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                       : `Xác nhận xóa ${formatNumberVN(deletingForms.length)} phiếu tăng ca`}
                   </h3>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Hệ thống sẽ đánh dấu xóa mềm (<code className="font-mono">deleted_at</code>)
-                    trên cả <code className="font-mono">overtime_forms</code> và{' '}
-                    <code className="font-mono">overtime_form_items</code> để đồng bộ cho toàn bộ người dùng.
+                    Hệ thống sẽ đánh dấu xóa mềm (
+                    <code className="font-mono">deleted_at</code>) trên cả{' '}
+                    <code className="font-mono">overtime_forms</code> và{' '}
+                    <code className="font-mono">overtime_form_items</code>.
                   </p>
                 </div>
               </div>
@@ -1570,8 +1786,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               </button>
             </div>
 
-            {/* Thông tin tóm tắt phiếu sắp xóa */}
-            {deletingForms.length === 1 ? (
+            {deletingForms.length === 1 && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-slate-500">Mã phiếu:</span>
@@ -1593,50 +1808,22 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   </span>
                 </div>
               </div>
-            ) : (
-              <div className="rounded-lg bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs space-y-1.5 max-h-36 overflow-y-auto">
-                <div className="font-semibold text-slate-700">
-                  Danh sách {formatNumberVN(deletingForms.length)} phiếu sẽ xóa mềm:
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {deletingForms.map((f) => (
-                    <span
-                      key={f.id}
-                      className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[11px] font-semibold text-[#14539E]"
-                    >
-                      {formatOvertimeFormCodeDisplay(f.form_code)}
-                    </span>
-                  ))}
-                </div>
-              </div>
             )}
 
-            {/* Lớp bảo vệ xác nhận bắt buộc trước khi xóa */}
             <label className="flex items-start gap-2.5 p-3 rounded-lg border border-red-200/80 bg-red-50/40 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={isDeleteConfirmed}
                 onChange={(e) => setIsDeleteConfirmed(e.target.checked)}
+                data-testid="confirm-delete-checkbox"
                 className="mt-0.5 w-4 h-4 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
               />
               <span className="text-xs text-slate-700 leading-snug">
-                {deletingForms.length === 1 ? (
-                  <>
-                    Tôi xác nhận muốn xóa phiếu tăng ca{' '}
-                    <strong className="font-mono text-slate-900">
-                      {formatOvertimeFormCodeDisplay(deletingForms[0].form_code)}
-                    </strong>{' '}
-                    khỏi nhật ký.
-                  </>
-                ) : (
-                  <>
-                    Tôi xác nhận muốn xóa{' '}
-                    <strong className="text-slate-900">
-                      {formatNumberVN(deletingForms.length)} phiếu tăng ca
-                    </strong>{' '}
-                    đã chọn khỏi nhật ký.
-                  </>
-                )}
+                Tôi xác nhận muốn xóa phiếu tăng ca{' '}
+                <strong className="font-mono text-slate-900">
+                  {formatOvertimeFormCodeDisplay(deletingForms[0].form_code)}
+                </strong>{' '}
+                khỏi nhật ký.
               </span>
             </label>
 
@@ -1653,6 +1840,7 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 type="button"
                 disabled={isDeleting || !isDeleteConfirmed}
                 onClick={() => void handleConfirmDelete()}
+                data-testid="confirm-delete-overtime-btn"
                 className="h-9 px-4 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
               >
                 {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -1663,12 +1851,12 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* Modal Mã SQL Chuẩn hóa RLS Xóa mềm & Realtime trên Supabase */}
+      {/* Modal Mã SQL Chuẩn hóa Supabase */}
       {isSqlModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Mã SQL chuẩn hóa xóa mềm và Realtime Supabase"
+          aria-label="Mã SQL chuẩn hóa xóa mềm Supabase"
           className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center p-4 no-print"
         >
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -1677,10 +1865,11 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                 <Database className="w-5 h-5 text-[#14539E] shrink-0" />
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    Chuẩn hóa Supabase: Xóa mềm (deleted_at) &amp; Realtime
+                    Chuẩn hóa Supabase: Xóa mềm (deleted_at)
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Chạy đoạn SQL sau trong SQL Editor trên Supabase để mở quyền cập nhật deleted_at và đồng bộ Realtime
+                    Chạy đoạn SQL sau trong SQL Editor trên Supabase để mở quyền
+                    cập nhật deleted_at
                   </p>
                 </div>
               </div>
@@ -1702,8 +1891,15 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
               )}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-700">
-                  Áp dụng cho <code className="font-mono text-[#14539E]">public.overtime_forms</code> &amp;{' '}
-                  <code className="font-mono text-[#14539E]">public.overtime_form_items</code>:
+                  Áp dụng cho{' '}
+                  <code className="font-mono text-[#14539E]">
+                    public.overtime_forms
+                  </code>{' '}
+                  &amp;{' '}
+                  <code className="font-mono text-[#14539E]">
+                    public.overtime_form_items
+                  </code>
+                  :
                 </span>
                 <button
                   type="button"

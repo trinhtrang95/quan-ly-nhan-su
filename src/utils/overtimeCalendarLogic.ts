@@ -1,4 +1,6 @@
-import type { OvertimeFormWithItems } from '../services/hrService';
+import { isOvertimeFormLocked, type OvertimeFormWithItems } from './overtimeFormsService';
+
+export type OvertimeCalendarDateStatus = 'locked' | 'open';
 
 export interface CalendarDayCell {
   isoDate: string;
@@ -6,6 +8,8 @@ export interface CalendarDayCell {
   inCurrentMonth: boolean;
   isSunday: boolean;
   hasOvertimeForm: boolean;
+  formStatus: OvertimeCalendarDateStatus | null;
+  isLocked: boolean;
 }
 
 export const CALENDAR_WEEKDAY_HEADERS = [
@@ -69,18 +73,31 @@ export function shiftYearMonth(
   };
 }
 
-export function collectOvertimeFormDatesSet(
+/**
+ * Collects active overtime form statuses strictly by `form.overtime_date`
+ * (ignoring soft-deleted forms and never using `created_at`).
+ */
+export function collectOvertimeFormStatusByDate(
   forms: OvertimeFormWithItems[]
-): Set<string> {
-  const set = new Set<string>();
+): Map<string, OvertimeCalendarDateStatus> {
+  const map = new Map<string, OvertimeCalendarDateStatus>();
   for (const form of forms || []) {
     if (form.deleted_at) continue;
     const primaryDate = (form.overtime_date || '').trim().slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(primaryDate)) {
-      set.add(primaryDate);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(primaryDate)) continue;
+    const locked = isOvertimeFormLocked(form);
+    const existing = map.get(primaryDate);
+    if (locked || !existing) {
+      map.set(primaryDate, locked ? 'locked' : 'open');
     }
   }
-  return set;
+  return map;
+}
+
+export function collectOvertimeFormDatesSet(
+  forms: OvertimeFormWithItems[]
+): Set<string> {
+  return new Set(collectOvertimeFormStatusByDate(forms).keys());
 }
 
 export function buildCalendarYearOptions(
@@ -118,7 +135,9 @@ export function buildCalendarYearOptions(
 export function buildOvertimeMonthCalendarGrid(
   year: number,
   month: number,
-  activeFormDates: Set<string>
+  activeFormDatesOrStatus:
+    | Set<string>
+    | Map<string, OvertimeCalendarDateStatus>
 ): CalendarDayCell[] {
   const firstOfMonth = new Date(year, month - 1, 1);
   // JS getDay(): 0 = Sun, 1 = Mon ... 6 = Sat -> Mon-based offset (0..6)
@@ -132,6 +151,13 @@ export function buildOvertimeMonthCalendarGrid(
   ).getDate();
   const nextMonthInfo = shiftYearMonth(year, month, 1);
 
+  const resolveStatus = (isoDate: string): OvertimeCalendarDateStatus | null => {
+    if (activeFormDatesOrStatus instanceof Map) {
+      return activeFormDatesOrStatus.get(isoDate) ?? null;
+    }
+    return activeFormDatesOrStatus.has(isoDate) ? 'open' : null;
+  };
+
   const totalCells = Math.ceil((leadingOffset + daysInMonth) / 7) * 7;
   const cells: CalendarDayCell[] = [];
 
@@ -139,45 +165,42 @@ export function buildOvertimeMonthCalendarGrid(
     const colIndex = i % 7;
     const isSunday = colIndex === 6;
 
+    let day = 1;
+    let isoDate = '';
+    let inCurrentMonth = true;
+
     if (i < leadingOffset) {
-      const day = daysInPrevMonth - leadingOffset + i + 1;
-      const isoDate = formatIsoDateKey(
+      day = daysInPrevMonth - leadingOffset + i + 1;
+      isoDate = formatIsoDateKey(
         prevMonthInfo.year,
         prevMonthInfo.month,
         day
       );
-      cells.push({
-        isoDate,
-        day,
-        inCurrentMonth: false,
-        isSunday,
-        hasOvertimeForm: activeFormDates.has(isoDate),
-      });
+      inCurrentMonth = false;
     } else if (i < leadingOffset + daysInMonth) {
-      const day = i - leadingOffset + 1;
-      const isoDate = formatIsoDateKey(year, month, day);
-      cells.push({
-        isoDate,
-        day,
-        inCurrentMonth: true,
-        isSunday,
-        hasOvertimeForm: activeFormDates.has(isoDate),
-      });
+      day = i - leadingOffset + 1;
+      isoDate = formatIsoDateKey(year, month, day);
+      inCurrentMonth = true;
     } else {
-      const day = i - (leadingOffset + daysInMonth) + 1;
-      const isoDate = formatIsoDateKey(
+      day = i - (leadingOffset + daysInMonth) + 1;
+      isoDate = formatIsoDateKey(
         nextMonthInfo.year,
         nextMonthInfo.month,
         day
       );
-      cells.push({
-        isoDate,
-        day,
-        inCurrentMonth: false,
-        isSunday,
-        hasOvertimeForm: activeFormDates.has(isoDate),
-      });
+      inCurrentMonth = false;
     }
+
+    const formStatus = resolveStatus(isoDate);
+    cells.push({
+      isoDate,
+      day,
+      inCurrentMonth,
+      isSunday,
+      hasOvertimeForm: formStatus !== null,
+      formStatus,
+      isLocked: formStatus === 'locked',
+    });
   }
 
   return cells;

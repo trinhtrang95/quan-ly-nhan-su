@@ -6,6 +6,7 @@ import {
   buildCalendarYearOptions,
   buildOvertimeMonthCalendarGrid,
   collectOvertimeFormDatesSet,
+  collectOvertimeFormStatusByDate,
   parseYearMonthKey,
   shiftYearMonth,
 } from './overtimeCalendarLogic';
@@ -75,6 +76,49 @@ test('collectOvertimeFormDatesSet marks only primary overtime_date while skippin
   assert.equal(dates.has('2026-11-15'), false);
 });
 
+test('collectOvertimeFormStatusByDate distinguishes locked vs open forms strictly by overtime_date', () => {
+  const forms = [
+    makeForm({
+      id: 'f-open',
+      overtime_date: '2026-11-25',
+      status: 'Đã lưu',
+      is_locked: false,
+      created_at: '2026-11-28T10:00:00.000Z',
+    }),
+    makeForm({
+      id: 'f-locked',
+      overtime_date: '2026-11-26',
+      status: 'Đã chốt',
+      is_locked: true,
+      created_at: '2026-11-28T11:00:00.000Z',
+    }),
+    makeForm({
+      id: 'f-deleted-locked',
+      overtime_date: '2026-11-27',
+      status: 'Đã chốt',
+      is_locked: true,
+      deleted_at: '2026-11-28T12:00:00.000Z',
+    }),
+  ];
+
+  const statusMap = collectOvertimeFormStatusByDate(forms);
+  assert.equal(statusMap.get('2026-11-25'), 'open');
+  assert.equal(statusMap.get('2026-11-26'), 'locked');
+  assert.equal(statusMap.get('2026-11-27'), undefined);
+  assert.equal(statusMap.get('2026-11-28'), undefined);
+
+  const cells = buildOvertimeMonthCalendarGrid(2026, 11, statusMap);
+  const nov25 = cells.find((c) => c.isoDate === '2026-11-25');
+  const nov26 = cells.find((c) => c.isoDate === '2026-11-26');
+  const nov28 = cells.find((c) => c.isoDate === '2026-11-28');
+  assert.equal(nov25?.formStatus, 'open');
+  assert.equal(nov25?.isLocked, false);
+  assert.equal(nov26?.formStatus, 'locked');
+  assert.equal(nov26?.isLocked, true);
+  assert.equal(nov28?.formStatus, null);
+  assert.equal(nov28?.hasOvertimeForm, false);
+});
+
 test('buildOvertimeMonthCalendarGrid aligns Monday-first columns, Sunday flags, and form dot markers', () => {
   // November 2026: Nov 1 is Sunday (col 6), so leadingOffset = 6 (Mon Oct 26 .. Sat Oct 31)
   const formDates = new Set(['2026-11-01', '2026-11-28']);
@@ -91,6 +135,7 @@ test('buildOvertimeMonthCalendarGrid aligns Monday-first columns, Sunday flags, 
   assert.equal(cells[6].inCurrentMonth, true);
   assert.equal(cells[6].isSunday, true);
   assert.equal(cells[6].hasOvertimeForm, true);
+  assert.equal(cells[6].formStatus, 'open');
 
   const nov28 = cells.find((c) => c.isoDate === '2026-11-28');
   assert.ok(nov28);

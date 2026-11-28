@@ -1455,3 +1455,28 @@ export async function suggestFactoryKoreanTranslation(
     source: 'contextual',
   };
 }
+
+/**
+ * Translates multiline Vietnamese overtime reason text into Korean line-by-line,
+ * checking exact glossary entries first and falling back to factory Korean translation.
+ */
+export async function translateMultilineKorean(
+  reasonVi: string,
+  glossaryEntries: OvertimeGlossaryEntry[]
+): Promise<string> {
+  const lines = (reasonVi || '').split(/\r?\n/);
+  const translatedLines = await Promise.all(
+    lines.map(async (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      const exact = findExactGlossaryMatch(glossaryEntries, trimmed);
+      if (exact) return exact.reasonKr;
+      const { translation } = await suggestFactoryKoreanTranslation(
+        trimmed,
+        glossaryEntries
+      );
+      return translation.replace(/\s*\n\s*/g, ' ').trim();
+    })
+  );
+  return translatedLines.join('\n');
+}

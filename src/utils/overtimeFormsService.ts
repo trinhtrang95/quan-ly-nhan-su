@@ -462,10 +462,34 @@ export function reconstructBlocksFromItems(
       employeeId: item.employee_id,
       startTime: item.start_time,
       endTime: item.end_time,
+      totalHours: item.total_hours,
     });
   }
 
   return orderedKeys.map((k) => blockMap.get(k)!);
+}
+
+/**
+ * Pure helper: swaps an overtime block with its adjacent neighbor (`up` or `down`)
+ * and returns a new array preserving immutability.
+ */
+export function reorderOvertimeBlocks<T>(
+  blocks: T[],
+  index: number,
+  direction: 'up' | 'down'
+): T[] {
+  if (!Array.isArray(blocks) || index < 0 || index >= blocks.length) {
+    return Array.isArray(blocks) ? [...blocks] : [];
+  }
+  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= blocks.length) {
+    return [...blocks];
+  }
+  const next = [...blocks];
+  const temp = next[index];
+  next[index] = next[targetIndex];
+  next[targetIndex] = temp;
+  return next;
 }
 
 /**

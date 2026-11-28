@@ -27,9 +27,14 @@ import {
   getLocalTodayIsoDate,
   isOvertimeFormLocked,
   lockOvertimeForm,
+  normalizeTargetGroups,
+  OvertimeBlockInput,
   OvertimeFormWithItems,
   OvertimeGlossaryEntry,
   OvertimeLeaveCheckEntry,
+  OvertimeParticipantInput,
+  OvertimeSupabaseActionError,
+  reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
   softDeleteOvertimeForms,
   subscribeToOvertimeGlossaryRealtime,
@@ -37,9 +42,13 @@ import {
   updateOvertimeFormInHistory,
 } from '../../../services/hrService';
 import {
+  calculateActualOvertimeHours,
   CompanyHoliday,
   createDefaultAdminShift,
   DEFAULT_OVERTIME_SETTINGS,
+  evaluateOvertimeDaySchedule,
+  getWeekdayKeyFromIsoDate,
+  normalize24hTime,
   OvertimeSettings,
   WorkShift,
 } from '../../../utils/workScheduleLogic';
@@ -61,6 +70,7 @@ import {
 } from './CreateOvertimeForm';
 import { GlossaryManagerModal } from './GlossaryManagerModal';
 import { OvertimeLog } from './OvertimeLog';
+import { ConfirmableOvertimeBlockPayload } from './ZaloScheduleScanModal';
 
 export type OvertimeTabId = 'create' | 'log' | 'glossary';
 
@@ -101,6 +111,11 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
   const [companyHolidays, setCompanyHolidays] = useState<CompanyHoliday[]>([]);
   const [overtimeSettings, setOvertimeSettings] = useState<OvertimeSettings>(
     () => ({ ...DEFAULT_OVERTIME_SETTINGS })
+  );
+
+  const employeeMap = useMemo(
+    () => new Map(employees.map((e) => [e.id, e])),
+    [employees]
   );
 
   const loadScheduleData = useCallback(async () => {
@@ -241,39 +256,214 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     };
   }, [loadForms, loadLeaveRecords, loadGlossary, loadScheduleData]);
 
-  const handleCreateOrOpenShell = async (overtimeDate: string) => {
+  const upsertFormInState = useCallback((nextForm: OvertimeFormWithItems) => {
+    setForms((prev) => {
+      const exists = prev.some((f) => f.id === nextForm.id);
+      if (exists) {
+        return prev.map((f) => (f.id === nextForm.id ? nextForm : f));
+      }
+      return [nextForm, ...prev];
+    });
+    setEditingForm((prev) => (prev && prev.id === nextForm.id ? nextForm : prev));
+  }, []);
+
+  const handleCreateOrOpenShell = async (
+    overtimeDate: string,
+    options?: { openInEditor?: boolean }
+  ) => {
     const res = await createOrOpenOvertimeShell(overtimeDate, {
       department: DEFAULT_OVERTIME_DEPARTMENT,
       knownSubGroups,
     });
 
-    await loadForms({ silent: true });
+    upsertFormInState(res.form);
 
     const displayCode = formatOvertimeFormCodeDisplay(res.form.form_code);
     const displayDate = formatDateToFormStyle(res.form.overtime_date);
 
     if (res.action === 'created_new') {
       onShowToast?.(
-        `Đã tạo vỏ phiếu mới ${displayCode} (Ngày ${displayDate}). Vui lòng thêm chi tiết lượt tăng ca.`
+        `Đã tạo vỏ phiếu mới ${displayCode} (Ngày ${displayDate}).`
       );
     } else if (res.action === 'opened_existing') {
       if (isOvertimeFormLocked(res.form)) {
         onShowToast?.(
-          `Phiếu ${displayCode} (Ngày ${displayDate}) đã được chốt. Đang mở ở chế độ chỉ xem.`
+          `Phiếu ${displayCode} (Ngày ${displayDate}) đã được chốt.`
         );
       } else {
         onShowToast?.(
-          `Ngày ${displayDate} đã tồn tại phiếu ${displayCode} — đã mở trực tiếp để chỉnh sửa.`
+          `Ngày ${displayDate} đã có phiếu ${displayCode} — đã mở trực tiếp.`
         );
       }
     } else {
       onShowToast?.(
-        `Đã khôi phục vỏ phiếu ${displayCode} (Ngày ${displayDate}) để nhập chi tiết.`
+        `Đã khôi phục vỏ phiếu ${displayCode} (Ngày ${displayDate}).`
       );
     }
 
-    setEditingForm(res.form);
-    handleSelectTab('create');
+    if (options?.openInEditor) {
+      setEditingForm(res.form);
+      handleSelectTab('create');
+    }
+  };
+
+  const computeNetHoursForEmployee = useCallback(
+    (isoDate: string, empId: string, startTime: string, endTime: string) => {
+      const empDept = (employeeMap.get(empId)?.department || '').trim();
+      const evalRes = evaluateOvertimeDaySchedule({
+        isoDate,
+        holidays: companyHolidays,
+        shifts: workShifts,
+        departmentName: empDept || 'ALL',
+        employeeDepartments: empDept ? [empDept] : [],
+      });
+      const isWeekendOrHoliday =
+        evalRes.dayKind === 'weekly_off' ||
+        evalRes.dayKind === 'holiday' ||
+        evalRes.dayKind === 'compensatory_off' ||
+        (Boolean(isoDate && /^\d{4}-\d{2}-\d{2}$/.test(isoDate)) &&
+          getWeekdayKeyFromIsoDate(isoDate) === 'sun');
+
+      return calculateActualOvertimeHours(
+        isoDate,
+        startTime,
+        endTime,
+        isWeekendOrHoliday,
+        overtimeSettings
+      ).netHours;
+    },
+    [employeeMap, companyHolidays, workShifts, overtimeSettings]
+  );
+
+  const handleAppendBlocksToDate = async (
+    fallbackDate: string,
+    payloads: ConfirmableOvertimeBlockPayload[]
+  ): Promise<OvertimeFormWithItems> => {
+    if (!payloads || payloads.length === 0) {
+      throw new Error('Không có nhóm tăng ca nào để ghi nhận.');
+    }
+
+    const targetDate =
+      (payloads[0]?.overtimeDate || fallbackDate || '').trim() ||
+      getLocalTodayIsoDate();
+
+    // Tìm vỏ phiếu đang hoạt động của ngày đó hoặc tự động tạo/khôi phục vỏ phiếu TC-YYYYMMDD
+    let targetForm = forms.find(
+      (f) => !f.deleted_at && (f.overtime_date || '').trim() === targetDate
+    );
+
+    if (!targetForm) {
+      const shellRes = await createOrOpenOvertimeShell(targetDate, {
+        department: DEFAULT_OVERTIME_DEPARTMENT,
+        knownSubGroups,
+      });
+      targetForm = shellRes.form;
+      upsertFormInState(targetForm);
+    }
+
+    if (isOvertimeFormLocked(targetForm)) {
+      throw new OvertimeSupabaseActionError(
+        `Phiếu ${formatOvertimeFormCodeDisplay(
+          targetForm.form_code
+        )} đã chốt, không thể thêm nhóm tăng ca mới.`
+      );
+    }
+
+    const existingBlocks = reconstructBlocksFromItems(targetForm.items || []);
+
+    const newBlocks: OvertimeBlockInput[] = payloads.map((payload, idx) => {
+      const resolvedBlockDate =
+        (payload.overtimeDate || targetDate).trim() || targetDate;
+      const normStart = normalize24hTime(payload.startTime, '16:10');
+      const normEnd = normalize24hTime(payload.endTime, '18:10');
+      const participants: OvertimeParticipantInput[] =
+        payload.selectedEmployeeIds.map((empId) => {
+          const custom = payload.customTimes[empId];
+          const pStart = custom?.startTime
+            ? normalize24hTime(custom.startTime, normStart)
+            : normStart;
+          const pEnd = custom?.endTime
+            ? normalize24hTime(custom.endTime, normEnd)
+            : normEnd;
+          return {
+            employeeId: empId,
+            startTime: pStart,
+            endTime: pEnd,
+            totalHours: computeNetHoursForEmployee(
+              resolvedBlockDate,
+              empId,
+              pStart,
+              pEnd
+            ),
+          };
+        });
+
+      return {
+        id: `ot-block-${Date.now()}-${idx}-${Math.random()
+          .toString(36)
+          .slice(2, 6)}`,
+        overtimeDate: resolvedBlockDate,
+        reasonVi: payload.reasonVi.trim(),
+        reasonKr: payload.reasonKr.trim(),
+        startTime: normStart,
+        endTime: normEnd,
+        selectedEmployeeIds: [...payload.selectedEmployeeIds],
+        participants,
+      };
+    });
+
+    const combinedBlocks = [...existingBlocks, ...newBlocks];
+    const mainDepartment = resolveOvertimeMainDepartment(
+      targetForm.department,
+      knownSubGroups
+    );
+
+    const updatedForm = await updateOvertimeFormInHistory(targetForm, {
+      department: mainDepartment,
+      overtimeDate: targetForm.overtime_date,
+      blocks: combinedBlocks,
+      employees,
+      knownSubGroups,
+    });
+
+    upsertFormInState(updatedForm);
+    onShowToast?.(
+      newBlocks.length > 1
+        ? `Đã ghi nhận ${newBlocks.length} nhóm tăng ca vào phiếu ${formatOvertimeFormCodeDisplay(
+            updatedForm.form_code
+          )}.`
+        : `Đã ghi nhận nhóm tăng ca vào phiếu ${formatOvertimeFormCodeDisplay(
+            updatedForm.form_code
+          )}.`
+    );
+
+    return updatedForm;
+  };
+
+  const handleUpdateFormBlocks = async (
+    form: OvertimeFormWithItems,
+    nextBlocks: OvertimeBlockInput[]
+  ): Promise<OvertimeFormWithItems> => {
+    if (isOvertimeFormLocked(form)) {
+      throw new OvertimeSupabaseActionError(
+        'Phiếu đã chốt, không thể thay đổi thứ tự hoặc nội dung nhóm.'
+      );
+    }
+
+    const mainDepartment = resolveOvertimeMainDepartment(
+      form.department,
+      knownSubGroups
+    );
+    const updatedForm = await updateOvertimeFormInHistory(form, {
+      department: mainDepartment,
+      overtimeDate: form.overtime_date,
+      blocks: nextBlocks,
+      employees,
+      knownSubGroups,
+    });
+
+    upsertFormInState(updatedForm);
+    return updatedForm;
   };
 
   const handleStartEditForm = async (form: OvertimeFormWithItems) => {
@@ -330,7 +520,6 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       knownSubGroups
     );
 
-    // Luôn cập nhật trực tiếp vào vỏ phiếu đang mở (giữ cố định Mã phiếu TC-YYYYMMDD & Ngày phiếu)
     const updated = await updateOvertimeFormInHistory(editingForm, {
       department: mainDepartment,
       overtimeDate: editingForm.overtime_date,
@@ -339,9 +528,8 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       knownSubGroups,
     });
 
-    await loadForms({ silent: true });
-    
-    // Vẫn hiển thị thông báo cập nhật thành công với số giờ mới nhất
+    upsertFormInState(updated);
+
     onShowToast?.(
       `Đã cập nhật phiếu ${formatOvertimeFormCodeDisplay(
         updated.form_code
@@ -350,7 +538,6 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
       )} giờ).`
     );
 
-    // ĐIỂM CHỐT LÀ Ở ĐÂY: Chỉ chuyển trang khi KHÔNG phải là tự động lưu
     if (!isAutoSave) {
       setEditingForm(null);
       setActiveTab('log');
@@ -371,16 +558,12 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
     if (editingForm && deletedSet.has(editingForm.id)) {
       setEditingForm(null);
     }
-    // Tải lại danh sách trực tiếp từ Supabase (.is('deleted_at', null)), không giữ state local cũ
-    await loadForms({ silent: true });
+    setForms((prev) => prev.filter((f) => !deletedSet.has(f.id)));
   };
 
   const handleLockForm = async (form: OvertimeFormWithItems) => {
     const locked = await lockOvertimeForm(form.id);
-    if (editingForm && editingForm.id === locked.id) {
-      setEditingForm(locked);
-    }
-    await loadForms({ silent: true });
+    upsertFormInState(locked);
     onShowToast?.(
       `Đã chốt phiếu ${formatOvertimeFormCodeDisplay(
         locked.form_code
@@ -392,10 +575,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
 
   const handleUnlockForm = async (form: OvertimeFormWithItems) => {
     const unlocked = await unlockOvertimeForm(form);
-    if (editingForm && editingForm.id === unlocked.id) {
-      setEditingForm(unlocked);
-    }
-    await loadForms({ silent: true });
+    upsertFormInState(unlocked);
     onShowToast?.(
       `Đã mở khóa khẩn cấp phiếu ${formatOvertimeFormCodeDisplay(
         unlocked.form_code
@@ -491,10 +671,20 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
             forms={forms}
             employees={employees}
             groups={groups}
+            leaveRecords={effectiveLeaveRecords}
+            glossaryEntries={glossaryEntries}
+            workShifts={workShifts}
+            companyHolidays={companyHolidays}
             isLoading={isLoadingForms}
             schemaNeedsMigration={schemaNeedsMigration}
             onRefresh={() => loadForms({ silent: false })}
-            onCreateOrOpenShell={handleCreateOrOpenShell}
+            onCreateOrOpenShell={(dateStr) =>
+              handleCreateOrOpenShell(dateStr, { openInEditor: false })
+            }
+            onAppendBlocksToDate={handleAppendBlocksToDate}
+            onUpdateFormBlocks={handleUpdateFormBlocks}
+            onGlossaryEntriesUpdated={setGlossaryEntries}
+            onLeaveRecordsRefreshed={setSupabaseLeaveRecords}
             onEdit={(form) => void handleStartEditForm(form)}
             onLockForm={handleLockForm}
             onUnlockForm={handleUnlockForm}
@@ -569,7 +759,9 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
                   onClick={async () => {
                     setIsQuickCreating(true);
                     try {
-                      await handleCreateOrOpenShell(quickShellDate);
+                      await handleCreateOrOpenShell(quickShellDate, {
+                        openInEditor: true,
+                      });
                     } catch (err) {
                       onShowToast?.(getFriendlyErrorMessage(err));
                     } finally {

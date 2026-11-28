@@ -17,6 +17,7 @@ import {
   isOvertimeFormLocked,
   isOvertimeTimeBold,
   reconstructBlocksFromItems,
+  reorderOvertimeBlocks,
   resolveDefaultPrimaryOvertimeDate,
   resolveDepartmentLabel,
   resolveOvertimeMainDepartment,
@@ -705,5 +706,56 @@ describe('overtimeFormsService pure logic', () => {
       'Nghỉ Chế độ (Ốm đau / Viện phí)'
     );
   });
+
+  it('reorders overtime blocks cleanly and preserves custom participant totalHours across round-trips', () => {
+    const blocks: OvertimeBlockInput[] = [
+      {
+        id: 'b1',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Nhóm 1',
+        reasonKr: '그룹 1',
+        startTime: '16:10',
+        endTime: '19:10',
+        selectedEmployeeIds: ['emp-1'],
+        participants: [
+          { employeeId: 'emp-1', startTime: '16:10', endTime: '19:10', totalHours: 2.5 },
+        ],
+      },
+      {
+        id: 'b2',
+        overtimeDate: '2026-11-28',
+        reasonVi: 'Nhóm 2',
+        reasonKr: '그룹 2',
+        startTime: '16:10',
+        endTime: '20:10',
+        selectedEmployeeIds: ['emp-2'],
+        participants: [
+          { employeeId: 'emp-2', startTime: '16:10', endTime: '20:10', totalHours: 3.5 },
+        ],
+      },
+    ];
+
+    const movedDown = reorderOvertimeBlocks(blocks, 0, 'down');
+    assert.deepEqual(movedDown.map((b) => b.id), ['b2', 'b1']);
+    const movedUp = reorderOvertimeBlocks(movedDown, 1, 'up');
+    assert.deepEqual(movedUp.map((b) => b.id), ['b1', 'b2']);
+    // Out-of-bounds swaps are no-ops
+    assert.deepEqual(reorderOvertimeBlocks(blocks, 0, 'up').map((b) => b.id), ['b1', 'b2']);
+    assert.deepEqual(reorderOvertimeBlocks(blocks, 1, 'down').map((b) => b.id), ['b1', 'b2']);
+
+    const items = buildOvertimeFormItemsFromBlocks('f-roundtrip', movedDown, sampleEmployees, '2026-11-28');
+    assert.equal(items[0].block_order, 0);
+    assert.equal(items[0].employee_id, 'emp-2');
+    assert.equal(items[0].total_hours, 3.5);
+    assert.equal(items[1].block_order, 1);
+    assert.equal(items[1].employee_id, 'emp-1');
+    assert.equal(items[1].total_hours, 2.5);
+
+    const reconstructed = reconstructBlocksFromItems(items);
+    assert.deepEqual(reconstructed.map((b) => b.id), ['b2', 'b1']);
+    assert.equal(reconstructed[0].participants[0].totalHours, 3.5);
+    assert.equal(reconstructed[1].participants[0].totalHours, 2.5);
+  });
 });
+
 
