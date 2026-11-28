@@ -48,7 +48,7 @@ import {
   reconstructBlocksFromItems,
   resolveOvertimeMainDepartment,
   sortParticipantsByReasonScope,
-  suggestFactoryKoreanTranslation,
+  translateMultilineKorean,
   upsertOvertimeGlossaryEntry,
 } from '../../../services/hrService';
 import {
@@ -167,27 +167,6 @@ class OvertimeFormService {
 }
 
 const DRAFT_STORAGE_KEY = 'ot_form_draft_v1';
-
-async function translateMultilineKorean(
-  reasonVi: string,
-  glossaryEntries: OvertimeGlossaryEntry[]
-): Promise<string> {
-  const lines = reasonVi.split(/\r?\n/);
-  const translatedLines = await Promise.all(
-    lines.map(async (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return '';
-      const exact = findExactGlossaryMatch(glossaryEntries, trimmed);
-      if (exact) return exact.reasonKr;
-      const { translation } = await suggestFactoryKoreanTranslation(
-        trimmed,
-        glossaryEntries
-      );
-      return translation.replace(/\s*\n\s*/g, ' ').trim();
-    })
-  );
-  return translatedLines.join('\n');
-}
 
 export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   employees = INITIAL_EMPLOYEES,

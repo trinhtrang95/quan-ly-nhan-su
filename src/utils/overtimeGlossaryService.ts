@@ -2,6 +2,7 @@ import {
   getOvertimeSupabaseClient,
   overtimeSupabase,
 } from './overtimeFormsService';
+import { translateLinesWithAiRouting } from '../services/aiSettingsService';
 
 export interface OvertimeGlossaryEntry {
   id: string;
@@ -1373,10 +1374,11 @@ export async function deleteGlossaryEntry(id: string): Promise<{
 }
 
 /**
- * 3-tier translation suggestion:
+ * 4-tier translation suggestion:
  * - Tier 1: Exact match in internal glossary (instant, standard factory phrasing)
- * - Tier 2/3: Contextual concise factory overtime translation (Vietnamese -> Korean)
- *   with automatic offline fallback to built-in factory phrase dictionary.
+ * - Tier 2: Configured AI routing (DeepL API Free -> Groq -> Gemini -> Mistral -> OpenRouter)
+ * - Tier 3: Unauthenticated contextual translate.googleapis.com fallback
+ * - Tier 4: Offline built-in factory phrase dictionary composer
  */
 export async function suggestFactoryKoreanTranslation(
   reasonVi: string,
@@ -1391,6 +1393,20 @@ export async function suggestFactoryKoreanTranslation(
   const exact = findExactGlossaryMatch(entries, cleanVi);
   if (exact) {
     return { translation: exact.reasonKr, source: 'glossary' };
+  }
+
+  // Tier 2: Smart AI routing (DeepL Free -> Groq -> Gemini -> Mistral -> OpenRouter)
+  try {
+    const routed = await translateLinesWithAiRouting([cleanVi]);
+    const aiTranslated = routed?.translations?.[0]?.trim();
+    if (aiTranslated) {
+      const refined = cleanFactoryKoreanTranslation(aiTranslated);
+      if (refined) {
+        return { translation: refined, source: 'contextual' };
+      }
+    }
+  } catch {
+    // Fall through to legacy contextual translation
   }
 
   // Tier 3: Contextual translation for concise factory overtime reasons
@@ -1458,25 +1474,65 @@ export async function suggestFactoryKoreanTranslation(
 
 /**
  * Translates multiline Vietnamese overtime reason text into Korean line-by-line,
- * checking exact glossary entries first and falling back to factory Korean translation.
+ * checking exact glossary entries first, batching remaining lines through configured AI routing,
+ * and falling back to Google/offline factory Korean translation per line if needed.
  */
 export async function translateMultilineKorean(
   reasonVi: string,
   glossaryEntries: OvertimeGlossaryEntry[]
 ): Promise<string> {
   const lines = (reasonVi || '').split(/\r?\n/);
-  const translatedLines = await Promise.all(
-    lines.map(async (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return '';
-      const exact = findExactGlossaryMatch(glossaryEntries, trimmed);
-      if (exact) return exact.reasonKr;
-      const { translation } = await suggestFactoryKoreanTranslation(
-        trimmed,
-        glossaryEntries
-      );
-      return translation.replace(/\s*\n\s*/g, ' ').trim();
-    })
-  );
-  return translatedLines.join('\n');
+  const resolvedLines = new Array<string>(lines.length).fill('');
+  const pendingIndices: number[] = [];
+  const pendingTexts: string[] = [];
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      resolvedLines[idx] = '';
+      return;
+    }
+    const exact = findExactGlossaryMatch(glossaryEntries, trimmed);
+    if (exact) {
+      resolvedLines[idx] = exact.reasonKr;
+      return;
+    }
+    pendingIndices.push(idx);
+    pendingTexts.push(trimmed);
+  });
+
+  if (pendingTexts.length > 0) {
+    try {
+      const routed = await translateLinesWithAiRouting(pendingTexts);
+      if (
+        routed &&
+        Array.isArray(routed.translations) &&
+        routed.translations.length === pendingTexts.length
+      ) {
+        pendingIndices.forEach((lineIdx, pos) => {
+          const cleaned = cleanFactoryKoreanTranslation(
+            routed.translations[pos] || ''
+          );
+          if (cleaned) {
+            resolvedLines[lineIdx] = cleaned;
+          }
+        });
+      }
+    } catch {
+      // Ignore and fall back per line below
+    }
+
+    await Promise.all(
+      pendingIndices.map(async (lineIdx, pos) => {
+        if (resolvedLines[lineIdx]) return;
+        const { translation } = await suggestFactoryKoreanTranslation(
+          pendingTexts[pos],
+          glossaryEntries
+        );
+        resolvedLines[lineIdx] = translation.replace(/\s*\n\s*/g, ' ').trim();
+      })
+    );
+  }
+
+  return resolvedLines.join('\n');
 }

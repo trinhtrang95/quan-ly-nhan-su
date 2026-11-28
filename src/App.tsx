@@ -96,6 +96,7 @@ import {
   maskSensitiveUserAccount,
 } from './utils/errorAndSecurityService';
 import { AttendanceSymbolsProvider } from './contexts/AttendanceSymbolsContext';
+import { AI_NOTIFICATION_EVENT } from './services/aiSettingsService';
 
 const DATA_VERSION = 'v2_cloud_strict';
 
@@ -466,6 +467,20 @@ function AppContent() {
       setToastMsg((prev) => (prev === msg ? null : prev));
     }, 3500);
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleAiNotification = (e: Event) => {
+      const custom = e as CustomEvent<{ message?: string }>;
+      if (custom.detail?.message) {
+        showToast(custom.detail.message);
+      }
+    };
+    window.addEventListener(AI_NOTIFICATION_EVENT, handleAiNotification);
+    return () => {
+      window.removeEventListener(AI_NOTIFICATION_EVENT, handleAiNotification);
+    };
+  }, []);
 
   // Initialize saved Theme Preset & OS Dark Mode listener on mount
   useEffect(() => {

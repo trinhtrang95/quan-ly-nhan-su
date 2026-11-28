@@ -24,8 +24,10 @@ import {
   MonitorDown,
   Palette,
   Layers,
+  Sparkles,
 } from 'lucide-react';
 import { CompanyOrgStructureTab } from './settings/CompanyOrgStructureTab';
+import { AiSettingsTab } from './settings/AiSettingsTab';
 import { StGeneralSetupTab } from './stWork/StGeneralSetupTab';
 import {
   CompanyUnit,
@@ -68,6 +70,7 @@ export type SettingsSubTab =
   | 'departments'
   | 'accounts'
   | 'backup'
+  | 'ai_settings'
   | 'st_lines'
   | 'st_customers';
 
@@ -118,6 +121,7 @@ const SUB_TABS: {
   { id: 'departments', label: 'Bộ phận & Nhóm', icon: FolderCog },
   { id: 'accounts', label: 'Tài khoản & Phân quyền', icon: UsersRound },
   { id: 'backup', label: 'Quản trị & Sao lưu Dữ liệu', icon: Database },
+  { id: 'ai_settings', label: 'Cài đặt AI', icon: Sparkles },
 ];
 
 const ST_SETTINGS_TABS: {
@@ -1787,6 +1791,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             </div>
           </div>
         </section>
+      )}
+
+      {activeSubTab === 'ai_settings' && (
+        <AiSettingsTab onShowToast={onShowToast} />
       )}
 
       {activeSubTab === 'st_lines' && (

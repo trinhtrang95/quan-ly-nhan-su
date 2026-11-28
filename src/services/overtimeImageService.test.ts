@@ -22,12 +22,15 @@ const MOCK_EMPLOYEES: Employee[] = [
   },
 ];
 
-test('parseOvertimeScheduleImage throws clear error when VITE_GEMINI_API_KEY is missing and never calls /api/', async () => {
+test('parseOvertimeScheduleImage throws clear error when no vision provider key is configured', async () => {
   const originalFetch = globalThis.fetch;
-  let fetchCalled = false;
-  globalThis.fetch = (async () => {
-    fetchCalled = true;
-    throw new Error('Should not call fetch when API key is missing');
+  let visionApiCalled = false;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/ai/vision-parse')) {
+      visionApiCalled = true;
+    }
+    throw new Error('Should not call vision API without any provider key');
   }) as typeof fetch;
 
   const prevViteKey = process.env.VITE_GEMINI_API_KEY;
@@ -44,9 +47,9 @@ test('parseOvertimeScheduleImage throws clear error when VITE_GEMINI_API_KEY is 
           employees: MOCK_EMPLOYEES,
           defaultDate: '2026-11-28',
         }),
-      /Chưa cấu hình VITE_GEMINI_API_KEY trên môi trường/
+      /Chưa có nhà cung cấp AI đọc ảnh nào khả dụng/
     );
-    assert.equal(fetchCalled, false);
+    assert.equal(visionApiCalled, false);
   } finally {
     globalThis.fetch = originalFetch;
     if (prevViteKey !== undefined) process.env.VITE_GEMINI_API_KEY = prevViteKey;
@@ -54,56 +57,57 @@ test('parseOvertimeScheduleImage throws clear error when VITE_GEMINI_API_KEY is 
   }
 });
 
-test('parseOvertimeScheduleImage calls Gemini v1beta directly and falls back on 404 without calling /api/', async () => {
+test('parseOvertimeScheduleImage routes via /api/ai/vision-parse and returns provider fallback metadata', async () => {
   const originalFetch = globalThis.fetch;
   const calledUrls: string[] = [];
-  let capturedBody: Record<string, unknown> | null = null;
+  let capturedPayload: {
+    attempts?: Array<{ provider: string; apiKeys: string[] }>;
+  } = {};
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calledUrls.push(url);
-    assert.equal(url.includes('/api/overtime/parse-schedule-image'), false);
 
-    if (url.includes('/models/gemini-2.5-flash:')) {
-      return new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
-    }
-
-    capturedBody = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
-    return new Response(
-      JSON.stringify({
-        candidates: [
-          {
-            content: {
-              parts: [
+    if (url.includes('/api/ai/vision-parse')) {
+      capturedPayload = JSON.parse(String(init?.body || '{}')) as {
+        attempts?: Array<{ provider: string; apiKeys: string[] }>;
+      };
+      return new Response(
+        JSON.stringify({
+          providerUsed: 'mistral',
+          modelUsed: 'pixtral-12b-2409',
+          attemptLogs: [
+            {
+              provider: 'gemini',
+              status: 429,
+              rateLimited: true,
+              message: 'Resource exhausted',
+            },
+          ],
+          blocks: [
+            {
+              overtimeDate: '2026-11-28',
+              reasonVi: '- Kiểm tra line 1\n- Vệ sinh máy',
+              reasonKr: '- 1라인 점검\n- 설비 청소',
+              startTime: '16:10',
+              endTime: '18:10',
+              matchedParticipants: [
                 {
-                  text: JSON.stringify({
-                    blocks: [
-                      {
-                        overtimeDate: '2026-11-28',
-                        reasonVi: '- Kiểm tra line 1\n- Vệ sinh máy',
-                        reasonKr: '- 1라인 점검\n- 설비 청소',
-                        startTime: '16:10',
-                        endTime: '18:10',
-                        matchedParticipants: [
-                          {
-                            employeeId: 'emp-1',
-                            rawName: 'Nguyễn Văn An',
-                            startTime: '16:10',
-                            endTime: '18:10',
-                          },
-                        ],
-                        unmatchedNames: [],
-                      },
-                    ],
-                  }),
+                  employeeId: 'emp-1',
+                  rawName: 'Nguyễn Văn An',
+                  startTime: '16:10',
+                  endTime: '18:10',
                 },
               ],
+              unmatchedNames: [],
             },
-          },
-        ],
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new Response(JSON.stringify({ error: 'unexpected url' }), { status: 404 });
   }) as typeof fetch;
 
   try {
@@ -115,17 +119,13 @@ test('parseOvertimeScheduleImage calls Gemini v1beta directly and falls back on 
       apiKeyOverride: 'test-key-123',
     });
 
-    assert.equal(calledUrls.length, 2);
-    assert.match(
-      calledUrls[0],
-      /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-2\.5-flash:generateContent\?key=test-key-123$/
-    );
-    assert.match(
-      calledUrls[1],
-      /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-4-hydrogen:generateContent\?key=test-key-123$/
-    );
-    assert.ok(capturedBody);
-    assert.equal(result.modelUsed, 'gemini-4-hydrogen');
+    assert.ok(calledUrls.some((u) => u.includes('/api/ai/vision-parse')));
+    const attempts = capturedPayload.attempts || [];
+    assert.ok(attempts.length > 0);
+    assert.equal(attempts[0].provider, 'gemini');
+    assert.equal(attempts[0].apiKeys[0], 'test-key-123');
+    assert.equal(result.providerUsed, 'mistral');
+    assert.equal(result.modelUsed, 'Mistral (pixtral-12b-2409)');
     assert.equal(result.blocks.length, 1);
     assert.equal(result.blocks[0].reasonVi, '- Kiểm tra line 1\n- Vệ sinh máy');
   } finally {
