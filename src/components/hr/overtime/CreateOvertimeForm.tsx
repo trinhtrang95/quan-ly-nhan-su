@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Calendar,
   CalendarHeart,
+  Camera,
   Check,
   CheckCircle2,
   ChevronUp,
@@ -68,6 +69,10 @@ import {
   sanitize24hTimeInput,
   type WorkShift,
 } from '../../../utils/workScheduleLogic';
+import {
+  ConfirmableOvertimeBlockPayload,
+  ZaloScheduleScanModal,
+} from './ZaloScheduleScanModal';
 
 export interface OvertimeParticipant {
   employeeId: string;
@@ -250,6 +255,7 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
   const [currentSelectedEmployeeIds, setCurrentSelectedEmployeeIds] = useState<string[]>([]);
   const [customTimes, setCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [editingTimeEmpId, setEditingTimeEmpId] = useState<string | null>(null);
+  const [isAiScanModalOpen, setIsAiScanModalOpen] = useState<boolean>(false);
   
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState<string>('');
   const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState<boolean>(false);
@@ -458,6 +464,141 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
     setTimeout(() => {
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 3500);
+  };
+
+  const handleConfirmAiModalPayloads = async (
+    payloads: ConfirmableOvertimeBlockPayload[]
+  ) => {
+    if (isLockedForm) {
+      throw new Error('Phiếu tăng ca đã chốt, không thể thêm nhóm mới.');
+    }
+
+    const latestLeaveCheck = await fetchActiveLeaveRecordsForOvertimeCheck(employees).catch(() => null);
+    const recordsToCheck =
+      latestLeaveCheck && latestLeaveCheck.source === 'supabase'
+        ? latestLeaveCheck.records
+        : effectiveLeaveRecords;
+    if (latestLeaveCheck && latestLeaveCheck.source === 'supabase') {
+      setLiveLeaveRecords(latestLeaveCheck.records);
+    }
+
+    const newBlocks: OvertimeTaskBlock[] = [];
+    const skippedOnLeaveAll: string[] = [];
+
+    for (let i = 0; i < payloads.length; i += 1) {
+      const payload = payloads[i];
+      const resolvedDate =
+        payload.overtimeDate || shellOvertimeDate || getLocalTodayIsoDate();
+      const latestOnLeaveMap = buildOnLeaveEmployeeMapForDate(
+        resolvedDate,
+        recordsToCheck,
+        employees
+      );
+
+      const validEmployeeIds: string[] = [];
+      for (const empId of payload.selectedEmployeeIds) {
+        if (latestOnLeaveMap.has(empId)) {
+          skippedOnLeaveAll.push(employeeMap.get(empId)?.fullName || empId);
+        } else {
+          validEmployeeIds.push(empId);
+        }
+      }
+
+      if (validEmployeeIds.length === 0) {
+        throw new Error(
+          `Tất cả nhân sự trong nhóm "${payload.reasonVi}" đều đang có đơn nghỉ ngày ${formatDateToFormStyle(
+            resolvedDate
+          )}.`
+        );
+      }
+
+      const normalizedStart = OvertimeFormService.normalize24hTime(
+        payload.startTime,
+        '16:10'
+      );
+      const normalizedEnd = OvertimeFormService.normalize24hTime(
+        payload.endTime,
+        '18:10'
+      );
+      const cleanReasonVi = payload.reasonVi.trim();
+      const finalReasonKr = payload.reasonKr.trim()
+        ? payload.reasonKr.trim()
+        : await translateMultilineKorean(cleanReasonVi, glossaryEntries);
+
+      if (cleanReasonVi && finalReasonKr) {
+        const existingGlossary = findExactGlossaryMatch(
+          glossaryEntries,
+          cleanReasonVi
+        );
+        if (!existingGlossary) {
+          const blockDepartments = normalizeTargetGroups(
+            validEmployeeIds.map((id) => employeeMap.get(id)?.department || '')
+          );
+          void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr, {
+            isVerified: false,
+            targetGroups: blockDepartments,
+          }).then(({ entries }) => updateGlossaryState(entries));
+        } else if (finalReasonKr !== existingGlossary.reasonKr.trim()) {
+          void upsertOvertimeGlossaryEntry(cleanReasonVi, finalReasonKr).then(
+            ({ entries }) => updateGlossaryState(entries)
+          );
+        }
+      }
+
+      const participants: OvertimeParticipant[] = validEmployeeIds.map((empId) => {
+        const custom = payload.customTimes[empId];
+        const pStart = custom?.startTime
+          ? OvertimeFormService.normalize24hTime(custom.startTime, normalizedStart)
+          : normalizedStart;
+        const pEnd = custom?.endTime
+          ? OvertimeFormService.normalize24hTime(custom.endTime, normalizedEnd)
+          : normalizedEnd;
+        const netRes = getNetHoursForParticipant(resolvedDate, empId, pStart, pEnd);
+        return {
+          employeeId: empId,
+          startTime: pStart,
+          endTime: pEnd,
+          totalHours: netRes.netHours,
+        };
+      });
+
+      newBlocks.push({
+        id: `ot-block-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        overtimeDate: resolvedDate,
+        reasonVi: cleanReasonVi,
+        reasonKr: finalReasonKr,
+        startTime: normalizedStart,
+        endTime: normalizedEnd,
+        selectedEmployeeIds: validEmployeeIds,
+        participants,
+        isTranslating: false,
+      });
+    }
+
+    const updatedBlocks = [...previewData, ...newBlocks];
+    setPreviewData(updatedBlocks);
+
+    if (onSaveOnly) {
+      await onSaveOnly(
+        {
+          department: formDepartment,
+          overtimeDate: shellOvertimeDate,
+          blocks: updatedBlocks,
+        },
+        true
+      );
+    }
+
+    setIsAiScanModalOpen(false);
+    const leaveSuffix =
+      skippedOnLeaveAll.length > 0
+        ? ` (đã bỏ qua ${skippedOnLeaveAll.length} người đang nghỉ)`
+        : '';
+    showToast(
+      newBlocks.length > 1
+        ? `Đã ghi nhận và tự động lưu ${newBlocks.length} nhóm tăng ca từ ảnh Zalo thành công!${leaveSuffix}`
+        : `Đã ghi nhận và tự động lưu nhóm tăng ca từ ảnh Zalo thành công!${leaveSuffix}`
+    );
   };
 
   const employeeMap = useMemo(() => new Map<string, Employee>(employees.map((e) => [e.id, e])), [employees]);
@@ -1203,27 +1344,41 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
               {shellFormCode} • {formatDateToFormStyle(shellOvertimeDate)}
             </h2>
           </div>
-          {onCancelEdit ? (
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={onCancelEdit}
-              className="h-7 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+              disabled={isLockedForm}
+              onClick={() => setIsAiScanModalOpen(true)}
+              title="Quét ảnh lịch tăng ca từ Zalo"
+              aria-label="Quét ảnh lịch tăng ca từ Zalo"
+              data-testid="open-zalo-scan-modal-btn"
+              className="h-7 w-7 rounded-lg border border-blue-200 bg-blue-50/80 hover:bg-blue-100 hover:border-[#14539E] text-[#14539E] inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
-              <ArrowLeft className="w-3 h-3" />
-              <span>Quay lại Nhật ký</span>
+              <Camera className="w-3.5 h-3.5" />
             </button>
-          ) : (
-            <span
-              data-testid="overtime-main-department-label"
-              className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-[#14539E] border border-blue-200 shrink-0 whitespace-nowrap"
-            >
-              {formDepartment}
-            </span>
-          )}
+            {onCancelEdit ? (
+              <button
+                type="button"
+                onClick={onCancelEdit}
+                className="h-7 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                <span>Quay lại Nhật ký</span>
+              </button>
+            ) : (
+              <span
+                data-testid="overtime-main-department-label"
+                className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-[#14539E] border border-blue-200 shrink-0 whitespace-nowrap"
+              >
+                {formDepartment}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* VÙNG CUỘN CHÍNH CỦA CỘT TRÁI */}
         <div className="p-3 sm:p-3.5 space-y-2.5 overflow-y-auto flex-1 min-h-0">
+
           {isLockedForm && (
             <div
               role="status"
@@ -2140,6 +2295,20 @@ export const CreateOvertimeForm: React.FC<CreateOvertimeFormProps> = ({
           </div>
         </div>
       </div>
+
+      <ZaloScheduleScanModal
+        isOpen={isAiScanModalOpen}
+        onClose={() => setIsAiScanModalOpen(false)}
+        employees={employees}
+        glossaryEntries={glossaryEntries}
+        leaveRecords={effectiveLeaveRecords}
+        existingPreviewBlocks={previewData}
+        defaultDate={blockOvertimeDate || shellOvertimeDate || getLocalTodayIsoDate()}
+        translateMultilineKorean={translateMultilineKorean}
+        onLeaveRecordsRefreshed={(records) => setLiveLeaveRecords(records)}
+        onConfirmBlock={(payload) => handleConfirmAiModalPayloads([payload])}
+        onConfirmAllBlocks={(payloads) => handleConfirmAiModalPayloads(payloads)}
+      />
 
       {toastMessage && (
         <div role="status" className="fixed top-16 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg border border-slate-700 flex items-center gap-2.5 text-xs font-medium max-w-md animate-in fade-in slide-in-from-top-2 duration-200">

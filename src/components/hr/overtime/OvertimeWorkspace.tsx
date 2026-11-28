@@ -509,7 +509,7 @@ export const OvertimeWorkspace: React.FC<OvertimeWorkspaceProps> = ({
         <div
           className={
             activeTab === 'create'
-              ? 'flex-1 min-h-0 flex flex-col overflow-y-auto lg:overflow-hidden'
+              ? 'flex-1 min-h-0 flex flex-col overflow-y-auto xl:overflow-hidden'
               : 'hidden'
           }
         >
