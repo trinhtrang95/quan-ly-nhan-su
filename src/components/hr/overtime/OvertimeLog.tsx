@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Calendar,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Database,
   Eye,
@@ -13,7 +15,6 @@ import {
   Lock,
   Pencil,
   Printer,
-  Search,
   ShieldAlert,
   Trash2,
   Unlock,
@@ -44,6 +45,15 @@ import {
   resolveOvertimeMainDepartment,
   SUPABASE_OVERTIME_REALTIME_AND_SOFT_DELETE_SQL,
 } from '../../../services/hrService';
+import {
+  buildCalendarYearOptions,
+  buildOvertimeMonthCalendarGrid,
+  CALENDAR_WEEKDAY_HEADERS,
+  collectOvertimeFormDatesSet,
+  formatYearMonthKey,
+  parseYearMonthKey,
+  shiftYearMonth,
+} from '../../../utils/overtimeCalendarLogic';
 
 export interface OvertimeLogProps {
   forms: OvertimeFormWithItems[];
@@ -61,12 +71,6 @@ export interface OvertimeLogProps {
   onShowToast?: (message: string) => void;
 }
 
-function formatMonthLabel(monthKey: string): string {
-  const match = monthKey.match(/^(\d{4})-(\d{2})$/);
-  if (!match) return monthKey;
-  return `Tháng ${match[2]}/${match[1]}`;
-}
-
 export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   forms,
   employees,
@@ -82,17 +86,24 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   onSwitchToCreate,
   onShowToast,
 }) => {
+  const todayIsoDate = useMemo(() => getLocalTodayIsoDate(), []);
   const currentMonthKey = useMemo(
-    () => getLocalTodayIsoDate().slice(0, 7),
-    []
+    () => todayIsoDate.slice(0, 7),
+    [todayIsoDate]
   );
-  const [createShellDate, setCreateShellDate] = useState<string>(() =>
-    getLocalTodayIsoDate()
+  const currentYear = useMemo(
+    () => Number(todayIsoDate.slice(0, 4)),
+    [todayIsoDate]
   );
   const [isCreatingShell, setIsCreatingShell] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [monthFilter, setMonthFilter] = useState<string>(
-    () => getLocalTodayIsoDate().slice(0, 7)
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(
+    null
+  );
+  const [calendarYear, setCalendarYear] = useState<number>(() =>
+    parseYearMonthKey(getLocalTodayIsoDate().slice(0, 7), getLocalTodayIsoDate()).year
+  );
+  const [calendarMonth, setCalendarMonth] = useState<number>(() =>
+    parseYearMonthKey(getLocalTodayIsoDate().slice(0, 7), getLocalTodayIsoDate()).month
   );
   const [viewingForm, setViewingForm] = useState<OvertimeFormWithItems | null>(
     null
@@ -132,31 +143,73 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
   const getDisplayDepartment = (rawDepartment?: string | null) =>
     resolveOvertimeMainDepartment(rawDepartment, knownSubGroups);
 
-  const monthOptions = useMemo(() => {
-    const keys = new Set<string>([currentMonthKey]);
-    if (monthFilter && /^\d{4}-\d{2}$/.test(monthFilter)) {
-      keys.add(monthFilter);
-    }
-    for (const form of forms) {
-      if (form.deleted_at) continue;
-      if (form.overtime_date && /^\d{4}-\d{2}/.test(form.overtime_date)) {
-        keys.add(form.overtime_date.slice(0, 7));
-      }
-      if (Array.isArray(form.overtime_dates)) {
-        for (const d of form.overtime_dates) {
-          if (d && /^\d{4}-\d{2}/.test(d)) {
-            keys.add(d.slice(0, 7));
-          }
-        }
-      }
-    }
-    return Array.from(keys).sort((a, b) => b.localeCompare(a));
-  }, [forms, currentMonthKey, monthFilter]);
+  const activeMonthKey = useMemo(
+    () => formatYearMonthKey(calendarYear, calendarMonth),
+    [calendarYear, calendarMonth]
+  );
+
+  const activeFormDatesSet = useMemo(
+    () => collectOvertimeFormDatesSet(forms),
+    [forms]
+  );
+
+  const calendarYearOptions = useMemo(
+    () => buildCalendarYearOptions(forms, calendarYear, currentYear),
+    [forms, calendarYear, currentYear]
+  );
+
+  const calendarGridCells = useMemo(
+    () =>
+      buildOvertimeMonthCalendarGrid(
+        calendarYear,
+        calendarMonth,
+        activeFormDatesSet
+      ),
+    [calendarYear, calendarMonth, activeFormDatesSet]
+  );
 
   const filteredForms = useMemo(
-    () => filterOvertimeForms(forms, searchQuery, monthFilter, knownSubGroups),
-    [forms, searchQuery, monthFilter, knownSubGroups]
+    () =>
+      filterOvertimeForms(
+        forms,
+        '',
+        selectedDateFilter || activeMonthKey,
+        knownSubGroups
+      ),
+    [forms, selectedDateFilter, activeMonthKey, knownSubGroups]
   );
+
+  const handleCalendarMonthSelect = (nextMonth: number) => {
+    setCalendarMonth(nextMonth);
+    setSelectedDateFilter(null);
+  };
+
+  const handleCalendarYearSelect = (nextYear: number) => {
+    setCalendarYear(nextYear);
+    setSelectedDateFilter(null);
+  };
+
+  const handleShiftCalendarMonth = (delta: -1 | 1) => {
+    const shifted = shiftYearMonth(calendarYear, calendarMonth, delta);
+    setCalendarYear(shifted.year);
+    setCalendarMonth(shifted.month);
+    setSelectedDateFilter(null);
+  };
+
+  const handleCalendarTodayClick = () => {
+    const parsedToday = parseYearMonthKey(currentMonthKey, todayIsoDate);
+    setCalendarYear(parsedToday.year);
+    setCalendarMonth(parsedToday.month);
+    setSelectedDateFilter(todayIsoDate);
+  };
+
+  const handleCalendarDayClick = (isoDate: string) => {
+    if (selectedDateFilter === isoDate) {
+      setSelectedDateFilter(null);
+      return;
+    }
+    setSelectedDateFilter(isoDate);
+  };
 
   // Đồng bộ modal xem chi tiết khi danh sách phiếu được cập nhật trực tiếp trong phiên làm việc
   useEffect(() => {
@@ -173,10 +226,6 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
   }, [forms, viewingForm, onShowToast]);
 
-  const hasActiveFilters = Boolean(
-    searchQuery.trim() || monthFilter !== currentMonthKey
-  );
-
   const handleCreateShellClick = async () => {
     if (isCreatingShell) return;
     if (!onCreateOrOpenShell) {
@@ -185,7 +234,8 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
     }
     setIsCreatingShell(true);
     try {
-      await onCreateOrOpenShell(createShellDate || getLocalTodayIsoDate());
+      const targetOvertimeDate = selectedDateFilter || getLocalTodayIsoDate();
+      await onCreateOrOpenShell(targetOvertimeDate);
     } catch (error) {
       if (error instanceof OvertimeSupabaseActionError && error.needsSqlFix) {
         setSqlErrorContext(error.message);
@@ -451,173 +501,350 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
         </div>
       )}
 
-      {/* Thanh công cụ ngang hợp nhất: Bộ lọc bên trái | Tạo vỏ phiếu căn sát phải */}
-      <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs no-print">
-        {/* Cụm bên trái: Tìm kiếm & Dropdown chọn tháng */}
-        <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <div className="relative w-48 sm:w-56">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm mã phiếu hoặc bộ phận..."
-              aria-label="Tìm mã phiếu hoặc bộ phận"
-              className="w-full h-9 pl-8 pr-7 text-xs rounded-lg border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 focus:border-[#14539E] focus:outline-none"
-            />
-            {searchQuery && (
+      {/* Bố cục 2 khối ngang: Khối 1 Lịch tháng bên trái | Khối 2 Thanh công cụ + Bảng nhật ký bên phải */}
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        {/* KHỐI 1: Lịch tháng trực quan */}
+        <aside
+          data-testid="overtime-log-calendar-card"
+          aria-label="Lịch chọn ngày tăng ca"
+          className="w-full lg:w-[340px] xl:w-[380px] shrink-0 bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs no-print space-y-3"
+        >
+          {/* Tiêu đề lịch: < Tháng > + Năm + Hôm nay */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1 min-w-0">
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Xóa từ khóa tìm kiếm"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                onClick={() => handleShiftCalendarMonth(-1)}
+                data-testid="calendar-prev-month-btn"
+                aria-label="Tháng trước"
+                title="Tháng trước"
+                className="h-8 w-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
               >
-                <X className="w-3.5 h-3.5" />
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              <select
+                value={calendarMonth}
+                onChange={(e) =>
+                  handleCalendarMonthSelect(Number(e.target.value))
+                }
+                aria-label="Chọn tháng trên lịch"
+                data-testid="calendar-month-select"
+                className="h-8 px-2 text-xs font-bold text-slate-800 rounded-lg border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer tabular-nums"
+              >
+                {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
+                  <option key={m} value={m}>
+                    Tháng {m}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => handleShiftCalendarMonth(1)}
+                data-testid="calendar-next-month-btn"
+                aria-label="Tháng sau"
+                title="Tháng sau"
+                className="h-8 w-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <select
+                value={calendarYear}
+                onChange={(e) =>
+                  handleCalendarYearSelect(Number(e.target.value))
+                }
+                aria-label="Chọn năm trên lịch"
+                data-testid="calendar-year-select"
+                className="h-8 px-2 text-xs font-bold text-slate-800 rounded-lg border border-slate-200 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer tabular-nums"
+              >
+                {calendarYearOptions.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCalendarTodayClick}
+              data-testid="calendar-today-btn"
+              className="h-8 px-2.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#14539E] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              Hôm nay
+            </button>
+          </div>
+
+          {/* Tiêu đề 7 thứ trong tuần: T2 -> CN */}
+          <div className="grid grid-cols-7 gap-1 text-center">
+            {CALENDAR_WEEKDAY_HEADERS.map((label) => {
+              const isSundayHeader = label === 'CN';
+              return (
+                <div
+                  key={label}
+                  className={`py-1.5 text-[11px] font-bold uppercase tracking-wide ${
+                    isSundayHeader
+                      ? 'bg-slate-100/80 text-slate-500 rounded-lg'
+                      : 'text-slate-500'
+                  }`}
+                >
+                  {label}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Lưới các ngày trong tháng */}
+          <div className="grid grid-cols-7 gap-1">
+            {calendarGridCells.map((cell) => {
+              if (!cell.inCurrentMonth) {
+                return (
+                  <div
+                    key={cell.isoDate}
+                    aria-hidden="true"
+                    className={`h-10 flex flex-col items-center justify-center text-xs tabular-nums select-none ${
+                      cell.isSunday
+                        ? 'bg-slate-100/50 text-slate-300 rounded-lg'
+                        : 'text-slate-300'
+                    }`}
+                  >
+                    <span>{cell.day}</span>
+                  </div>
+                );
+              }
+
+              const isSelected = selectedDateFilter === cell.isoDate;
+              const isToday = cell.isoDate === todayIsoDate;
+
+              let cellStyle =
+                'text-slate-700 hover:bg-slate-100 rounded-lg';
+              if (isSelected) {
+                cellStyle =
+                  'bg-[#14539E] text-white font-bold shadow-xs rounded-lg';
+              } else if (cell.isSunday) {
+                cellStyle =
+                  'bg-slate-100/80 text-slate-500 hover:bg-slate-200/70 rounded-lg';
+              }
+
+              const todayRing =
+                !isSelected && isToday
+                  ? 'ring-1 ring-inset ring-[#14539E]/60 text-[#14539E] font-bold'
+                  : '';
+
+              return (
+                <button
+                  key={cell.isoDate}
+                  type="button"
+                  onClick={() => handleCalendarDayClick(cell.isoDate)}
+                  data-testid={`calendar-day-${cell.isoDate}`}
+                  aria-pressed={isSelected}
+                  aria-label={`Ngày ${formatDateToFormStyle(cell.isoDate)}${
+                    cell.hasOvertimeForm ? ', đã có phiếu tăng ca' : ''
+                  }`}
+                  title={
+                    cell.hasOvertimeForm
+                      ? `${formatDateToFormStyle(cell.isoDate)} • Đã có phiếu tăng ca`
+                      : formatDateToFormStyle(cell.isoDate)
+                  }
+                  className={`h-10 flex flex-col items-center justify-center text-xs tabular-nums transition-colors cursor-pointer ${cellStyle} ${todayRing}`}
+                >
+                  <span className="leading-none">{cell.day}</span>
+                  <span className="h-1.5 mt-1 flex items-center justify-center">
+                    {cell.hasOvertimeForm && (
+                      <span
+                        data-testid={`calendar-dot-${cell.isoDate}`}
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          isSelected ? 'bg-white' : 'bg-[#14539E]'
+                        }`}
+                      />
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Chú thích & Nút xem tất cả ngày trong tháng */}
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <div className="flex items-center justify-between text-[11px] text-slate-500">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#14539E] inline-block" />
+                <span>Ngày đã có phiếu tăng ca</span>
+              </span>
+              <span className="tabular-nums font-medium text-slate-600">
+                Tháng {String(calendarMonth).padStart(2, '0')}/{calendarYear}
+              </span>
+            </div>
+
+            {selectedDateFilter && (
+              <button
+                type="button"
+                onClick={() => setSelectedDateFilter(null)}
+                data-testid="calendar-show-all-month-btn"
+                className="w-full h-8 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+              >
+                Xem tất cả ngày trong tháng
               </button>
             )}
           </div>
+        </aside>
 
-          <div className="relative">
-            <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <select
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              aria-label="Lọc theo tháng tăng ca"
-              data-testid="overtime-log-month-select"
-              className="h-9 pl-8 pr-7 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-800 focus:border-[#14539E] focus:outline-none cursor-pointer"
-            >
-              <option value="">Tất cả các tháng</option>
-              {monthOptions.map((monthKey) => (
-                <option key={monthKey} value={monthKey}>
-                  {formatMonthLabel(monthKey)}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* KHỐI 2: Thanh trạng thái lọc + nút icon Tạo phiếu mới & Bảng nhật ký */}
+        <div className="flex-1 min-w-0 w-full space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2 shadow-2xs no-print">
+            {/* Cụm bên trái: Trạng thái lọc theo ngày hoặc tổng quan tháng đang xem trên lịch */}
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              {selectedDateFilter ? (
+                <>
+                  <div
+                    data-testid="overtime-log-date-filter-badge"
+                    className="h-8 pl-2.5 pr-1.5 rounded-lg bg-blue-50 border border-[#14539E]/30 text-[#14539E] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums"
+                  >
+                    <span>
+                      Đang lọc ngày: {formatDateToFormStyle(selectedDateFilter)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDateFilter(null)}
+                      data-testid="clear-date-filter-badge-btn"
+                      aria-label="Bỏ lọc theo ngày"
+                      title="Bỏ lọc ngày"
+                      className="p-0.5 rounded hover:bg-[#14539E]/15 text-[#14539E] cursor-pointer transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDateFilter(null)}
+                    data-testid="overtime-log-clear-filter-btn"
+                    className="h-8 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    Xóa lọc
+                  </button>
+                </>
+              ) : (
+                <div
+                  data-testid="overtime-log-month-summary"
+                  className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 tabular-nums"
+                >
+                  <Calendar className="w-4 h-4 text-[#14539E] shrink-0" />
+                  <span>
+                    Nhật ký Tháng {String(calendarMonth).padStart(2, '0')}/
+                    {calendarYear}
+                  </span>
+                  <span className="text-slate-400">•</span>
+                  <span className="text-[#14539E]">
+                    {formatNumberVN(filteredForms.length)} phiếu
+                  </span>
+                </div>
+              )}
+            </div>
 
-          {hasActiveFilters && (
+            {/* Cụm bên phải: Nút icon-only Tạo phiếu tăng ca mới */}
             <button
               type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setMonthFilter(currentMonthKey);
-              }}
-              className="h-9 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              disabled={isCreatingShell}
+              onClick={() => void handleCreateShellClick()}
+              data-testid="create-overtime-shell-icon-btn"
+              title={
+                selectedDateFilter
+                  ? `Tạo phiếu tăng ca mới (${formatDateToFormStyle(selectedDateFilter)})`
+                  : 'Tạo phiếu tăng ca mới'
+              }
+              aria-label="Tạo phiếu tăng ca mới"
+              className="h-9 w-9 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white inline-flex items-center justify-center shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
             >
-              Xóa lọc
+              {isCreatingShell ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FilePlus2 className="w-4 h-4" />
+              )}
             </button>
-          )}
-        </div>
-
-        {/* Cụm bên phải: Ngày phiếu & nút + Tạo phiếu tăng ca mới (luôn căn sát phải) */}
-        <div className="ml-auto shrink-0 max-w-full flex flex-wrap items-center justify-end gap-2">
-          <div className="flex items-center gap-1.5 shrink-0">
-            <label
-              htmlFor="overtime-shell-date-input"
-              className="text-xs font-bold text-[#14539E] whitespace-nowrap"
-            >
-              Ngày phiếu:
-            </label>
-            <div className="relative w-36">
-              <Calendar className="w-3.5 h-3.5 text-[#14539E] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="overtime-shell-date-input"
-                type="date"
-                value={createShellDate}
-                onChange={(e) => setCreateShellDate(e.target.value)}
-                className="w-full h-9 pl-8 pr-2 text-xs font-mono font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:border-[#14539E] focus:outline-none cursor-pointer"
-              />
-            </div>
           </div>
 
-          <button
-            type="button"
-            disabled={isCreatingShell}
-            onClick={() => void handleCreateShellClick()}
-            className="h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
-          >
-            {isCreatingShell ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <FilePlus2 className="w-3.5 h-3.5" />
-            )}
-            <span>+ Tạo phiếu tăng ca mới</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Data Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden no-print">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                <th className="py-3 px-3 w-14 text-center">STT</th>
-                <th className="py-3 px-3.5 min-w-[160px]">Mã phiếu</th>
-                <th className="py-3 px-3.5 min-w-[175px]">Ngày tăng ca</th>
-                <th className="py-3 px-3.5 w-36 text-center">Trạng thái</th>
-                <th className="py-3 px-3.5 w-52 text-left">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
-              {isLoading ? (
-                Array.from({ length: 4 }).map((_, idx) => (
-                  <tr key={`skeleton-${idx}`} className="h-14 animate-pulse">
-                    <td className="py-3 px-3 text-center">
-                      <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
-                    </td>
-                    <td className="py-3 px-3.5">
-                      <div className="h-3.5 w-28 bg-slate-200 rounded" />
-                    </td>
-                    <td className="py-3 px-3.5">
-                      <div className="h-3.5 w-24 bg-slate-200 rounded" />
-                    </td>
-                    <td className="py-3 px-3.5">
-                      <div className="h-5 w-20 bg-slate-200 rounded-full mx-auto" />
-                    </td>
-                    <td className="py-3 px-3.5">
-                      <div className="h-8 w-44 bg-slate-200 rounded ml-auto" />
-                    </td>
+          {/* Data Table */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden no-print">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                    <th className="py-3 px-3 w-14 text-center">STT</th>
+                    <th className="py-3 px-3.5 min-w-[160px]">Mã phiếu</th>
+                    <th className="py-3 px-3.5 min-w-[175px]">Ngày tăng ca</th>
+                    <th className="py-3 px-3.5 w-36 text-center">Trạng thái</th>
+                    <th className="py-3 px-3.5 w-52 text-left">Thao tác</th>
                   </tr>
-                ))
-              ) : filteredForms.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-14 px-6 text-center">
-                    <div className="max-w-sm mx-auto flex flex-col items-center">
-                      <FileText className="w-9 h-9 text-slate-300 mb-3" />
-                      <p className="text-sm font-semibold text-slate-800">
-                        {hasActiveFilters
-                          ? 'Không tìm thấy phiếu tăng ca phù hợp'
-                          : monthFilter
-                            ? `Chưa có phiếu tăng ca nào trong ${formatMonthLabel(
-                                monthFilter
-                              )}`
-                            : 'Chưa có phiếu tăng ca nào được lưu'}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-1">
-                        {hasActiveFilters || monthFilter
-                          ? 'Thử chọn tháng khác, chuyển về Tất cả các tháng hoặc tạo phiếu mới.'
-                          : 'Chọn Ngày phiếu ở thanh trên và bấm "+ Tạo phiếu tăng ca mới" để tạo vỏ phiếu theo ngày.'}
-                      </p>
-                      {!hasActiveFilters && (onCreateOrOpenShell || onSwitchToCreate) && (
-                        <button
-                          type="button"
-                          disabled={isCreatingShell}
-                          onClick={() => void handleCreateShellClick()}
-                          className="mt-4 h-9 px-4 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          {isCreatingShell ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <FilePlus2 className="w-3.5 h-3.5" />
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {isLoading ? (
+                    Array.from({ length: 4 }).map((_, idx) => (
+                      <tr key={`skeleton-${idx}`} className="h-14 animate-pulse">
+                        <td className="py-3 px-3 text-center">
+                          <div className="h-3.5 w-6 bg-slate-200 rounded mx-auto" />
+                        </td>
+                        <td className="py-3 px-3.5">
+                          <div className="h-3.5 w-28 bg-slate-200 rounded" />
+                        </td>
+                        <td className="py-3 px-3.5">
+                          <div className="h-3.5 w-24 bg-slate-200 rounded" />
+                        </td>
+                        <td className="py-3 px-3.5">
+                          <div className="h-5 w-20 bg-slate-200 rounded-full mx-auto" />
+                        </td>
+                        <td className="py-3 px-3.5">
+                          <div className="h-8 w-44 bg-slate-200 rounded ml-auto" />
+                        </td>
+                      </tr>
+                    ))
+                  ) : filteredForms.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-14 px-6 text-center">
+                        <div className="max-w-sm mx-auto flex flex-col items-center">
+                          <FileText className="w-9 h-9 text-slate-300 mb-3" />
+                          <p className="text-sm font-semibold text-slate-800">
+                            {selectedDateFilter
+                              ? `Chưa có phiếu tăng ca nào trong ngày ${formatDateToFormStyle(
+                                  selectedDateFilter
+                                )}`
+                              : `Chưa có phiếu tăng ca nào trong Tháng ${String(
+                                  calendarMonth
+                                ).padStart(2, '0')}/${calendarYear}`}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {selectedDateFilter
+                              ? 'Bấm lại vào ngày đang chọn để xem cả tháng hoặc bấm nút Tạo phiếu mới để lập phiếu cho ngày này.'
+                              : 'Chọn ngày trên lịch bên trái hoặc bấm nút Tạo phiếu mới để lập phiếu cho ngày hôm nay.'}
+                          </p>
+                          {(onCreateOrOpenShell || onSwitchToCreate) && (
+                            <button
+                              type="button"
+                              disabled={isCreatingShell}
+                              onClick={() => void handleCreateShellClick()}
+                              title="Tạo phiếu tăng ca mới"
+                              aria-label="Tạo phiếu tăng ca mới cho ngày đang chọn"
+                              className="mt-4 h-9 px-3.5 rounded-lg bg-[#14539E] hover:bg-[#0F3E77] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              {isCreatingShell ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <FilePlus2 className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {selectedDateFilter
+                                  ? `Tạo phiếu ngày ${formatDateToFormStyle(
+                                      selectedDateFilter
+                                    )}`
+                                  : 'Tạo phiếu ngày hôm nay'}
+                              </span>
+                            </button>
                           )}
-                          <span>+ Tạo phiếu tăng ca mới</span>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ) : (
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
                 filteredForms.map((form, index) => {
                   const datesList =
                     Array.isArray(form.overtime_dates) &&
@@ -787,8 +1014,10 @@ export const OvertimeLog: React.FC<OvertimeLogProps> = ({
                   );
                 })
               )}
-            </tbody>
-          </table>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 

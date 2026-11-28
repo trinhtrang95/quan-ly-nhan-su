@@ -618,17 +618,21 @@ export function filterOvertimeForms(
     if (form.deleted_at) return false;
 
     if (cleanDate) {
-      const dates =
+      const primaryDate = (form.overtime_date || '').trim().slice(0, 10);
+      const dates = (
         Array.isArray(form.overtime_dates) && form.overtime_dates.length > 0
           ? form.overtime_dates
-          : [form.overtime_date];
+          : [primaryDate]
+      )
+        .map((d) => (d || '').trim().slice(0, 10))
+        .filter(Boolean);
       if (isMonthFilter) {
-        const primaryMatches = (form.overtime_date || '').startsWith(cleanDate);
-        const anyItemMatches = dates.some((d) => (d || '').startsWith(cleanDate));
+        const primaryMatches = primaryDate.startsWith(cleanDate);
+        const anyItemMatches = dates.some((d) => d.startsWith(cleanDate));
         if (!primaryMatches && !anyItemMatches) {
           return false;
         }
-      } else if (form.overtime_date !== cleanDate && !dates.includes(cleanDate)) {
+      } else if (primaryDate !== cleanDate && !dates.includes(cleanDate)) {
         return false;
       }
     }
